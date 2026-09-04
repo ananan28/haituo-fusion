@@ -15,7 +15,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout Caisheng build files
@@ -36,12 +36,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: signal/.nvmrc
-          cache: pnpm
-          cache-dependency-path: signal/pnpm-lock.yaml
 
       - name: Enable pinned pnpm
         shell: bash
-        run: corepack enable
+        working-directory: signal
+        run: |
+          corepack enable
+          corepack install
+          pnpm --version
 
       - name: Install dependencies
         shell: bash
