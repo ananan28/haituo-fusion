@@ -1,0 +1,93 @@
+name: Build Caisheng Signal Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - patches/caisheng-signal.patch
+      - .github/workflows/build-windows.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout Caisheng build files
+        uses: actions/checkout@v4
+
+      - name: Checkout official Signal Desktop
+        shell: bash
+        run: git clone --depth 1 --branch v8.29.0-alpha.1 https://github.com/signalapp/Signal-Desktop.git signal
+
+      - name: Apply Caisheng patch
+        shell: bash
+        run: |
+          cd signal
+          git apply --check ../patches/caisheng-signal.patch
+          git apply ../patches/caisheng-signal.patch
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: signal/.nvmrc
+          cache: pnpm
+          cache-dependency-path: signal/pnpm-lock.yaml
+
+      - name: Enable pinned pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: signal
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+          NPM_CONFIG_NODE_GYP: ${{ github.workspace }}\\signal\\noop.js
+        run: |
+          touch noop.js
+          pnpm install --frozen-lockfile
+          rm noop.js
+
+      - name: Remove Signal signing certificate configuration
+        shell: cmd
+        working-directory: signal
+        run: |
+          copy package.json temp.json
+          del package.json
+          type temp.json | findstr /v certificateSubjectName | findstr /v certificateSha1 > package.json
+
+      - name: Prepare build
+        shell: bash
+        working-directory: signal
+        run: |
+          pnpm run prepare-beta-build
+          pnpm run generate
+          pnpm run build:preload-cache
+
+      - name: Run Caisheng translation tests
+        shell: bash
+        working-directory: signal
+        run: pnpm run test-node -- --grep "Caisheng translation"
+
+      - name: Build Windows x64 installer
+        shell: bash
+        working-directory: signal
+        env:
+          DISABLE_INSPECT_FUSE: on
+        run: pnpm run build:release --publish=never --x64
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caisheng-Signal-Windows-x64
+          path: |
+            signal/release/*.exe
+            signal/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 14
