@@ -23,7 +23,7 @@ jobs:
 
       - name: Checkout official Signal Desktop
         shell: bash
-        run: git clone --depth 1 --branch v8.29.0-alpha.1 https://github.com/signalapp/Signal-Desktop.git signal
+        run: git clone --depth 1 https://github.com/signalapp/Signal-Desktop.git signal
 
       - name: Apply Caisheng patch
         shell: bash
