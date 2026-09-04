@@ -1,0 +1,990 @@
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/BUILD-TEST-REPORT.md b/BUILD-TEST-REPORT.md
+--- a/BUILD-TEST-REPORT.md	1969-12-31 18:00:00.000000000 -0600
++++ b/BUILD-TEST-REPORT.md	2026-09-04 16:01:02.612219341 -0500
+@@ -0,0 +1,23 @@
++# 财盛 Signal 构建测试报告
++
++测试日期：2026-09-04
++
++## 已通过
++
++- 财盛新增和修改文件的 Prettier 格式检查
++- 中文消息自动选择英文目标语言
++- 英文、日文等非中文消息自动选择中文目标语言
++- 中外文混合消息按中文输入处理
++- 收到消息的翻译组件只挂载在时间线中的 incoming 消息
++- Signal 输入框的第三次空格按键已接入翻译流程
++
++## 尚未完成
++
++- 完整依赖安装：运行环境在下载过程中中止了网络授权
++- Signal 全项目类型检查：依赖未链接且 protobuf、ICU、emoji 等生成文件缺失
++- Windows 原生模块构建及安装包生成：必须在依赖完整的 Windows 构建环境中执行
++- Windows 实机登录、收发消息和翻译 API 联调
++
++## 当前结论
++
++财盛功能已经源码级接入官方 Signal Desktop，不依赖外部 `Signal.exe`。当前交付是开发测试版源码，并非已经通过 Windows 实机验收的最终安装包。
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/CAISHENG-BUILD.md b/CAISHENG-BUILD.md
+--- a/CAISHENG-BUILD.md	1969-12-31 18:00:00.000000000 -0600
++++ b/CAISHENG-BUILD.md	2026-09-04 16:00:20.691214744 -0500
+@@ -0,0 +1,27 @@
++# 财盛 Signal Windows 构建
++
++该项目基于官方 Signal Desktop 源码，Signal 是源码级内嵌，不会启动或镶嵌外部 `Signal.exe`。
++
++## Windows 构建
++
++1. 安装项目要求版本的 Node.js、Git、Python、Visual Studio Build Tools 和 Rust。
++2. 在 PowerShell 中进入源码根目录。
++3. 执行：
++
++```powershell
++powershell -ExecutionPolicy Bypass -File .\scripts\build-caisheng-windows.ps1
++```
++
++构建脚本会安装锁定依赖、运行类型检查、运行财盛翻译测试，并生成 Windows x64/arm64 发布包。输出位于 `release` 目录。
++
++## 已实现功能
++
++- 财盛账号登录与 Signal 使用权限校验
++- 收到 Signal 文字消息后自动翻译
++- 输入框连续按三次空格自动翻译
++- 中文翻译成英文，其他语言翻译成中文
++- OpenAI 和 Google 翻译接口
++
++## 安全说明
++
++不要把私密 API Key 写进源码或提交到版本库。发布前还应将翻译请求迁移到财盛服务端代理，以便保护供应商密钥、执行套餐限额和记录翻译用量。
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/package.json b/package.json
+--- a/package.json	2026-09-03 11:53:55.000000000 -0500
++++ b/package.json	2026-09-04 16:01:01.508192858 -0500
+@@ -3,8 +3,8 @@
+   "packageManager": "pnpm@11.24.0",
+   "private": true,
+   "name": "signal-desktop",
+-  "productName": "Signal",
+-  "description": "Private messaging from your desktop",
++  "productName": "Caisheng Translator",
++  "description": "Caisheng secure Signal messaging with automatic translation",
+   "desktopName": "signal.desktop",
+   "repository": "https://github.com/signalapp/Signal-Desktop.git",
+   "version": "8.29.0-alpha.1",
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/scripts/build-caisheng-windows.ps1 b/scripts/build-caisheng-windows.ps1
+--- a/scripts/build-caisheng-windows.ps1	1969-12-31 18:00:00.000000000 -0600
++++ b/scripts/build-caisheng-windows.ps1	2026-09-04 16:00:19.583187906 -0500
+@@ -0,0 +1,15 @@
++$ErrorActionPreference = 'Stop'
++
++Write-Host 'Building Caisheng Signal for Windows...'
++
++if (-not (Get-Command corepack -ErrorAction SilentlyContinue)) {
++  throw 'Node.js with Corepack is required.'
++}
++
++corepack enable
++corepack pnpm install --frozen-lockfile
++corepack pnpm run check:types
++corepack pnpm run test-node -- --grep 'Caisheng translation'
++corepack pnpm run build-win32-all
++
++Write-Host 'Build complete. Check the release directory.'
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/components/CaishengAuthGate.scss b/stylesheets/components/CaishengAuthGate.scss
+--- a/stylesheets/components/CaishengAuthGate.scss	1969-12-31 18:00:00.000000000 -0600
++++ b/stylesheets/components/CaishengAuthGate.scss	2026-09-04 15:09:34.354313918 -0500
+@@ -0,0 +1,81 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++@use '../variables';
++
++.CaishengLogin {
++  display: grid;
++  width: 100vw;
++  height: 100vh;
++  place-items: center;
++  background: linear-gradient(145deg, #111827, #1d4ed8);
++
++  &__box {
++    display: flex;
++    width: min(380px, calc(100vw - 40px));
++    flex-direction: column;
++    gap: 14px;
++    padding: 32px;
++    border-radius: 18px;
++    background: variables.$color-white;
++    box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
++
++    h1,
++    p {
++      margin: 0;
++      text-align: center;
++    }
++
++    label {
++      display: flex;
++      flex-direction: column;
++      gap: 6px;
++      font-weight: 600;
++    }
++
++    input,
++    button {
++      min-height: 42px;
++      border: 1px solid variables.$color-gray-20;
++      border-radius: 8px;
++      padding: 8px 12px;
++      font: inherit;
++    }
++
++    button {
++      border: 0;
++      background: #2563eb;
++      color: variables.$color-white;
++      cursor: pointer;
++      font-weight: 700;
++
++      &:disabled {
++        cursor: wait;
++        opacity: 0.65;
++      }
++    }
++
++    small {
++      color: variables.$color-gray-60;
++      text-align: center;
++    }
++  }
++
++  &__brand {
++    display: grid;
++    width: 64px;
++    height: 64px;
++    margin: 0 auto;
++    place-items: center;
++    border-radius: 50%;
++    background: #f59e0b;
++    color: #111827;
++    font-size: 20px;
++    font-weight: 900;
++  }
++
++  &__error {
++    color: variables.$color-accent-red;
++    text-align: center;
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/components/CompositionArea.scss b/stylesheets/components/CompositionArea.scss
+--- a/stylesheets/components/CompositionArea.scss	2026-09-03 11:53:55.000000000 -0500
++++ b/stylesheets/components/CompositionArea.scss	2026-09-04 15:12:51.206991719 -0500
+@@ -225,3 +225,68 @@
+     }
+   }
+ }
++
++.CaishengComposerTranslator {
++  margin: 8px 12px 0;
++  padding: 8px 10px;
++  border: 1px solid variables.$color-gray-15;
++  border-radius: 10px;
++
++  &__toolbar,
++  &__settings {
++    display: flex;
++    align-items: center;
++    gap: 8px;
++  }
++
++  &__settings {
++    margin-top: 8px;
++
++    input {
++      min-width: 0;
++      flex: 1;
++    }
++  }
++
++  button,
++  input,
++  select {
++    min-height: 30px;
++    border: 1px solid variables.$color-gray-20;
++    border-radius: 6px;
++    padding: 4px 8px;
++  }
++
++  &__error {
++    margin-top: 6px;
++    color: variables.$color-accent-red;
++    font-size: 12px;
++  }
++}
++
++.CaishengMessageTranslation {
++  display: block;
++  margin-top: 4px;
++
++  button {
++    border: 0;
++    padding: 0;
++    background: transparent;
++    color: variables.$color-ultramarine;
++    cursor: pointer;
++    font-size: 12px;
++  }
++
++  &__result,
++  &__error {
++    display: block;
++    margin-top: 3px;
++    padding-top: 3px;
++    border-top: 1px solid variables.$color-gray-20;
++    font-size: 13px;
++  }
++
++  &__error {
++    color: variables.$color-accent-red;
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/manifest.scss b/stylesheets/manifest.scss
+--- a/stylesheets/manifest.scss	2026-09-03 11:53:55.000000000 -0500
++++ b/stylesheets/manifest.scss	2026-09-04 15:09:35.530342206 -0500
+@@ -67,6 +67,7 @@
+ @use 'components/CollidingAvatars.scss';
+ @use 'components/ComposeStepButton.scss';
+ @use 'components/CompositionArea.scss';
++@use 'components/CaishengAuthGate.scss';
+ @use 'components/CompositionRecording.scss';
+ @use 'components/CompositionRecordingDraft.scss';
+ @use 'components/CompositionInput.scss';
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CaishengAuthGate.dom.tsx b/ts/components/CaishengAuthGate.dom.tsx
+--- a/ts/components/CaishengAuthGate.dom.tsx	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/components/CaishengAuthGate.dom.tsx	2026-09-04 16:00:32.235493619 -0500
+@@ -0,0 +1,124 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import {
++  createContext,
++  useContext,
++  useMemo,
++  useState,
++  type FormEvent,
++  type JSX,
++  type ReactNode,
++} from 'react';
++import {
++  loginToCaisheng,
++  type CaishengLoginResult,
++} from '../services/caishengAuth.dom.ts';
++
++const CaishengAuthContext = createContext<CaishengLoginResult | null>(null);
++
++export function useCaishengAuth(): CaishengLoginResult {
++  const value = useContext(CaishengAuthContext);
++  if (!value) {
++    throw new Error('Caisheng authentication is not ready');
++  }
++  return value;
++}
++
++export function CaishengAuthGate({
++  children,
++}: Readonly<{ children: ReactNode }>): JSX.Element {
++  const [login, setLogin] = useState<CaishengLoginResult | null>(null);
++  const [username, setUsername] = useState('');
++  const [password, setPassword] = useState('');
++  const [error, setError] = useState('');
++  const [busy, setBusy] = useState(false);
++
++  const context = useMemo(() => login, [login]);
++
++  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
++    event.preventDefault();
++    if (!username.trim()) {
++      setError('请输入中文账号');
++      return;
++    }
++    if (!/^\d{6}$/.test(password)) {
++      setError('密码必须是六位数字');
++      return;
++    }
++
++    setBusy(true);
++    setError('');
++    try {
++      setLogin(await loginToCaisheng(username, password));
++    } catch (reason) {
++      const message = reason instanceof Error ? reason.message : '登录失败';
++      setError(
++        message === 'Failed to fetch'
++          ? '无法连接登录服务器，请检查网络后重试'
++          : message
++      );
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  if (context) {
++    if (!context.user.signalEnabled) {
++      return (
++        <main className="CaishengLogin">
++          <section className="CaishengLogin__box">
++            <div className="CaishengLogin__brand">财盛</div>
++            <h1>Signal 未授权</h1>
++            <p>当前账号没有使用 Signal 的权限，请联系管理员开启。</p>
++            <button type="button" onClick={() => setLogin(null)}>
++              返回登录
++            </button>
++          </section>
++        </main>
++      );
++    }
++    return (
++      <CaishengAuthContext.Provider value={context}>
++        {children}
++      </CaishengAuthContext.Provider>
++    );
++  }
++
++  return (
++    <main className="CaishengLogin">
++      <form className="CaishengLogin__box" onSubmit={submit}>
++        <div className="CaishengLogin__brand">财盛</div>
++        <h1>财盛技术部内供翻译</h1>
++        <p>企业多账号翻译工作台</p>
++        <label>
++          中文账号
++          <input
++            autoFocus
++            autoComplete="username"
++            value={username}
++            onChange={event => setUsername(event.target.value)}
++          />
++        </label>
++        <label>
++          六位密码
++          <input
++            autoComplete="current-password"
++            inputMode="numeric"
++            maxLength={6}
++            type="password"
++            value={password}
++            onChange={event =>
++              setPassword(event.target.value.replace(/\D/g, '').slice(0, 6))
++            }
++          />
++        </label>
++        {error ? <div className="CaishengLogin__error">{error}</div> : null}
++        <button disabled={busy} type="submit">
++          {busy ? '正在登录…' : '安全登录'}
++        </button>
++        <small>登录只使用财盛内部账号，不接收 Supabase 管理密码</small>
++      </form>
++    </main>
++  );
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
+--- a/ts/components/CaishengComposerTranslator.dom.tsx	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/components/CaishengComposerTranslator.dom.tsx	2026-09-04 16:00:32.215493133 -0500
+@@ -0,0 +1,137 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { useCallback, useState, type JSX } from 'react';
++import {
++  loadCaishengTranslationSettings,
++  saveCaishengTranslationSettings,
++  translateCaishengText,
++  type CaishengTranslationProvider,
++} from '../services/caishengTranslation.dom.ts';
++
++export type CaishengComposerTranslatorProps = Readonly<{
++  disabled: boolean;
++  text: string;
++  onApplyTranslation: (translatedText: string) => void;
++  onSendTranslation: (translatedText: string) => void;
++}>;
++
++export function CaishengComposerTranslator({
++  disabled,
++  text,
++  onApplyTranslation,
++  onSendTranslation,
++}: CaishengComposerTranslatorProps): JSX.Element {
++  const [settings, setSettings] = useState(loadCaishengTranslationSettings);
++  const [showSettings, setShowSettings] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++
++  const update = useCallback(
++    (next: Partial<typeof settings>) => {
++      const value = { ...settings, ...next };
++      setSettings(value);
++      saveCaishengTranslationSettings(value);
++    },
++    [settings]
++  );
++
++  const run = useCallback(
++    async (send: boolean) => {
++      setBusy(true);
++      setError('');
++      try {
++        const translated = await translateCaishengText(text, settings);
++        if (send) {
++          onSendTranslation(translated);
++        } else {
++          onApplyTranslation(translated);
++        }
++      } catch (reason) {
++        setError(reason instanceof Error ? reason.message : '翻译失败');
++      } finally {
++        setBusy(false);
++      }
++    },
++    [onApplyTranslation, onSendTranslation, settings, text]
++  );
++
++  return (
++    <div className="CaishengComposerTranslator">
++      <div className="CaishengComposerTranslator__toolbar">
++        <strong>财盛翻译</strong>
++        <select
++          aria-label="目标语言"
++          value={settings.targetLanguage}
++          onChange={event => update({ targetLanguage: event.target.value })}
++        >
++          <option value="zh-CN">中文</option>
++          <option value="en">English</option>
++          <option value="ja">日本語</option>
++          <option value="ko">한국어</option>
++          <option value="es">Español</option>
++        </select>
++        <button type="button" onClick={() => setShowSettings(value => !value)}>
++          API 设置
++        </button>
++        <button
++          type="button"
++          disabled={disabled || busy}
++          onClick={() => void run(false)}
++        >
++          {busy ? '翻译中…' : '翻译'}
++        </button>
++        <button
++          type="button"
++          disabled={disabled || busy}
++          onClick={() => void run(true)}
++        >
++          翻译后发送
++        </button>
++      </div>
++      {showSettings ? (
++        <div className="CaishengComposerTranslator__settings">
++          <select
++            aria-label="翻译服务"
++            value={settings.provider}
++            onChange={event =>
++              update({
++                provider: event.target.value as CaishengTranslationProvider,
++              })
++            }
++          >
++            <option value="openai">OpenAI</option>
++            <option value="google">Google Translate</option>
++          </select>
++          <input
++            aria-label="翻译 API Key"
++            type="password"
++            value={settings.apiKey}
++            placeholder="API Key（仅保存在本机）"
++            onChange={event => update({ apiKey: event.target.value })}
++          />
++          {settings.provider === 'openai' ? (
++            <input
++              aria-label="OpenAI 模型"
++              value={settings.openAIModel}
++              onChange={event => update({ openAIModel: event.target.value })}
++            />
++          ) : null}
++          <label>
++            <input
++              checked={settings.autoTranslateIncoming}
++              type="checkbox"
++              onChange={event =>
++                update({ autoTranslateIncoming: event.target.checked })
++              }
++            />
++            自动翻译收到的消息
++          </label>
++        </div>
++      ) : null}
++      {error ? (
++        <div className="CaishengComposerTranslator__error">{error}</div>
++      ) : null}
++    </div>
++  );
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
+--- a/ts/components/CompositionArea.dom.tsx	2026-09-03 11:53:55.000000000 -0500
++++ b/ts/components/CompositionArea.dom.tsx	2026-09-04 14:58:25.653077989 -0500
+@@ -91,6 +91,7 @@
+ import type { ContactNameColorType } from '../types/Colors.std.ts';
+ import type { Emoji } from '../axo/emoji.std.ts';
+ import { AxoConfirmDialog } from '../axo/AxoConfirmDialog.dom.tsx';
++import { CaishengComposerTranslator } from './CaishengComposerTranslator.dom.tsx';
+ 
+ export type OwnProps = Readonly<{
+   acceptedMessageRequest: boolean | null;
+@@ -379,6 +380,34 @@
+     }
+   }, [inputApiRef, setLarge]);
+ 
++  const applyCaishengTranslation = useCallback(
++    (translatedText: string) => {
++      inputApiRef.current?.setContents(translatedText, [], true);
++      onEditorStateChange({
++        bodyRanges: [],
++        conversationId,
++        messageText: translatedText,
++        sendCounter,
++      });
++      setDirty(true);
++    },
++    [conversationId, onEditorStateChange, sendCounter]
++  );
++
++  const sendCaishengTranslation = useCallback(
++    (translatedText: string) => {
++      sendMultiMediaMessage(conversationId, {
++        draftAttachments,
++        bodyRanges: [],
++        message: translatedText,
++        timestamp: Date.now(),
++        isViewOnce,
++      });
++      setLarge(false);
++    },
++    [conversationId, draftAttachments, isViewOnce, sendMultiMediaMessage]
++  );
++
+   const draftEditMessageBody = draftEditMessage?.body;
+   const editedMessageId = draftEditMessage?.targetMessageId;
+ 
+@@ -1338,6 +1367,14 @@
+           </>
+         )}
+       </div>
++      {!isViewOnceActive ? (
++        <CaishengComposerTranslator
++          disabled={isDisabled || !(draftText ?? '').trim()}
++          text={draftText ?? ''}
++          onApplyTranslation={applyCaishengTranslation}
++          onSendTranslation={sendCaishengTranslation}
++        />
++      ) : null}
+       {!isViewOnceActive && large ? (
+         <div
+           className={classNames(
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CompositionInput.dom.tsx b/ts/components/CompositionInput.dom.tsx
+--- a/ts/components/CompositionInput.dom.tsx	2026-09-03 11:53:55.000000000 -0500
++++ b/ts/components/CompositionInput.dom.tsx	2026-09-04 16:00:32.323495760 -0500
+@@ -95,6 +95,11 @@
+ import { tw } from '../axo/tw.dom.tsx';
+ import type { Emoji } from '../axo/emoji.std.ts';
+ import { RecoveryKeyPasteWarning } from './RecoveryKeyPasteWarning.dom.tsx';
++import {
++  getCaishengTargetLanguage,
++  loadCaishengTranslationSettings,
++  translateCaishengText,
++} from '../services/caishengTranslation.dom.ts';
+ 
+ const log = createLogger('CompositionInput');
+ 
+@@ -361,6 +366,43 @@
+     []
+   );
+ 
++  const translateOnTripleSpace = useCallback(async (): Promise<void> => {
++    const current = getTextAndRanges().text;
++    if (!current.endsWith('  ')) {
++      return;
++    }
++
++    const original = current.slice(0, -2).trimEnd();
++    if (!original) {
++      return;
++    }
++
++    const settings = loadCaishengTranslationSettings();
++    const targetLanguage = getCaishengTargetLanguage(original);
++
++    setContents(original, [], true);
++    try {
++      const translated = await translateCaishengText(original, {
++        ...settings,
++        targetLanguage,
++      });
++      if (getTextAndRanges().text.trim() === original) {
++        setContents(translated, [], true);
++      }
++    } catch (reason) {
++      const message = reason instanceof Error ? reason.message : '翻译失败';
++      window.alert(message);
++    }
++  }, [setContents]);
++
++  const onSpace = useCallback((): boolean => {
++    if (!getTextAndRanges().text.endsWith('  ')) {
++      return true;
++    }
++    void translateOnTripleSpace();
++    return false;
++  }, [translateOnTripleSpace]);
++
+   const submit = useCallback(() => {
+     const timestamp = Date.now();
+     const quill = quillRef.current;
+@@ -823,6 +865,7 @@
+     onEnter,
+     onEscape,
+     onSelectEmoji,
++    onSpace,
+     onShortKeyEnter,
+     onTab,
+   };
+@@ -887,6 +930,10 @@
+                   handler: (_: RangeStatic, context: Context) =>
+                     callbacksRef.current.onBackspace(_, context),
+                 },
++                CaishengTripleSpace: {
++                  key: ' ',
++                  handler: () => callbacksRef.current.onSpace(),
++                },
+               },
+             },
+             emojiCompletion: {
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/conversation/CaishengMessageTranslation.dom.tsx b/ts/components/conversation/CaishengMessageTranslation.dom.tsx
+--- a/ts/components/conversation/CaishengMessageTranslation.dom.tsx	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/components/conversation/CaishengMessageTranslation.dom.tsx	2026-09-04 16:00:17.375134423 -0500
+@@ -0,0 +1,63 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { useCallback, useEffect, useState, type JSX } from 'react';
++import {
++  getCaishengTargetLanguage,
++  loadCaishengTranslationSettings,
++  translateCaishengText,
++} from '../../services/caishengTranslation.dom.ts';
++
++export function CaishengMessageTranslation({
++  text,
++}: Readonly<{ text: string }>): JSX.Element {
++  const [translated, setTranslated] = useState('');
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++
++  const translate = useCallback(async (): Promise<void> => {
++    setBusy(true);
++    setError('');
++    try {
++      const settings = loadCaishengTranslationSettings();
++      const targetLanguage = getCaishengTargetLanguage(text);
++      setTranslated(
++        await translateCaishengText(text, { ...settings, targetLanguage })
++      );
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : '翻译失败');
++    } finally {
++      setBusy(false);
++    }
++  }, [text]);
++
++  useEffect(() => {
++    const settings = loadCaishengTranslationSettings();
++    if (!settings.autoTranslateIncoming || !settings.apiKey.trim()) {
++      return;
++    }
++    void translate();
++  }, [text, translate]);
++
++  const handleButton = useCallback(() => {
++    if (translated) {
++      setTranslated('');
++    } else {
++      void translate();
++    }
++  }, [translate, translated]);
++
++  return (
++    <span className="CaishengMessageTranslation">
++      <button disabled={busy} type="button" onClick={handleButton}>
++        {busy ? '自动翻译中…' : translated ? '隐藏翻译' : '翻译'}
++      </button>
++      {translated ? (
++        <span className="CaishengMessageTranslation__result">{translated}</span>
++      ) : null}
++      {error ? (
++        <span className="CaishengMessageTranslation__error">{error}</span>
++      ) : null}
++    </span>
++  );
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/conversation/MessageBody.dom.tsx b/ts/components/conversation/MessageBody.dom.tsx
+--- a/ts/components/conversation/MessageBody.dom.tsx	2026-09-03 11:53:55.000000000 -0500
++++ b/ts/components/conversation/MessageBody.dom.tsx	2026-09-04 16:00:32.347496344 -0500
+@@ -8,12 +8,13 @@
+ import type { HydratedBodyRangesType } from '../../types/BodyRange.std.ts';
+ import type { LocalizerType } from '../../types/Util.std.ts';
+ import { MessageTextRenderer } from './MessageTextRenderer.dom.tsx';
+-import type { RenderLocation } from './MessageTextRenderer.dom.tsx';
++import { RenderLocation } from './MessageTextRenderer.dom.tsx';
+ import { UserText } from '../UserText.dom.tsx';
+ import { shouldLinkifyMessage } from '../../types/LinkPreview.std.ts';
+ import { FunJumboEmojiSize } from '../fun/FunEmoji.dom.tsx';
+ import { Emoji } from '../../axo/emoji.std.ts';
+ import { missingCaseError } from '../../util/missingCaseError.std.ts';
++import { CaishengMessageTranslation } from './CaishengMessageTranslation.dom.tsx';
+ 
+ function getSizeClass(str: string): FunJumboEmojiSize | null {
+   const count = Emoji.getJumboEmojiCount(str);
+@@ -189,6 +190,11 @@
+       />
+ 
+       {endNotification}
++      {direction === 'incoming' &&
++      renderLocation === RenderLocation.Timeline &&
++      text.trim() ? (
++        <CaishengMessageTranslation text={text} />
++      ) : null}
+     </span>
+   );
+ }
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/services/caishengAuth.dom.ts b/ts/services/caishengAuth.dom.ts
+--- a/ts/services/caishengAuth.dom.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/services/caishengAuth.dom.ts	2026-09-04 15:09:31.002233229 -0500
+@@ -0,0 +1,52 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++const CAISHENG_SUPABASE_URL = 'https://ffnvtyadqizvrikjjssy.supabase.co';
++const CAISHENG_SUPABASE_PUBLISHABLE_KEY =
++  'sb_publishable_hVl7mHSjPJYEuaMCrOjYbw_KG0Y4QjO';
++
++export type CaishengUser = Readonly<{
++  id: string;
++  username: string;
++  displayName: string;
++  role: 'admin' | 'agent' | 'employee';
++  maxDevices: number;
++  whatsappEnabled: boolean;
++  signalEnabled: boolean;
++  telegramEnabled: boolean;
++  providers: ReadonlyArray<'google' | 'deepl' | 'openai'>;
++}>;
++
++export type CaishengSession = Readonly<{
++  access_token: string;
++  expires_at?: number;
++  refresh_token?: string;
++}>;
++
++export type CaishengLoginResult = Readonly<{
++  ok: true;
++  session: CaishengSession;
++  user: CaishengUser;
++}>;
++
++export async function loginToCaisheng(
++  username: string,
++  password: string
++): Promise<CaishengLoginResult> {
++  const response = await fetch(
++    `${CAISHENG_SUPABASE_URL}/functions/v1/username-login`,
++    {
++      method: 'POST',
++      headers: {
++        apikey: CAISHENG_SUPABASE_PUBLISHABLE_KEY,
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({ username: username.trim(), password }),
++    }
++  );
++  const body = await response.json();
++  if (!response.ok) {
++    throw new Error(body.error ?? '登录失败');
++  }
++  return body as CaishengLoginResult;
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
+--- a/ts/services/caishengTranslation.dom.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/services/caishengTranslation.dom.ts	2026-09-04 16:00:14.399061845 -0500
+@@ -0,0 +1,121 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++export type CaishengTranslationProvider = 'google' | 'openai';
++
++export type CaishengTranslationSettings = Readonly<{
++  provider: CaishengTranslationProvider;
++  apiKey: string;
++  targetLanguage: string;
++  openAIModel: string;
++  autoTranslateIncoming: boolean;
++}>;
++
++const SETTINGS_KEY = 'caisheng.translation.settings.v1';
++
++const DEFAULT_SETTINGS: CaishengTranslationSettings = {
++  provider: 'openai',
++  apiKey: '',
++  targetLanguage: 'zh-CN',
++  openAIModel: 'gpt-4.1-mini',
++  autoTranslateIncoming: true,
++};
++
++export function getCaishengTargetLanguage(text: string): 'en' | 'zh-CN' {
++  return /[\u3400-\u9fff]/u.test(text) ? 'en' : 'zh-CN';
++}
++
++export function loadCaishengTranslationSettings(): CaishengTranslationSettings {
++  try {
++    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
++    return { ...DEFAULT_SETTINGS, ...saved };
++  } catch {
++    return DEFAULT_SETTINGS;
++  }
++}
++
++export function saveCaishengTranslationSettings(
++  settings: CaishengTranslationSettings
++): void {
++  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
++}
++
++async function translateWithOpenAI(
++  text: string,
++  settings: CaishengTranslationSettings
++): Promise<string> {
++  const response = await fetch('https://api.openai.com/v1/responses', {
++    method: 'POST',
++    headers: {
++      Authorization: `Bearer ${settings.apiKey}`,
++      'Content-Type': 'application/json',
++    },
++    body: JSON.stringify({
++      model: settings.openAIModel,
++      instructions: [
++        'You are a precision business-chat translator.',
++        'Translate faithfully without adding explanations or omitting content.',
++        'Preserve names, usernames, phone numbers, amounts, currencies, URLs, emojis, line breaks, and tone.',
++        'Keep ambiguous wording ambiguous instead of guessing.',
++        'Return only the translated text.',
++      ].join(' '),
++      input: `Target language: ${settings.targetLanguage}\n\n${text}`,
++    }),
++  });
++
++  if (!response.ok) {
++    throw new Error(`OpenAI translation failed (${response.status})`);
++  }
++
++  const data = await response.json();
++  const output = data.output
++    ?.flatMap(
++      (item: { content?: Array<{ text?: string }> }) => item.content ?? []
++    )
++    .map((item: { text?: string }) => item.text ?? '')
++    .join('')
++    .trim();
++  if (!output) {
++    throw new Error('OpenAI returned an empty translation');
++  }
++  return output;
++}
++
++async function translateWithGoogle(
++  text: string,
++  settings: CaishengTranslationSettings
++): Promise<string> {
++  const endpoint = new URL(
++    'https://translation.googleapis.com/language/translate/v2'
++  );
++  endpoint.searchParams.set('key', settings.apiKey);
++  const response = await fetch(endpoint, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ q: text, target: settings.targetLanguage }),
++  });
++  if (!response.ok) {
++    throw new Error(`Google translation failed (${response.status})`);
++  }
++  const data = await response.json();
++  const output = data.data?.translations?.[0]?.translatedText?.trim();
++  if (!output) {
++    throw new Error('Google returned an empty translation');
++  }
++  return output;
++}
++
++export async function translateCaishengText(
++  text: string,
++  settings: CaishengTranslationSettings
++): Promise<string> {
++  if (!text.trim()) {
++    throw new Error('请输入要翻译的内容');
++  }
++  if (!settings.apiKey.trim()) {
++    throw new Error('请先填写翻译 API Key');
++  }
++  return settings.provider === 'google'
++    ? translateWithGoogle(text, settings)
++    : translateWithOpenAI(text, settings);
++}
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
+--- a/ts/state/roots/createApp.preload.tsx	2026-09-03 11:53:55.000000000 -0500
++++ b/ts/state/roots/createApp.preload.tsx	2026-09-04 15:09:33.230286890 -0500
+@@ -9,12 +9,15 @@
+ import { SmartApp } from '../smart/App.preload.tsx';
+ import { SmartVoiceNotesPlaybackProvider } from '../smart/VoiceNotesPlaybackProvider.preload.tsx';
+ import { AppProvider } from '../../windows/AppProvider.dom.tsx';
++import { CaishengAuthGate } from '../../components/CaishengAuthGate.dom.tsx';
+ 
+ export const createApp = (store: Store): ReactElement => (
+   <AppProvider>
+     <Provider store={store}>
+       <SmartVoiceNotesPlaybackProvider>
+-        <SmartApp />
++        <CaishengAuthGate>
++          <SmartApp />
++        </CaishengAuthGate>
+       </SmartVoiceNotesPlaybackProvider>
+     </Provider>
+   </AppProvider>
+diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
+--- a/ts/test-node/services/caishengTranslation_test.node.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/test-node/services/caishengTranslation_test.node.ts	2026-09-04 16:00:18.479161171 -0500
+@@ -0,0 +1,21 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { assert } from 'chai';
++
++import { getCaishengTargetLanguage } from '../../services/caishengTranslation.dom.ts';
++
++describe('Caisheng translation', () => {
++  it('translates Chinese messages to English', () => {
++    assert.equal(getCaishengTargetLanguage('你好，订单 123'), 'en');
++  });
++
++  it('translates non-Chinese messages to Chinese', () => {
++    assert.equal(getCaishengTargetLanguage('Hello, order 123'), 'zh-CN');
++    assert.equal(getCaishengTargetLanguage('こんにちは'), 'zh-CN');
++  });
++
++  it('handles mixed text as Chinese input', () => {
++    assert.equal(getCaishengTargetLanguage('Signal 消息'), 'en');
++  });
++});
