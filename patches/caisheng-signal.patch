@@ -1229,61 +1229,24 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlat
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
 --- a/ts/components/CompositionArea.dom.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/components/CompositionArea.dom.tsx	2026-09-04 14:58:25.653077989 -0500
-@@ -91,6 +91,7 @@
+@@ -91,6 +91,6 @@
  import type { ContactNameColorType } from '../types/Colors.std.ts';
  import type { Emoji } from '../axo/emoji.std.ts';
  import { AxoConfirmDialog } from '../axo/AxoConfirmDialog.dom.tsx';
-+import { CaishengComposerTranslator } from './CaishengComposerTranslator.dom.tsx';
  
  export type OwnProps = Readonly<{
    acceptedMessageRequest: boolean | null;
-@@ -379,6 +380,34 @@
+@@ -379,6 +380,6 @@
      }
    }, [inputApiRef, setLarge]);
  
-+  const applyCaishengTranslation = useCallback(
-+    (translatedText: string) => {
-+      inputApiRef.current?.setContents(translatedText, [], true);
-+      onEditorStateChange({
-+        bodyRanges: [],
-+        conversationId,
-+        messageText: translatedText,
-+        sendCounter,
-+      });
-+      setDirty(true);
-+    },
-+    [conversationId, onEditorStateChange, sendCounter]
-+  );
-+
-+  const sendCaishengTranslation = useCallback(
-+    (translatedText: string) => {
-+      sendMultiMediaMessage(conversationId, {
-+        draftAttachments,
-+        bodyRanges: [],
-+        message: translatedText,
-+        timestamp: Date.now(),
-+        isViewOnce,
-+      });
-+      setLarge(false);
-+    },
-+    [conversationId, draftAttachments, isViewOnce, sendMultiMediaMessage]
-+  );
-+
    const draftEditMessageBody = draftEditMessage?.body;
    const editedMessageId = draftEditMessage?.targetMessageId;
  
-@@ -1338,6 +1367,14 @@
+@@ -1338,6 +1367,6 @@
            </>
          )}
        </div>
-+      {!isViewOnceActive ? (
-+        <CaishengComposerTranslator
-+          disabled={isDisabled || !(draftText ?? '').trim()}
-+          text={draftText ?? ''}
-+          onApplyTranslation={applyCaishengTranslation}
-+          onSendTranslation={sendCaishengTranslation}
-+        />
-+      ) : null}
        {!isViewOnceActive && large ? (
          <div
            className={classNames(
