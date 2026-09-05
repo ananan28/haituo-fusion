@@ -56,10 +56,90 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/CAISHENG-BUILD.md b/CAISHE
 +## 安全说明
 +
 +不要把私密 API Key 写进源码或提交到版本库。发布前还应将翻译请求迁移到财盛服务端代理，以便保护供应商密钥、执行套餐限额和记录翻译用量。
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/caishengWebviewTranslation.main.ts b/app/caishengWebviewTranslation.main.ts
+--- a/app/caishengWebviewTranslation.main.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/app/caishengWebviewTranslation.main.ts	2026-09-04 20:10:47.643134803 -0500
+@@ -0,0 +1,60 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { ipcMain } from 'electron';
++
++const ALLOWED_HOSTS = new Set(['web.whatsapp.com', 'web.telegram.org']);
++
++function assertAllowedSender(url: string): void {
++  let hostname = '';
++  try {
++    hostname = new URL(url).hostname;
++  } catch {
++    // Rejected below.
++  }
++  if (!ALLOWED_HOSTS.has(hostname)) {
++    throw new Error('不允许的翻译请求来源');
++  }
++}
++
++export function installCaishengWebviewTranslation(): void {
++  ipcMain.removeHandler('caisheng:webview-translate');
++  ipcMain.handle(
++    'caisheng:webview-translate',
++    async (event, value: unknown, target: unknown) => {
++      assertAllowedSender(event.senderFrame?.url ?? '');
++      const text = typeof value === 'string' ? value.trim() : '';
++      const targetLanguage = target === 'en' ? 'en' : 'zh-CN';
++      if (!text || text.length > 30000) {
++        throw new Error('翻译内容为空或过长');
++      }
++      const url = new URL(
++        'https://translate.googleapis.com/translate_a/single'
++      );
++      url.search = new URLSearchParams({
++        client: 'gtx',
++        sl: 'auto',
++        tl: targetLanguage,
++        dt: 't',
++        q: text,
++      }).toString();
++      const response = await fetch(url, {
++        signal: AbortSignal.timeout(20000),
++      });
++      if (!response.ok) {
++        throw new Error(`翻译服务连接失败（${response.status}）`);
++      }
++      const body = (await response.json()) as ReadonlyArray<
++        ReadonlyArray<ReadonlyArray<unknown>>
++      >;
++      const translated = body[0]
++        ?.map(part => (typeof part?.[0] === 'string' ? part[0] : ''))
++        .join('')
++        .trim();
++      if (!translated) {
++        throw new Error('翻译服务未返回结果');
++      }
++      return { text: translated };
++    }
++  );
++}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/main.main.ts
 --- a/app/main.main.ts	2026-09-03 11:53:55.000000000 -0500
-+++ b/app/main.main.ts	2026-09-04 19:55:50.804288525 -0500
-@@ -718,6 +718,7 @@
++++ b/app/main.main.ts	2026-09-04 20:10:48.971170165 -0500
+@@ -75,6 +75,7 @@
+ import * as updater from '../ts/updater/index.main.ts';
+ import { updateDefaultSession } from './updateDefaultSession.main.ts';
+ import { PreventDisplaySleepService } from './PreventDisplaySleepService.std.ts';
++import { installCaishengWebviewTranslation } from './caishengWebviewTranslation.main.ts';
+ import {
+   SystemTrayService,
+   focusAndForceToTop,
+@@ -116,6 +117,7 @@
+ import '../ts/main/clipboardMain.main.ts';
+ import { maybeParseUrl, setUrlSearchParams } from '../ts/util/url.std.ts';
+ import { getHeicConverter } from '../ts/workers/heicConverterMain.main.ts';
++import type { CaishengLoginIpcResult } from '../ts/services/caishengAuth.std.ts';
+ 
+ import type { LocaleDirection, LocaleType } from './locale.node.ts';
+ import { load as loadLocale } from './locale.node.ts';
+@@ -718,6 +720,7 @@
        ...defaultWebPrefs,
        nodeIntegration: false,
        nodeIntegrationInWorker: false,
@@ -67,7 +147,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
        sandbox: false,
        contextIsolation: !isTestEnvironment(getEnvironment()),
        preload: isTestEnvironment(getEnvironment())
-@@ -772,6 +773,26 @@
+@@ -772,6 +775,36 @@
    // Create the browser window.
    mainWindow = new BrowserWindow(windowOptions);
  
@@ -85,15 +165,305 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
 +        event.preventDefault();
 +        return;
 +      }
++      const expectedPartition =
++        hostname === 'web.whatsapp.com'
++          ? 'persist:caisheng-whatsapp'
++          : 'persist:caisheng-telegram';
++      if (params.partition !== expectedPartition) {
++        event.preventDefault();
++        return;
++      }
 +      preferences.nodeIntegration = false;
++      preferences.nodeIntegrationInWorker = false;
 +      preferences.contextIsolation = true;
 +      preferences.sandbox = true;
++      preferences.preload = join(rootDir, 'js', 'caisheng-webview-preload.js');
 +    }
 +  );
 +
    mainWindow.webContents.on('preload-error', (_event, _preloadPath, error) => {
      log.error(Errors.toLogFormat(error));
      if (isTestEnvironment(getEnvironment())) {
+@@ -1060,6 +1093,117 @@
+   );
+ }
+ 
++const CAISHENG_LOGIN_URL =
++  'https://ffnvtyadqizvrikjjssy.supabase.co/functions/v1/username-login';
++const CAISHENG_SUPABASE_PUBLISHABLE_KEY =
++  'sb_publishable_hVl7mHSjPJYEuaMCrOjYbw_KG0Y4QjO';
++const CaishengLoginCredentialsSchema = z.object({
++  username: z.string().trim().min(1).max(128),
++  password: z.string().regex(/^\d{6}$/),
++});
++const CaishengLoginResponseSchema = z.object({
++  ok: z.literal(true),
++  session: z.object({
++    access_token: z.string().min(1),
++    expires_at: z.number().optional(),
++    refresh_token: z.string().optional(),
++  }),
++  user: z.object({
++    id: z.string().min(1),
++    username: z.string(),
++    displayName: z.string(),
++    role: z.enum(['admin', 'agent', 'employee']),
++    maxDevices: z.number(),
++    whatsappEnabled: z.boolean(),
++    signalEnabled: z.boolean(),
++    telegramEnabled: z.boolean(),
++    providers: z.array(z.enum(['google', 'deepl', 'openai'])),
++  }),
++});
++
++function getCaishengLoginError(body: unknown, fallback: string): string {
++  if (body && typeof body === 'object') {
++    const { error, message } = body as {
++      error?: unknown;
++      message?: unknown;
++    };
++    if (typeof error === 'string' && error) {
++      return error;
++    }
++    if (typeof message === 'string' && message) {
++      return message;
++    }
++  }
++  return fallback;
++}
++
++ipc.handle('caisheng:login', async (_event, input: unknown) => {
++  const credentials = CaishengLoginCredentialsSchema.safeParse(input);
++  if (!credentials.success) {
++    return {
++      ok: false,
++      code: 'INVALID_REQUEST',
++      error: '账号或密码格式不正确',
++    } satisfies CaishengLoginIpcResult;
++  }
++
++  const controller = new AbortController();
++  const timeout = setTimeout(() => controller.abort(), 15_000);
++  try {
++    const response = await net.fetch(CAISHENG_LOGIN_URL, {
++      method: 'POST',
++      headers: {
++        Accept: 'application/json',
++        apikey: CAISHENG_SUPABASE_PUBLISHABLE_KEY,
++        Authorization: `Bearer ${CAISHENG_SUPABASE_PUBLISHABLE_KEY}`,
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify(credentials.data),
++      signal: controller.signal,
++    });
++
++    const text = await response.text();
++    let body: unknown;
++    try {
++      body = text ? JSON.parse(text) : undefined;
++    } catch {
++      body = undefined;
++    }
++
++    if (!response.ok) {
++      return {
++        ok: false,
++        code: 'SERVER_ERROR',
++        error: getCaishengLoginError(
++          body,
++          `登录服务器错误 (${response.status})`
++        ),
++      } satisfies CaishengLoginIpcResult;
++    }
++
++    const parsed = CaishengLoginResponseSchema.safeParse(body);
++    if (!parsed.success) {
++      return {
++        ok: false,
++        code: 'SERVER_ERROR',
++        error: '登录服务器返回的数据不完整',
++      } satisfies CaishengLoginIpcResult;
++    }
++    return parsed.data satisfies CaishengLoginIpcResult;
++  } catch (error) {
++    return {
++      ok: false,
++      code: 'NETWORK_ERROR',
++      error:
++        error instanceof Error && error.name === 'AbortError'
++          ? '连接登录服务器超时，请稍后重试'
++          : '无法连接登录服务器，请检查网络或代理设置',
++    } satisfies CaishengLoginIpcResult;
++  } finally {
++    clearTimeout(timeout);
++  }
++});
++
+ // Renderer asks if we are done with the database
+ ipc.handle('database-ready', async () => {
+   if (!sqlInitPromise) {
+@@ -2667,17 +2811,22 @@
+   }
+ });
+ 
+-// Defense in depth. We never intend to open webviews or windows. Prevent it completely.
++// Keep arbitrary webviews blocked; Caisheng's two allow-listed services are
++// validated again by the main-window will-attach-webview handler above.
+ app.on(
+   'web-contents-created',
+   (_createEvent: Electron.Event, contents: Electron.WebContents) => {
+     contents.on('will-attach-webview', attachEvent => {
+-      attachEvent.preventDefault();
++      if (contents !== mainWindow?.webContents) {
++        attachEvent.preventDefault();
++      }
+     });
+     contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+   }
+ );
+ 
++installCaishengWebviewTranslation();
++
+ if (!app.isDefaultProtocolClient('sgnl')) {
+   log.info('setting signal as the default app for the sgnl url scheme');
+   app.setAsDefaultProtocolClient('sgnl');
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/js/caisheng-webview-preload.js b/js/caisheng-webview-preload.js
+--- a/js/caisheng-webview-preload.js	1969-12-31 18:00:00.000000000 -0600
++++ b/js/caisheng-webview-preload.js	2026-09-04 20:10:46.479103861 -0500
+@@ -0,0 +1,133 @@
++'use strict';
++
++const { ipcRenderer } = require('electron');
++
++const busy = new WeakSet();
++const translated = new WeakSet();
++
++function editable(node) {
++  return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement ||
++    (node instanceof HTMLElement && node.isContentEditable);
++}
++
++function read(node) {
++  return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
++    ? node.value : node.innerText;
++}
++
++function write(node, value) {
++  node.focus();
++  if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
++    const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
++    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
++    if (setter) setter.call(node, value); else node.value = value;
++  } else {
++    const selection = window.getSelection();
++    const range = document.createRange();
++    range.selectNodeContents(node);
++    selection?.removeAllRanges();
++    selection?.addRange(range);
++    if (!document.execCommand('insertText', false, value)) node.textContent = value;
++  }
++  node.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: value }));
++  node.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
++}
++
++function toast(message, error = false) {
++  document.getElementById('caisheng-translate-toast')?.remove();
++  const node = document.createElement('div');
++  node.id = 'caisheng-translate-toast';
++  node.textContent = message;
++  Object.assign(node.style, { position: 'fixed', right: '20px', bottom: '82px', zIndex: '2147483647', padding: '10px 16px', borderRadius: '8px', color: '#fff', background: error ? '#c63d3d' : '#202a3b', boxShadow: '0 8px 30px #0004', fontSize: '13px' });
++  document.body.append(node);
++  setTimeout(() => node.remove(), 2200);
++}
++
++async function requestTranslation(text) {
++  const target = /[\u3400-\u9fff]/.test(text) ? 'en' : 'zh-CN';
++  const result = await ipcRenderer.invoke('caisheng:webview-translate', text, target);
++  if (!result || typeof result.text !== 'string') throw new Error('翻译服务未返回结果');
++  return result.text;
++}
++
++async function translateComposer(target) {
++  if (busy.has(target)) return;
++  const original = read(target).replace(/ {2}$/, '').trim();
++  if (!original) return;
++  busy.add(target);
++  toast('正在智能翻译…');
++  try {
++    const result = await requestTranslation(original);
++    const current = read(target).replace(/ {2}$/, '').trim();
++    if (current !== original) return toast('输入内容已变化，本次译文未覆盖');
++    write(target, result);
++    toast('翻译完成，按 Enter 发送');
++  } catch (error) {
++    toast(error instanceof Error ? error.message : '翻译失败', true);
++  } finally {
++    busy.delete(target);
++  }
++}
++
++document.addEventListener('keydown', event => {
++  if (!editable(event.target) || event.isComposing || event.keyCode === 229) return;
++  if (event.altKey && event.key.toLowerCase() === 't') {
++    event.preventDefault();
++    void translateComposer(event.target);
++  } else if (event.key === ' ' && !event.shiftKey && / {2}$/.test(read(event.target))) {
++    event.preventDefault();
++    void translateComposer(event.target);
++  }
++}, true);
++
++function incomingBubble(candidate) {
++  if (candidate.closest('.message-out')) return null;
++  const whatsapp = candidate.closest('.message-in,[data-testid="msg-container"]');
++  if (whatsapp?.querySelector('[data-pre-plain-text]')) return whatsapp;
++  const telegram = candidate.closest('.Message.message-list-item,.message');
++  if (!telegram || telegram.matches('.own,.is-outgoing,.message-out') || telegram.classList.contains('own')) return null;
++  return telegram;
++}
++
++function bubbleText(node) {
++  const textNode = node.querySelector('[data-pre-plain-text],.text-content,.message-content,.copyable-text');
++  if (!textNode) return '';
++  const clone = textNode.cloneNode(true);
++  clone.querySelectorAll('.caisheng-message-translation').forEach(child => child.remove());
++  return clone.innerText?.trim() || clone.textContent?.trim() || '';
++}
++
++async function translateBubble(node) {
++  if (translated.has(node)) return;
++  const original = bubbleText(node);
++  if (!original || original.length > 30000 || /^https?:\/\/\S+$/i.test(original) || !/[\p{L}\p{Script=Han}]/u.test(original)) return;
++  translated.add(node);
++  try {
++    const result = await requestTranslation(original);
++    if (!node.isConnected) return;
++    const line = document.createElement('div');
++    line.className = 'caisheng-message-translation';
++    line.textContent = result;
++    line.title = '财盛自动翻译 · 双击复制';
++    Object.assign(line.style, { color: '#1687ff', fontSize: '13px', lineHeight: '1.55', borderTop: '1px dashed #1687ff44', marginTop: '5px', paddingTop: '4px', whiteSpace: 'pre-wrap' });
++    line.ondblclick = event => { event.stopPropagation(); void navigator.clipboard.writeText(result); toast('译文已复制'); };
++    (node.querySelector('.copyable-text,.text-content,.message-content') || node).append(line);
++  } catch {
++    translated.delete(node);
++  }
++}
++
++function scan(root) {
++  if (!(root instanceof Document || root instanceof Element)) return;
++  root.querySelectorAll('[data-pre-plain-text],.Message.message-list-item,.message').forEach(candidate => {
++    const bubble = incomingBubble(candidate);
++    if (bubble) void translateBubble(bubble);
++  });
++}
++
++window.addEventListener('DOMContentLoaded', () => {
++  scan(document);
++  new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
++    if (node instanceof Element) { const bubble = incomingBubble(node); if (bubble) void translateBubble(bubble); scan(node); }
++  }))).observe(document.body, { childList: true, subtree: true });
++});
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/package.json b/package.json
 --- a/package.json	2026-09-03 11:53:55.000000000 -0500
 +++ b/package.json	2026-09-04 16:01:01.508192858 -0500
@@ -214,18 +584,72 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
 --- a/stylesheets/components/CaishengPlatformShell.scss	1969-12-31 18:00:00.000000000 -0600
-+++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 19:55:39.331999690 -0500
-@@ -0,0 +1,11 @@
++++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 20:11:48.816711581 -0500
+@@ -0,0 +1,65 @@
 +.CaishengPlatformShell {
-+  display: flex; flex-direction: column; height: 100vh; width: 100vw;
-+  &__nav { align-items: center; background: #111827; color: #fff; display: flex; flex: 0 0 48px; gap: 8px; padding: 0 14px; }
-+  &__nav strong { margin-inline-end: 12px; }
-+  &__nav button { background: transparent; border: 0; border-radius: 7px; color: #cbd5e1; cursor: pointer; padding: 8px 14px; }
-+  &__nav button.is-active { background: #2563eb; color: #fff; }
-+  &__nav button:disabled { cursor: not-allowed; opacity: .35; }
-+  &__content, &__signal, &__webview { height: 100%; width: 100%; }
-+  &__content { flex: 1 1 auto; min-height: 0; }
-+  &__signal[hidden], &__webview[hidden] { display: none; }
++  display: flex;
++  flex-direction: column;
++  height: 100vh;
++  overflow: hidden;
++  width: 100vw;
++
++  &__nav {
++    align-items: center;
++    background: #111827;
++    color: #fff;
++    display: flex;
++    flex: 0 0 48px;
++    gap: 8px;
++    padding: 0 14px;
++    z-index: 1;
++  }
++
++  &__nav strong {
++    margin-inline-end: 12px;
++  }
++
++  &__nav button {
++    background: transparent;
++    border: 0;
++    border-radius: 7px;
++    color: #cbd5e1;
++    cursor: pointer;
++    padding: 8px 14px;
++  }
++
++  &__nav button.is-active {
++    background: #2563eb;
++    color: #fff;
++  }
++
++  &__nav button:disabled {
++    cursor: not-allowed;
++    opacity: 0.35;
++  }
++
++  &__content {
++    flex: 1 1 auto;
++    min-height: 0;
++    overflow: hidden;
++    position: relative;
++  }
++
++  &__signal,
++  &__webview {
++    border: 0;
++    display: flex;
++    height: 100%;
++    inset: 0;
++    min-height: 0;
++    min-width: 0;
++    position: absolute;
++    width: 100%;
++  }
++
++  &__signal[hidden],
++  &__webview[hidden] {
++    display: none;
++  }
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CompositionArea.scss b/stylesheets/components/CompositionArea.scss
 --- a/stylesheets/components/CompositionArea.scss	2026-09-03 11:53:55.000000000 -0500
@@ -445,8 +869,8 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuth
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
 --- a/ts/components/CaishengComposerTranslator.dom.tsx	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/components/CaishengComposerTranslator.dom.tsx	2026-09-04 16:00:32.215493133 -0500
-@@ -0,0 +1,137 @@
++++ b/ts/components/CaishengComposerTranslator.dom.tsx	2026-09-04 20:13:13.234848933 -0500
+@@ -0,0 +1,158 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
@@ -549,8 +973,14 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 +              })
 +            }
 +          >
-+            <option value="openai">OpenAI</option>
-+            <option value="google">Google Translate</option>
++            <option value="auto">自动选择（免费优先）</option>
++            <option value="google-free">Google 免费公共翻译</option>
++            <option value="mymemory">MyMemory 免费翻译</option>
++            <option value="libre">LibreTranslate</option>
++            <option value="microsoft">微软翻译（需配置）</option>
++            <option value="openai">OpenAI（需配置）</option>
++            <option value="qwen">Qwen3-8B（需配置）</option>
++            <option value="glm">GLM-4-9B（需配置）</option>
 +          </select>
 +          <input
 +            aria-label="翻译 API Key"
@@ -565,6 +995,21 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 +              value={settings.openAIModel}
 +              onChange={event => update({ openAIModel: event.target.value })}
 +            />
++          ) : null}
++          {settings.provider === 'libre' ? (
++            <input aria-label="LibreTranslate 服务地址" value={settings.libreEndpoint}
++              placeholder="https://你的-libretranslate-服务"
++              onChange={event => update({ libreEndpoint: event.target.value })} />
++          ) : null}
++          {settings.provider === 'microsoft' ? (
++            <input aria-label="微软翻译区域" value={settings.microsoftRegion}
++              placeholder="Azure 区域（如 eastasia）"
++              onChange={event => update({ microsoftRegion: event.target.value })} />
++          ) : null}
++          {settings.provider === 'qwen' || settings.provider === 'glm' ? (
++            <input aria-label="OpenAI 兼容 API 地址" value={settings.compatibleEndpoint}
++              placeholder="OpenAI 兼容 API 地址"
++              onChange={event => update({ compatibleEndpoint: event.target.value })} />
 +          ) : null}
 +          <label>
 +            <input
@@ -586,37 +1031,86 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
 --- a/ts/components/CaishengPlatformShell.dom.tsx	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-04 19:55:38.215971538 -0500
-@@ -0,0 +1,30 @@
++++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-04 20:11:47.660681874 -0500
+@@ -0,0 +1,79 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
-+import { createElement, useMemo, useState, type JSX, type ReactNode } from 'react';
++import {
++  createElement,
++  useEffect,
++  useMemo,
++  useState,
++  type HTMLAttributes,
++  type JSX,
++  type ReactNode,
++} from 'react';
 +import { useCaishengAuth } from './CaishengAuthGate.dom.tsx';
++import {
++  getCaishengPlatforms,
++  getDefaultCaishengPlatform,
++  type CaishengPlatform,
++} from '../services/caishengPlatform.std.ts';
 +
-+type Platform = 'signal' | 'whatsapp' | 'telegram';
-+
-+export function CaishengPlatformShell({ signal }: Readonly<{ signal: ReactNode }>): JSX.Element {
++export function CaishengPlatformShell({
++  signal,
++}: Readonly<{ signal: ReactNode }>): JSX.Element {
 +  const { user } = useCaishengAuth();
-+  const platforms = useMemo(() => [
-+    { id: 'signal' as const, label: 'Signal', enabled: user.signalEnabled },
-+    { id: 'whatsapp' as const, label: 'WhatsApp', enabled: user.whatsappEnabled, url: 'https://web.whatsapp.com/' },
-+    { id: 'telegram' as const, label: 'Telegram', enabled: user.telegramEnabled, url: 'https://web.telegram.org/k/' },
-+  ], [user]);
-+  const [active, setActive] = useState<Platform>(platforms.find(item => item.enabled)?.id ?? 'signal');
-+  return <div className="CaishengPlatformShell">
-+    <nav className="CaishengPlatformShell__nav" aria-label="财盛应用">
-+      <strong>财盛翻译</strong>
-+      {platforms.map(item => <button className={active === item.id ? 'is-active' : undefined} disabled={!item.enabled} key={item.id} onClick={() => setActive(item.id)} type="button">{item.label}</button>)}
-+    </nav>
-+    <section className="CaishengPlatformShell__content">
-+      <div hidden={active !== 'signal'} className="CaishengPlatformShell__signal">{signal}</div>
-+      {platforms.filter(item => item.id !== 'signal' && item.enabled && item.url).map(item => createElement('webview', {
-+        className: 'CaishengPlatformShell__webview', hidden: active !== item.id, key: item.id,
-+        partition: `persist:caisheng-${item.id}`, src: item.url,
-+      }))}
-+    </section>
-+  </div>;
++  const platforms = useMemo(() => getCaishengPlatforms(user), [user]);
++  const [active, setActive] = useState<CaishengPlatform>(
++    getDefaultCaishengPlatform(platforms) ?? 'signal'
++  );
++
++  useEffect(() => {
++    if (!platforms.some(item => item.id === active && item.enabled)) {
++      setActive(getDefaultCaishengPlatform(platforms) ?? 'signal');
++    }
++  }, [active, platforms]);
++
++  return (
++    <div className="CaishengPlatformShell">
++      <nav className="CaishengPlatformShell__nav" aria-label="财盛应用">
++        <strong>财盛翻译</strong>
++        {platforms.map(item => (
++          <button
++            aria-pressed={active === item.id}
++            className={active === item.id ? 'is-active' : undefined}
++            disabled={!item.enabled}
++            key={item.id}
++            onClick={() => setActive(item.id)}
++            type="button"
++          >
++            {item.label}
++          </button>
++        ))}
++      </nav>
++      <section className="CaishengPlatformShell__content">
++        <div
++          hidden={active !== 'signal'}
++          className="CaishengPlatformShell__signal"
++        >
++          {signal}
++        </div>
++        {platforms
++          .filter(item => item.id !== 'signal' && item.enabled && item.url)
++          .map(item =>
++            createElement(
++              'webview',
++              {
++                className: 'CaishengPlatformShell__webview',
++                hidden: active !== item.id,
++                key: item.id,
++                partition: `persist:caisheng-${item.id}`,
++                src: item.url,
++              } as HTMLAttributes<HTMLElement> & {
++                partition: string;
++                src: string;
++              }
++            )
++          )}
++      </section>
++    </div>
++  );
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
 --- a/ts/components/CompositionArea.dom.tsx	2026-09-03 11:53:55.000000000 -0500
@@ -681,8 +1175,8 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionA
            className={classNames(
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionInput.dom.tsx b/ts/components/CompositionInput.dom.tsx
 --- a/ts/components/CompositionInput.dom.tsx	2026-09-03 11:53:55.000000000 -0500
-+++ b/ts/components/CompositionInput.dom.tsx	2026-09-04 16:00:32.323495760 -0500
-@@ -95,6 +95,11 @@
++++ b/ts/components/CompositionInput.dom.tsx	2026-09-04 20:10:18.450366083 -0500
+@@ -95,6 +95,12 @@
  import { tw } from '../axo/tw.dom.tsx';
  import type { Emoji } from '../axo/emoji.std.ts';
  import { RecoveryKeyPasteWarning } from './RecoveryKeyPasteWarning.dom.tsx';
@@ -691,23 +1185,21 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionI
 +  loadCaishengTranslationSettings,
 +  translateCaishengText,
 +} from '../services/caishengTranslation.dom.ts';
++import { getCaishengTripleSpaceAction } from '../services/caishengComposer.std.ts';
  
  const log = createLogger('CompositionInput');
  
-@@ -361,6 +366,43 @@
+@@ -361,6 +367,40 @@
      []
    );
  
 +  const translateOnTripleSpace = useCallback(async (): Promise<void> => {
 +    const current = getTextAndRanges().text;
-+    if (!current.endsWith('  ')) {
++    const action = getCaishengTripleSpaceAction(current);
++    if (!action.shouldTranslate) {
 +      return;
 +    }
-+
-+    const original = current.slice(0, -2).trimEnd();
-+    if (!original) {
-+      return;
-+    }
++    const original = action.sourceText;
 +
 +    const settings = loadCaishengTranslationSettings();
 +    const targetLanguage = getCaishengTargetLanguage(original);
@@ -728,7 +1220,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionI
 +  }, [setContents]);
 +
 +  const onSpace = useCallback((): boolean => {
-+    if (!getTextAndRanges().text.endsWith('  ')) {
++    if (!getCaishengTripleSpaceAction(getTextAndRanges().text).shouldTranslate) {
 +      return true;
 +    }
 +    void translateOnTripleSpace();
@@ -738,7 +1230,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionI
    const submit = useCallback(() => {
      const timestamp = Date.now();
      const quill = quillRef.current;
-@@ -823,6 +865,7 @@
+@@ -823,6 +863,7 @@
      onEnter,
      onEscape,
      onSelectEmoji,
@@ -746,7 +1238,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionI
      onShortKeyEnter,
      onTab,
    };
-@@ -887,6 +930,10 @@
+@@ -887,6 +928,10 @@
                    handler: (_: RangeStatic, context: Context) =>
                      callbacksRef.current.onBackspace(_, context),
                  },
@@ -856,14 +1348,38 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation
  }
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.dom.ts b/ts/services/caishengAuth.dom.ts
 --- a/ts/services/caishengAuth.dom.ts	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/services/caishengAuth.dom.ts	2026-09-04 15:09:31.002233229 -0500
-@@ -0,0 +1,52 @@
++++ b/ts/services/caishengAuth.dom.ts	2026-09-04 20:08:56.484184891 -0500
+@@ -0,0 +1,24 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
-+const CAISHENG_SUPABASE_URL = 'https://ffnvtyadqizvrikjjssy.supabase.co';
-+const CAISHENG_SUPABASE_PUBLISHABLE_KEY =
-+  'sb_publishable_hVl7mHSjPJYEuaMCrOjYbw_KG0Y4QjO';
++import type { CaishengLoginResult } from './caishengAuth.std.ts';
++
++export type {
++  CaishengLoginResult,
++  CaishengSession,
++  CaishengUser,
++} from './caishengAuth.std.ts';
++
++export async function loginToCaisheng(
++  username: string,
++  password: string
++): Promise<CaishengLoginResult> {
++  const result = await window.SignalContext.caishengLogin({
++    username: username.trim(),
++    password,
++  });
++  if (!result.ok) {
++    throw new Error(result.error);
++  }
++  return result;
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.std.ts b/ts/services/caishengAuth.std.ts
+--- a/ts/services/caishengAuth.std.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/services/caishengAuth.std.ts	2026-09-04 20:10:20.430417905 -0500
+@@ -0,0 +1,39 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
 +
 +export type CaishengUser = Readonly<{
 +  id: string;
@@ -889,151 +1405,218 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.d
 +  user: CaishengUser;
 +}>;
 +
-+export async function loginToCaisheng(
-+  username: string,
-+  password: string
-+): Promise<CaishengLoginResult> {
-+  const response = await fetch(
-+    `${CAISHENG_SUPABASE_URL}/functions/v1/username-login`,
-+    {
-+      method: 'POST',
-+      headers: {
-+        apikey: CAISHENG_SUPABASE_PUBLISHABLE_KEY,
-+        'Content-Type': 'application/json',
-+      },
-+      body: JSON.stringify({ username: username.trim(), password }),
-+    }
-+  );
-+  const body = await response.json();
-+  if (!response.ok) {
-+    throw new Error(body.error ?? '登录失败');
++export type CaishengLoginFailure = Readonly<{
++  ok: false;
++  error: string;
++  code: 'INVALID_REQUEST' | 'NETWORK_ERROR' | 'SERVER_ERROR';
++}>;
++
++export type CaishengLoginIpcResult = CaishengLoginResult | CaishengLoginFailure;
++
++export type CaishengLoginCredentials = Readonly<{
++  username: string;
++  password: string;
++}>;
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengComposer.std.ts b/ts/services/caishengComposer.std.ts
+--- a/ts/services/caishengComposer.std.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/services/caishengComposer.std.ts	2026-09-04 20:10:16.738323132 -0500
+@@ -0,0 +1,20 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++export type CaishengTripleSpaceAction = Readonly<{
++  shouldTranslate: boolean;
++  sourceText: string;
++}>;
++
++// Called before Quill inserts the third space. Two trailing spaces therefore
++// mean that this key press is the triple-space translation shortcut.
++export function getCaishengTripleSpaceAction(
++  currentText: string
++): CaishengTripleSpaceAction {
++  if (!currentText.endsWith('  ')) {
++    return { shouldTranslate: false, sourceText: currentText };
 +  }
-+  return body as CaishengLoginResult;
++
++  const sourceText = currentText.slice(0, -2).trimEnd();
++  return { shouldTranslate: sourceText.length > 0, sourceText };
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengPlatform.std.ts b/ts/services/caishengPlatform.std.ts
+--- a/ts/services/caishengPlatform.std.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/services/caishengPlatform.std.ts	2026-09-04 20:09:56.117795419 -0500
+@@ -0,0 +1,48 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import type { CaishengUser } from './caishengAuth.std.ts';
++
++export type CaishengPlatform = 'signal' | 'whatsapp' | 'telegram';
++
++export type CaishengPlatformItem = Readonly<{
++  id: CaishengPlatform;
++  label: string;
++  enabled: boolean;
++  url?: string;
++}>;
++
++export function getCaishengPlatforms(
++  user: Pick<
++    CaishengUser,
++    'signalEnabled' | 'whatsappEnabled' | 'telegramEnabled'
++  >
++): ReadonlyArray<CaishengPlatformItem> {
++  return [
++    { id: 'signal', label: 'Signal', enabled: user.signalEnabled },
++    {
++      id: 'whatsapp',
++      label: 'WhatsApp',
++      enabled: user.whatsappEnabled,
++      url: 'https://web.whatsapp.com/',
++    },
++    {
++      id: 'telegram',
++      label: 'Telegram',
++      enabled: user.telegramEnabled,
++      url: 'https://web.telegram.org/k/',
++    },
++  ];
++}
++
++export function getDefaultCaishengPlatform(
++  platforms: ReadonlyArray<CaishengPlatformItem>
++): CaishengPlatform | undefined {
++  return platforms.find(item => item.enabled)?.id;
++}
++
++export function getEnabledCaishengPlatforms(
++  platforms: ReadonlyArray<CaishengPlatformItem>
++): ReadonlyArray<CaishengPlatformItem> {
++  return platforms.filter(item => item.enabled);
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
 --- a/ts/services/caishengTranslation.dom.ts	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/services/caishengTranslation.dom.ts	2026-09-04 16:00:14.399061845 -0500
++++ b/ts/services/caishengTranslation.dom.ts	2026-09-04 20:13:35.619415321 -0500
 @@ -0,0 +1,121 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
-+export type CaishengTranslationProvider = 'google' | 'openai';
-+
++export type CaishengTranslationProvider = 'auto' | 'google-free' | 'mymemory' | 'libre' | 'microsoft' | 'openai' | 'qwen' | 'glm';
 +export type CaishengTranslationSettings = Readonly<{
-+  provider: CaishengTranslationProvider;
-+  apiKey: string;
-+  targetLanguage: string;
-+  openAIModel: string;
-+  autoTranslateIncoming: boolean;
++  provider: CaishengTranslationProvider; apiKey: string; targetLanguage: string;
++  openAIModel: string; autoTranslateIncoming: boolean; libreEndpoint: string;
++  microsoftRegion: string; compatibleEndpoint: string; timeoutMs: number;
 +}>;
 +
 +const SETTINGS_KEY = 'caisheng.translation.settings.v1';
-+
++const CACHE_LIMIT = 300;
++const translationCache = new Map<string, string>();
 +const DEFAULT_SETTINGS: CaishengTranslationSettings = {
-+  provider: 'openai',
-+  apiKey: '',
-+  targetLanguage: 'zh-CN',
-+  openAIModel: 'gpt-4.1-mini',
-+  autoTranslateIncoming: true,
++  provider: 'auto', apiKey: '', targetLanguage: 'zh-CN', openAIModel: 'gpt-4.1-mini',
++  autoTranslateIncoming: true, libreEndpoint: '', microsoftRegion: '', compatibleEndpoint: '', timeoutMs: 10000,
 +};
 +
 +export function getCaishengTargetLanguage(text: string): 'en' | 'zh-CN' {
 +  return /[\u3400-\u9fff]/u.test(text) ? 'en' : 'zh-CN';
 +}
-+
 +export function loadCaishengTranslationSettings(): CaishengTranslationSettings {
 +  try {
 +    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
++    if (saved.provider === 'google') saved.provider = 'auto';
 +    return { ...DEFAULT_SETTINGS, ...saved };
-+  } catch {
-+    return DEFAULT_SETTINGS;
-+  }
++  } catch { return DEFAULT_SETTINGS; }
 +}
-+
-+export function saveCaishengTranslationSettings(
-+  settings: CaishengTranslationSettings
-+): void {
++export function saveCaishengTranslationSettings(settings: CaishengTranslationSettings): void {
 +  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 +}
-+
-+async function translateWithOpenAI(
-+  text: string,
-+  settings: CaishengTranslationSettings
-+): Promise<string> {
-+  const response = await fetch('https://api.openai.com/v1/responses', {
-+    method: 'POST',
-+    headers: {
-+      Authorization: `Bearer ${settings.apiKey}`,
-+      'Content-Type': 'application/json',
-+    },
-+    body: JSON.stringify({
-+      model: settings.openAIModel,
-+      instructions: [
-+        'You are a precision business-chat translator.',
-+        'Translate faithfully without adding explanations or omitting content.',
-+        'Preserve names, usernames, phone numbers, amounts, currencies, URLs, emojis, line breaks, and tone.',
-+        'Keep ambiguous wording ambiguous instead of guessing.',
-+        'Return only the translated text.',
-+      ].join(' '),
-+      input: `Target language: ${settings.targetLanguage}\n\n${text}`,
-+    }),
-+  });
-+
-+  if (!response.ok) {
-+    throw new Error(`OpenAI translation failed (${response.status})`);
-+  }
-+
-+  const data = await response.json();
-+  const output = data.output
-+    ?.flatMap(
-+      (item: { content?: Array<{ text?: string }> }) => item.content ?? []
-+    )
-+    .map((item: { text?: string }) => item.text ?? '')
-+    .join('')
-+    .trim();
-+  if (!output) {
-+    throw new Error('OpenAI returned an empty translation');
-+  }
-+  return output;
++export function getCaishengProviderOrder(settings: CaishengTranslationSettings): ReadonlyArray<CaishengTranslationProvider> {
++  if (settings.provider !== 'auto') return [settings.provider];
++  return settings.libreEndpoint.trim() ? ['google-free', 'mymemory', 'libre'] : ['google-free', 'mymemory'];
 +}
-+
-+async function translateWithGoogle(
-+  text: string,
-+  settings: CaishengTranslationSettings
-+): Promise<string> {
-+  const endpoint = new URL(
-+    'https://translation.googleapis.com/language/translate/v2'
-+  );
-+  endpoint.searchParams.set('key', settings.apiKey);
-+  const response = await fetch(endpoint, {
-+    method: 'POST',
-+    headers: { 'Content-Type': 'application/json' },
-+    body: JSON.stringify({ q: text, target: settings.targetLanguage }),
-+  });
-+  if (!response.ok) {
-+    throw new Error(`Google translation failed (${response.status})`);
-+  }
-+  const data = await response.json();
-+  const output = data.data?.translations?.[0]?.translatedText?.trim();
-+  if (!output) {
-+    throw new Error('Google returned an empty translation');
-+  }
-+  return output;
++function normalizeError(provider: string, reason: unknown): Error {
++  if (reason instanceof DOMException && reason.name === 'AbortError') return new Error(`${provider} 请求超时`);
++  const message = reason instanceof Error ? reason.message : String(reason);
++  return new Error(`${provider} 翻译失败：${message || '未知错误'}`);
 +}
-+
-+export async function translateCaishengText(
-+  text: string,
-+  settings: CaishengTranslationSettings
-+): Promise<string> {
-+  if (!text.trim()) {
-+    throw new Error('请输入要翻译的内容');
++async function requestJson(provider: string, url: string, init: RequestInit, timeoutMs: number) {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetch(url, { ...init, signal: controller.signal });
++    if (!response.ok) throw new Error(`HTTP ${response.status}`);
++    return await response.json();
++  } catch (reason) { throw normalizeError(provider, reason); }
++  finally { clearTimeout(timer); }
++}
++async function googleFree(text: string, target: string, timeout: number): Promise<string> {
++  const url = new URL('https://translate.googleapis.com/translate_a/single');
++  Object.entries({ client: 'gtx', sl: 'auto', tl: target, dt: 't', q: text }).forEach(([key, value]) => url.searchParams.set(key, value));
++  const data = await requestJson('Google', url.href, {}, timeout);
++  return (data?.[0] ?? []).map((part: unknown[]) => part?.[0] ?? '').join('').trim();
++}
++async function myMemory(text: string, target: string, timeout: number): Promise<string> {
++  const source = getCaishengTargetLanguage(text) === 'en' ? 'zh-CN' : 'en';
++  const url = new URL('https://api.mymemory.translated.net/get');
++  url.searchParams.set('q', text); url.searchParams.set('langpair', `${source}|${target}`);
++  const data = await requestJson('MyMemory', url.href, {}, timeout);
++  if (Number(data?.responseStatus ?? 200) >= 400) throw new Error(`MyMemory 翻译失败：${data.responseDetails || data.responseStatus}`);
++  return data?.responseData?.translatedText?.trim() ?? '';
++}
++async function libre(text: string, settings: CaishengTranslationSettings): Promise<string> {
++  if (!settings.libreEndpoint.trim()) throw new Error('LibreTranslate 未配置服务地址');
++  const data = await requestJson('LibreTranslate', `${settings.libreEndpoint.replace(/\/$/u, '')}/translate`, {
++    method: 'POST', headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ q: text, source: 'auto', target: settings.targetLanguage, ...(settings.apiKey ? { api_key: settings.apiKey } : {}) }),
++  }, settings.timeoutMs);
++  return data?.translatedText?.trim() ?? '';
++}
++async function microsoft(text: string, settings: CaishengTranslationSettings): Promise<string> {
++  if (!settings.apiKey.trim()) throw new Error('微软翻译需要配置 API Key');
++  const url = new URL('https://api.cognitive.microsofttranslator.com/translate');
++  url.searchParams.set('api-version', '3.0'); url.searchParams.set('to', settings.targetLanguage);
++  const data = await requestJson('微软', url.href, {
++    method: 'POST', headers: { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': settings.apiKey,
++      ...(settings.microsoftRegion ? { 'Ocp-Apim-Subscription-Region': settings.microsoftRegion } : {}) },
++    body: JSON.stringify([{ Text: text }]),
++  }, settings.timeoutMs);
++  return data?.[0]?.translations?.[0]?.text?.trim() ?? '';
++}
++async function compatibleAI(text: string, settings: CaishengTranslationSettings, provider: 'openai' | 'qwen' | 'glm'): Promise<string> {
++  if (!settings.apiKey.trim()) throw new Error(`${provider.toUpperCase()} 需要配置 API Key`);
++  const base = settings.compatibleEndpoint.trim() || (provider === 'openai' ? 'https://api.openai.com/v1' : '');
++  if (!base) throw new Error(`${provider.toUpperCase()} 需要配置兼容 API 地址`);
++  const defaults = { openai: 'gpt-4.1-mini', qwen: 'Qwen3-8B', glm: 'GLM-4-9B' };
++  const data = await requestJson(provider.toUpperCase(), `${base.replace(/\/$/u, '')}/chat/completions`, {
++    method: 'POST', headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json' },
++    body: JSON.stringify({ model: settings.openAIModel || defaults[provider], temperature: 0, messages: [
++      { role: 'system', content: 'Translate faithfully. Preserve names, numbers, URLs, emojis, line breaks and tone. Return only the translation.' },
++      { role: 'user', content: `Target language: ${settings.targetLanguage}\n\n${text}` },
++    ] }),
++  }, settings.timeoutMs);
++  return data?.choices?.[0]?.message?.content?.trim() ?? '';
++}
++async function withProvider(text: string, settings: CaishengTranslationSettings, provider: CaishengTranslationProvider): Promise<string> {
++  if (provider === 'google-free') return googleFree(text, settings.targetLanguage, settings.timeoutMs);
++  if (provider === 'mymemory') return myMemory(text, settings.targetLanguage, settings.timeoutMs);
++  if (provider === 'libre') return libre(text, settings);
++  if (provider === 'microsoft') return microsoft(text, settings);
++  if (provider === 'openai' || provider === 'qwen' || provider === 'glm') return compatibleAI(text, settings, provider);
++  throw new Error('不支持的翻译服务');
++}
++export async function translateCaishengText(text: string, settings: CaishengTranslationSettings): Promise<string> {
++  if (!text.trim()) throw new Error('请输入要翻译的内容');
++  const key = `${settings.provider}\u0000${settings.targetLanguage}\u0000${text}`;
++  const cached = translationCache.get(key); if (cached) return cached;
++  const errors: string[] = [];
++  for (const provider of getCaishengProviderOrder(settings)) {
++    try {
++      const output = await withProvider(text, settings, provider);
++      if (!output) throw new Error('返回内容为空');
++      translationCache.set(key, output);
++      if (translationCache.size > CACHE_LIMIT) translationCache.delete(translationCache.keys().next().value as string);
++      return output;
++    } catch (reason) { errors.push(reason instanceof Error ? reason.message : String(reason)); }
 +  }
-+  if (!settings.apiKey.trim()) {
-+    throw new Error('请先填写翻译 API Key');
-+  }
-+  return settings.provider === 'google'
-+    ? translateWithGoogle(text, settings)
-+    : translateWithOpenAI(text, settings);
++  throw new Error(errors.join('；'));
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
 --- a/ts/state/roots/createApp.preload.tsx	2026-09-03 11:53:55.000000000 -0500
@@ -1056,16 +1639,100 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.p
        </SmartVoiceNotesPlaybackProvider>
      </Provider>
    </AppProvider>
-diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
---- a/ts/test-node/services/caishengTranslation_test.node.ts	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/test-node/services/caishengTranslation_test.node.ts	2026-09-04 16:00:18.479161171 -0500
-@@ -0,0 +1,21 @@
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/caishengComposer_test.node.ts b/ts/test-node/services/caishengComposer_test.node.ts
+--- a/ts/test-node/services/caishengComposer_test.node.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/test-node/services/caishengComposer_test.node.ts	2026-09-04 20:10:00.585911118 -0500
+@@ -0,0 +1,27 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
 +import { assert } from 'chai';
 +
-+import { getCaishengTargetLanguage } from '../../services/caishengTranslation.dom.ts';
++import { getCaishengTripleSpaceAction } from '../../services/caishengComposer.std.ts';
++
++describe('Caisheng triple-space shortcut', () => {
++  it('triggers before the third space is inserted', () => {
++    assert.deepEqual(getCaishengTripleSpaceAction('hello  '), {
++      shouldTranslate: true,
++      sourceText: 'hello',
++    });
++  });
++
++  it('does not trigger for fewer than two trailing spaces', () => {
++    assert.isFalse(getCaishengTripleSpaceAction('hello ').shouldTranslate);
++    assert.isFalse(getCaishengTripleSpaceAction('hello').shouldTranslate);
++  });
++
++  it('does not translate an empty composer', () => {
++    assert.deepEqual(getCaishengTripleSpaceAction('  '), {
++      shouldTranslate: false,
++      sourceText: '',
++    });
++  });
++});
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/caishengPlatform_test.node.ts b/ts/test-node/services/caishengPlatform_test.node.ts
+--- a/ts/test-node/services/caishengPlatform_test.node.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/test-node/services/caishengPlatform_test.node.ts	2026-09-04 20:09:59.465883972 -0500
+@@ -0,0 +1,45 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { assert } from 'chai';
++
++import {
++  getCaishengPlatforms,
++  getDefaultCaishengPlatform,
++  getEnabledCaishengPlatforms,
++} from '../../services/caishengPlatform.std.ts';
++
++describe('Caisheng platform permissions', () => {
++  it('only enables platforms granted to the user', () => {
++    const platforms = getCaishengPlatforms({
++      signalEnabled: false,
++      whatsappEnabled: true,
++      telegramEnabled: false,
++    });
++
++    assert.deepEqual(
++      getEnabledCaishengPlatforms(platforms).map(item => item.id),
++      ['whatsapp']
++    );
++  });
++
++  it('selects the first enabled platform as the default', () => {
++    const platforms = getCaishengPlatforms({
++      signalEnabled: false,
++      whatsappEnabled: true,
++      telegramEnabled: true,
++    });
++
++    assert.equal(getDefaultCaishengPlatform(platforms), 'whatsapp');
++  });
++
++  it('has no default when the user has no platform permission', () => {
++    const platforms = getCaishengPlatforms({
++      signalEnabled: false,
++      whatsappEnabled: false,
++      telegramEnabled: false,
++    });
++
++    assert.isUndefined(getDefaultCaishengPlatform(platforms));
++  });
++});
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
+--- a/ts/test-node/services/caishengTranslation_test.node.ts	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/test-node/services/caishengTranslation_test.node.ts	2026-09-04 20:13:14.398878411 -0500
+@@ -0,0 +1,36 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { assert } from 'chai';
++
++import {
++  getCaishengProviderOrder,
++  getCaishengTargetLanguage,
++  type CaishengTranslationSettings,
++} from '../../services/caishengTranslation.dom.ts';
 +
 +describe('Caisheng translation', () => {
 +  it('translates Chinese messages to English', () => {
@@ -1080,4 +1747,49 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/cais
 +  it('handles mixed text as Chinese input', () => {
 +    assert.equal(getCaishengTargetLanguage('Signal 消息'), 'en');
 +  });
++
++  it('uses free providers in deterministic fallback order', () => {
++    const settings = { provider: 'auto', libreEndpoint: '' } as CaishengTranslationSettings;
++    assert.deepEqual(getCaishengProviderOrder(settings), ['google-free', 'mymemory']);
++    assert.deepEqual(getCaishengProviderOrder({ ...settings, libreEndpoint: 'https://libre.example' }), ['google-free', 'mymemory', 'libre']);
++  });
++
++  it('does not fall back when a provider is explicitly selected', () => {
++    const settings = { provider: 'microsoft' } as CaishengTranslationSettings;
++    assert.deepEqual(getCaishengProviderOrder(settings), ['microsoft']);
++  });
 +});
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/windows/context.preload.ts b/ts/windows/context.preload.ts
+--- a/ts/windows/context.preload.ts	2026-09-03 11:53:55.000000000 -0500
++++ b/ts/windows/context.preload.ts	2026-09-04 20:08:57.608214954 -0500
+@@ -25,6 +25,10 @@
+ import type { LocaleEmojiListType } from '../types/emoji.std.ts';
+ import { LocaleEmojiListSchema } from '../types/emoji.std.ts';
+ import type { HourCyclePreference } from '../types/I18N.std.ts';
++import type {
++  CaishengLoginCredentials,
++  CaishengLoginIpcResult,
++} from '../services/caishengAuth.std.ts';
+ import { MinimalSignalContext } from './minimalContext.preload.ts';
+ 
+ export type MainWindowStatsType = Readonly<{
+@@ -76,6 +80,9 @@
+   timers: Timers;
+   Emojify: typeof Emojify;
+   getLocalizedEmojiList: (locale: string) => Promise<LocaleEmojiListType>;
++  caishengLogin: (
++    credentials: CaishengLoginCredentials
++  ) => Promise<CaishengLoginIpcResult>;
+ } & MinimalSignalContextType;
+ 
+ const emojiListCache = new Map<string, LocaleEmojiListType>();
+@@ -90,6 +97,9 @@
+   },
+   timers: new Timers(),
+   Emojify,
++  caishengLogin(credentials) {
++    return ipcRenderer.invoke('caisheng:login', credentials);
++  },
+   async getLocalizedEmojiList(locale: string) {
+     const cached = emojiListCache.get(locale);
+     if (cached) {
