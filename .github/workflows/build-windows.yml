@@ -34,6 +34,8 @@ jobs:
           cd signal
           git apply --check ../patches/caisheng-signal.patch
           git apply ../patches/caisheng-signal.patch
+          git apply --check ../patches/caisheng-shell-ui.patch
+          git apply ../patches/caisheng-shell-ui.patch
 
       - name: Apply Caisheng Windows identity
         shell: python
