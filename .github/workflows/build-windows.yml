@@ -38,8 +38,7 @@ jobs:
           git apply ../patches/caisheng-shell-ui.patch
           git apply --check ../patches/caisheng-release-fix.patch
           git apply ../patches/caisheng-release-fix.patch
-          git apply --check ../patches/caisheng-platform-v2.patch
-          git apply ../patches/caisheng-platform-v2.patch
+          cp -R ../overlays/platform-v2/. .
 
       - name: Apply Caisheng Windows identity
         shell: python
