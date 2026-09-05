@@ -80,11 +80,73 @@ index ba15cd2..dc3bf8f 100644
      translated = body?.choices?.[0]?.message?.content?.trim() ?? '';
    } else throw new Error('不支持的翻译服务');
    if (!translated) throw new Error('翻译服务未返回结果');
+diff --git a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
+index 799d809..4ee94cb 100644
+--- a/ts/state/roots/createApp.preload.tsx
++++ b/ts/state/roots/createApp.preload.tsx
+@@ -9,16 +9,13 @@ import type { Store } from 'redux';
+ import { SmartApp } from '../smart/App.preload.tsx';
+ import { SmartVoiceNotesPlaybackProvider } from '../smart/VoiceNotesPlaybackProvider.preload.tsx';
+ import { AppProvider } from '../../windows/AppProvider.dom.tsx';
+-import { CaishengAuthGate } from '../../components/CaishengAuthGate.dom.tsx';
+ import { CaishengPlatformShell } from '../../components/CaishengPlatformShell.dom.tsx';
+ 
+ export const createApp = (store: Store): ReactElement => (
+   <AppProvider>
+     <Provider store={store}>
+       <SmartVoiceNotesPlaybackProvider>
+-        <CaishengAuthGate>
+-          <CaishengPlatformShell signal={<SmartApp />} />
+-        </CaishengAuthGate>
++        <CaishengPlatformShell signal={<SmartApp />} />
+       </SmartVoiceNotesPlaybackProvider>
+     </Provider>
+   </AppProvider>
 diff --git a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
-index 6e17e79..93942b9 100644
+index 6e17e79..ffbe6c4 100644
 --- a/ts/components/CaishengPlatformShell.dom.tsx
 +++ b/ts/components/CaishengPlatformShell.dom.tsx
-@@ -227,7 +227,10 @@ export function CaishengPlatformShell({
+@@ -11,7 +11,6 @@ import {
+   type MouseEvent,
+   type ReactNode,
+ } from "react";
+-import { useCaishengAuth } from "./CaishengAuthGate.dom.tsx";
+ import {
+   getCaishengPlatformAdapter,
+   type CaishengPlatformId,
+@@ -49,13 +48,8 @@ function loadEfficiencyMode(): boolean {
+ }
+ function allowed(
+   id: CaishengPlatformId,
+-  user: ReturnType<typeof useCaishengAuth>["user"],
+ ): boolean {
+-  return id === "signal"
+-    ? user.signalEnabled
+-    : id === "whatsapp"
+-      ? user.whatsappEnabled
+-      : user.telegramEnabled;
++  return id === "signal" || id === "whatsapp" || id === "telegram";
+ }
+ function load(): ReadonlyArray<CaishengWorkspace> {
+   try {
+@@ -87,7 +81,6 @@ function load(): ReadonlyArray<CaishengWorkspace> {
+ export function CaishengPlatformShell({
+   signal,
+ }: Readonly<{ signal: ReactNode }>): JSX.Element {
+-  const { user } = useCaishengAuth();
+   const [items, setItemsState] = useState(load);
+   const [active, setActive] = useState("signal-main");
+   const [adding, setAdding] = useState(false);
+@@ -137,7 +130,7 @@ export function CaishengPlatformShell({
+       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+     );
+   function add(platformId: "whatsapp" | "telegram"): void {
+-    if (!allowed(platformId, user)) return;
++    if (!allowed(platformId)) return;
+     const id = createCaishengWorkspaceId(
+       platformId,
+       crypto.randomUUID().replaceAll("-", ""),
+@@ -227,10 +220,13 @@ export function CaishengPlatformShell({
        }}
      >
        <nav className="CaishengPlatformShell__nav" aria-label="财盛多账号工作台">
@@ -95,8 +157,12 @@ index 6e17e79..93942b9 100644
 +        </div>
          <div className="CaishengPlatformShell__tabs">
            {items
-             .filter((item) => allowed(item.platformId, user))
-@@ -260,6 +263,7 @@ export function CaishengPlatformShell({
+-            .filter((item) => allowed(item.platformId, user))
++            .filter((item) => allowed(item.platformId))
+             .map((item) => (
+               <button
+                 aria-pressed={active === item.id}
+@@ -260,6 +256,7 @@ export function CaishengPlatformShell({
                  )}
                  <span className="CaishengPlatformShell__tabLabel">
                    {item.label}
@@ -104,7 +170,7 @@ index 6e17e79..93942b9 100644
                  </span>
                </button>
              ))}
-@@ -276,7 +280,7 @@ export function CaishengPlatformShell({
+@@ -276,7 +273,7 @@ export function CaishengPlatformShell({
            }}
            type="button"
          >
@@ -113,7 +179,7 @@ index 6e17e79..93942b9 100644
          </button>
          <button
            aria-expanded={showSettings}
-@@ -288,7 +292,7 @@ export function CaishengPlatformShell({
+@@ -288,7 +285,7 @@ export function CaishengPlatformShell({
            }}
            type="button"
          >
@@ -122,6 +188,15 @@ index 6e17e79..93942b9 100644
          </button>
          {adding ? (
            <div
+@@ -402,7 +399,7 @@ export function CaishengPlatformShell({
+         {items
+           .filter(
+             (item) =>
+-              item.platformId !== "signal" && allowed(item.platformId, user),
++              item.platformId !== "signal" && allowed(item.platformId),
+           )
+           .map((item) => {
+             const adapter = getCaishengPlatformAdapter(item.platformId);
 diff --git a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
 index 73b06e8..ea6d83e 100644
 --- a/ts/components/CaishengComposerTranslator.dom.tsx
