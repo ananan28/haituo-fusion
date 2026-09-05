@@ -25,6 +25,8 @@ jobs:
         run: |
           cat fusion/source.part-* > caisheng-onechat-source.zip
           powershell -NoProfile -Command "Expand-Archive -Path caisheng-onechat-source.zip -DestinationPath app -Force"
+          git -C app init
+          git -C app remote add origin https://github.com/ananan28/WS-.git
           git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git app/recipes
       - name: Restore upstream UI module
         shell: bash
