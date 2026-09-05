@@ -603,7 +603,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
 --- a/stylesheets/components/CaishengPlatformShell.scss	1969-12-31 18:00:00.000000000 -0600
 +++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 20:11:48.816711581 -0500
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,84 @@
 +.CaishengPlatformShell {
 +  display: flex;
 +  flex-direction: column;
@@ -1079,7 +1079,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
 --- a/ts/components/CaishengPlatformShell.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-05 02:45:00.000000000 -0500
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,119 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
