@@ -603,7 +603,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
 --- a/stylesheets/components/CaishengPlatformShell.scss	1969-12-31 18:00:00.000000000 -0600
 +++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 20:11:48.816711581 -0500
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,102 @@
 +.CaishengPlatformShell {
 +  display: flex;
 +  flex-direction: column;
@@ -655,7 +655,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 +    font-size: 22px;
 +    margin-left: auto;
 +  }
-
++
 +  &__picker {
 +    background: #fff;
 +    border: 1px solid #cbd5e1;
