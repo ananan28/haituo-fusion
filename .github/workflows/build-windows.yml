@@ -118,15 +118,16 @@ jobs:
               '# Start the updated Caisheng platform in the tray.',
           )
           installer.write_text(installer_text, encoding='utf-8')
+          strings = [
+              '# Copyright 2026 Caisheng Group',
+              '# SPDX-License-Identifier: AGPL-3.0-only',
+              'LangString caishengMinWinVersionErr 1033 "Caisheng MultiChat cannot run on this computer. Please update Windows and try again."',
+              'LangString caishengMinAppVersionErr 1033 "A newer version of Caisheng MultiChat is already installed. Do you want to continue?"',
+              'LangString caishengMinWinVersionErr 2052 "财盛聚合聊天无法在此电脑上运行，请先更新 Windows 后重试。"',
+              'LangString caishengMinAppVersionErr 2052 "电脑中已经安装了更新版本的财盛聚合聊天，是否继续安装？"',
+          ]
           (root / 'build/CaishengStrings.nsh').write_text(
-              '''# Copyright 2026 Caisheng Group
-# SPDX-License-Identifier: AGPL-3.0-only
-LangString caishengMinWinVersionErr 1033 "Caisheng MultiChat cannot run on this computer. Please update Windows and try again."
-LangString caishengMinAppVersionErr 1033 "A newer version of Caisheng MultiChat is already installed. Do you want to continue?"
-LangString caishengMinWinVersionErr 2052 "财盛聚合聊天无法在此电脑上运行，请先更新 Windows 后重试。"
-LangString caishengMinAppVersionErr 2052 "电脑中已经安装了更新版本的财盛聚合聊天，是否继续安装？"
-''',
-              encoding='utf-8',
+              '\n'.join(strings) + '\n', encoding='utf-8'
           )
 
       - name: Setup Node.js
