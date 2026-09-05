@@ -1226,30 +1226,6 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlat
 +    </div>
 +  );
 +}
-diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
---- a/ts/components/CompositionArea.dom.tsx	2026-09-03 11:53:55.000000000 -0500
-+++ b/ts/components/CompositionArea.dom.tsx	2026-09-04 14:58:25.653077989 -0500
-@@ -91,6 +91,6 @@
- import type { ContactNameColorType } from '../types/Colors.std.ts';
- import type { Emoji } from '../axo/emoji.std.ts';
- import { AxoConfirmDialog } from '../axo/AxoConfirmDialog.dom.tsx';
- 
- export type OwnProps = Readonly<{
-   acceptedMessageRequest: boolean | null;
-@@ -379,6 +380,6 @@
-     }
-   }, [inputApiRef, setLarge]);
- 
-   const draftEditMessageBody = draftEditMessage?.body;
-   const editedMessageId = draftEditMessage?.targetMessageId;
- 
-@@ -1338,6 +1367,6 @@
-           </>
-         )}
-       </div>
-       {!isViewOnceActive && large ? (
-         <div
-           className={classNames(
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionInput.dom.tsx b/ts/components/CompositionInput.dom.tsx
 --- a/ts/components/CompositionInput.dom.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/components/CompositionInput.dom.tsx	2026-09-04 20:10:18.450366083 -0500
