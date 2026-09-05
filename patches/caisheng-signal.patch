@@ -1060,7 +1060,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
 --- a/ts/components/CaishengPlatformShell.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-04 20:11:47.660681874 -0500
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,85 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
@@ -1658,7 +1658,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengTransl
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
 --- a/ts/state/roots/createApp.preload.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/state/roots/createApp.preload.tsx	2026-09-04 19:55:40.460028141 -0500
-@@ -9,12 +9,16 @@
+@@ -9,12 +9,13 @@
  import { SmartApp } from '../smart/App.preload.tsx';
  import { SmartVoiceNotesPlaybackProvider } from '../smart/VoiceNotesPlaybackProvider.preload.tsx';
  import { AppProvider } from '../../windows/AppProvider.dom.tsx';
