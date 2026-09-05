@@ -1,5 +1,5 @@
 diff --git a/app/main.main.ts b/app/main.main.ts
-index 5c23a6c..c64126c 100644
+index 5c23a6c..aae67ee 100644
 --- a/app/main.main.ts
 +++ b/app/main.main.ts
 @@ -390,19 +390,8 @@ async function getBackgroundColor(
@@ -34,6 +34,30 @@ index 5c23a6c..c64126c 100644
  
    mainWindow.webContents.on(
      "will-attach-webview",
+@@ -2654,8 +2646,9 @@ function setupMenu(options?: Partial<CreateTemplateOptionsType>) {
+     menuOptions,
+     getResolvedMessagesLocale().i18n,
+   );
+-  const menu = Menu.buildFromTemplate(template);
+-  Menu.setApplicationMenu(menu);
++  Menu.buildFromTemplate(template);
++  Menu.setApplicationMenu(null);
++  mainWindow?.setMenuBarVisibility(false);
+ 
+   mainWindow?.webContents.send("window:set-menu-options", {
+     development: menuOptions.development,
+@@ -2926,9 +2919,9 @@ ipc.on(
+ 
+ ipc.on(
+   "set-menu-bar-visibility",
+-  (_event: Electron.Event, visibility: boolean) => {
++  (_event: Electron.Event, _visibility: boolean) => {
+     if (mainWindow) {
+-      mainWindow.setMenuBarVisibility(visibility);
++      mainWindow.setMenuBarVisibility(false);
+     }
+   },
+ );
 diff --git a/app/caishengWebviewTranslation.main.ts b/app/caishengWebviewTranslation.main.ts
 index ba15cd2..dc3bf8f 100644
 --- a/app/caishengWebviewTranslation.main.ts
@@ -362,4 +386,3 @@ index 77479d8..d1d073a 100644
      ]);
    });
  });
-
