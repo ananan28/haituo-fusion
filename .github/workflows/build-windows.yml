@@ -47,6 +47,16 @@ jobs:
               "!DISABLE_SCREEN_SECURITY &&\n    (contentProtection ??",
               "false &&\n    (contentProtection ??",
           )
+          text = text.replace(
+              "ipc.once('ready-for-updates', readyForUpdates);",
+              "// Caisheng owns updates; Signal standalone updater is disabled.",
+          )
+          text = text.replace(
+              "setTimeout(readyForUpdates, TEN_MINUTES);",
+              "// Signal standalone update timer disabled.",
+          )
+          assert "ipc.once('ready-for-updates', readyForUpdates);" not in text
+          assert "setContentProtection(true)" in text
           main.write_text(text, encoding="utf-8")
 
           bridge = Path("signal/app/caishengWebviewTranslation.main.ts")
@@ -55,6 +65,7 @@ jobs:
               "if (!ALLOWED_HOSTS.has(hostname)) {",
               "if (!ALLOWED_HOSTS.has(hostname) && !url.startsWith('file:')) {",
           )
+          assert "url.startsWith('file:')" in text
           bridge.write_text(text, encoding="utf-8")
 
           context = Path("signal/ts/windows/context.preload.ts")
@@ -74,6 +85,7 @@ jobs:
           needle = "  if (!text.trim()) throw new Error('请输入要翻译的内容');"
           replacement = needle + "\n  if (settings.provider === 'auto' || settings.provider === 'google-free' || settings.provider === 'mymemory') {\n    const result = await window.SignalContext.caishengTranslate(text, settings.targetLanguage);\n    return result.text;\n  }"
           text = text.replace(needle, replacement)
+          assert "window.SignalContext.caishengTranslate" in text
           translation.write_text(text, encoding="utf-8")
 
       - name: Setup Node.js
