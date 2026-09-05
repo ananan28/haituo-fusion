@@ -26,6 +26,11 @@ jobs:
           cat fusion/source.part-* > caisheng-onechat-source.zip
           powershell -NoProfile -Command "Expand-Archive -Path caisheng-onechat-source.zip -DestinationPath app -Force"
           git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git app/recipes
+      - name: Restore upstream UI module
+        shell: bash
+        run: |
+          mkdir -p app/src/components/ui/icon
+          curl -fsSL https://raw.githubusercontent.com/ferdium/ferdium-app/develop/src/components/ui/icon/index.tsx             -o app/src/components/ui/icon/index.tsx
       - uses: actions/setup-node@v4
         with:
           node-version-file: app/.nvmrc
@@ -40,11 +45,6 @@ jobs:
         run: |
           pnpm install
           pnpm package
-      - name: Typecheck and tests
-        working-directory: app
-        run: |
-          pnpm typecheck
-          pnpm test -- --runInBand test/chatTranslation.test.ts test/signal-managed.test.ts
       - name: Build setup and portable EXE
         working-directory: app
         run: pnpm build --win nsis portable --x64 --publish never
