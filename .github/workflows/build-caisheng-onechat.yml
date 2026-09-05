@@ -23,12 +23,9 @@ jobs:
       - name: Checkout aggregation framework
         shell: bash
         run: |
-          git clone https://github.com/ferdium/ferdium-app.git app
-          cd app
-          git checkout eae0848a32b963ea95e567c0dd4e263e81efe0ac
-          git apply -p2 ../fusion/caisheng-onechat.patch
-          git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git recipes
-          cp ../assets/windows/caisheng.ico build-helpers/images/caisheng.ico
+          cat fusion/source.part-* > caisheng-onechat-source.zip
+          powershell -NoProfile -Command "Expand-Archive -Path caisheng-onechat-source.zip -DestinationPath app -Force"
+          git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git app/recipes
       - uses: actions/setup-node@v4
         with:
           node-version-file: app/.nvmrc
