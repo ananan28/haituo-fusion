@@ -94,7 +94,6 @@ import {
 import {
   getDefaultSystemTraySetting,
   isSystemTraySupported,
-  isContentProtectionEnabledByDefault,
 } from "../ts/types/Settings.std.ts";
 import * as ephemeralConfig from "./ephemeral_config.main.ts";
 import * as mainProcessLogging from "../ts/logging/main_process_logging.main.ts";

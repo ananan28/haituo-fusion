@@ -38,6 +38,7 @@ const partitions = [wa1, wa2, tg1, signal1, signal2].map(account =>
 assert.equal(new Set(partitions).size, partitions.length);
 for (const [index, partition] of partitions.entries()) {
   const account = [wa1, wa2, tg1, signal1, signal2][index];
+  assert(account);
   assert.deepEqual(parseCaishengWorkspacePartition(partition), {
     platformId: account.platformId,
     workspaceId: account.id,
