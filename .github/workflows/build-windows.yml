@@ -38,6 +38,8 @@ jobs:
           git apply ../patches/caisheng-shell-ui.patch
           git apply --check ../patches/caisheng-release-fix.patch
           git apply ../patches/caisheng-release-fix.patch
+          git apply --check ../patches/caisheng-platform-v2.patch
+          git apply ../patches/caisheng-platform-v2.patch
 
       - name: Apply Caisheng Windows identity
         shell: python
@@ -170,7 +172,10 @@ jobs:
       - name: Run Caisheng tests
         shell: bash
         working-directory: signal
-        run: pnpm run test-node -- --grep "Caisheng translation"
+        run: |
+          node --no-warnings scripts/chatlite/shell-test.mts
+          node --no-warnings scripts/chatlite/platform-isolation-test.mts
+          pnpm run check:types
 
       - name: Build branded installer and portable app
         shell: bash
