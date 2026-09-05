@@ -1,0 +1,1742 @@
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/build-helpers/images/caisheng.svg fusion_work/onechat-main/build-helpers/images/caisheng.svg
+--- fusion_base/onechat-main/build-helpers/images/caisheng.svg	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/build-helpers/images/caisheng.svg	2026-09-06 01:24:19.212282220 +0900
+@@ -0,0 +1,6 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
++  <defs><linearGradient id="b" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#176BFF"/><stop offset="1" stop-color="#083A9B"/></linearGradient></defs>
++  <rect x="20" y="20" width="472" height="472" rx="112" fill="url(#b)"/>
++  <path d="M128 139h256c27 0 49 22 49 49v151c0 27-22 49-49 49H263l-76 63v-63h-59c-27 0-49-22-49-49V188c0-27 22-49 49-49Z" fill="#fff"/>
++  <path d="M177 303c-30-30-31-78-2-109 27-29 72-32 103-8l-29 35c-13-10-32-9-43 3-13 14-12 36 2 49 12 12 31 13 44 3l28 36c-31 24-75 20-103-9Zm157-117c20 0 38 7 52 20l-30 34c-7-6-14-9-22-9-8 0-13 3-13 8 0 6 8 9 24 14 28 9 47 23 47 51 0 31-25 51-61 51-26 0-50-9-67-26l30-34c11 10 24 16 37 16 9 0 15-3 15-9 0-7-8-10-25-15-28-9-45-23-45-49 0-31 25-52 58-52Z" fill="#1257CE"/>
++</svg>
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/electron-builder.yml fusion_work/onechat-main/electron-builder.yml
+--- fusion_base/onechat-main/electron-builder.yml	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/electron-builder.yml	2026-09-06 01:24:58.853407421 +0900
+@@ -2,7 +2,8 @@
+   app: ./build
+   output: ./out
+ 
+-appId: "org.ferdium.ferdium-app"
++appId: "com.caisheng.multichat"
++productName: "财盛聚合聊天"
+ 
+ publish:
+   provider: github
+@@ -15,17 +16,21 @@
+   hooks: ./build-helpers/snap-hooks
+   publish:
+     provider: snapStore
+-  description: 'Ferdium is your cross-platform messaging app / former heir to the throne of Austria-Hungary which brings your chat & messaging services together into one application. For enabling webcam access you need to connect "camera" plug to snap, and for microphone with PulseAudio the "audio-record" plug. This can be done in Snap GUI or via command: `snap connect ferdium:camera; snap connect ferdium:audio-record`.'
++  description: '财盛聚合聊天将 Signal、WhatsApp、Telegram 等服务集中在一个多账号桌面客户端中。'
+ 
+ nsis:
+   perMachine: false
+   oneClick: false
+   allowToChangeInstallationDirectory: true
+-  artifactName: "${productName}-${os}-AutoSetup-${version}-${arch}.${ext}"
++  createDesktopShortcut: always
++  createStartMenuShortcut: true
++  shortcutName: "财盛聚合聊天"
++  runAfterFinish: true
++  artifactName: "Caisheng-MultiChat-Windows-${arch}-Setup-${version}.${ext}"
+ 
+ portable:
+-  artifactName: "${productName}-${os}-Portable-${version}-${arch}.${ext}"
+-  unpackDirName: "Ferdium-Unpacked"
++  artifactName: "Caisheng-MultiChat-Windows-${arch}-Portable-${version}.${ext}"
++  unpackDirName: "Caisheng-MultiChat"
+ 
+ dmg:
+   background: ./build-helpers/images/dmgInstaller.tiff
+@@ -53,8 +58,8 @@
+ afterSign: ./build-helpers/notarize.js
+ 
+ protocols:
+-  name: Ferdium
+-  schemes: [ferdium]
++  name: Caisheng MultiChat
++  schemes: [caisheng]
+ 
+ asarUnpack:
+   - ./recipes
+@@ -83,24 +88,22 @@
+     NSFocusStatusUsageDescription: "This app requires focus access for DND functionality"
+ 
+ win:
+-  artifactName: "${productName}-${os}-Installer-${version}-${arch}.${ext}"
+-  icon: ./build-helpers/images/icon.ico
++  executableName: "Caisheng-MultiChat"
++  icon: ./build-helpers/images/caisheng.ico
+   target:
+     - target: nsis
+-      arch: [x64, ia32, arm64]
++      arch: [x64]
+     - target: portable
+-      arch: [x64, ia32, arm64]
+-  # The name of the CN appearing in the certificate must be present in the publisherName list below
+-  publisherName: ["Ferdium Contributors", "Ambroise Grau"]
++      arch: [x64]
+   # Remove the verification for a signature to allow auto-update without signed certificate
+   verifyUpdateCodeSignature: false
+ 
+ linux:
+   icon: ./build-helpers/images/icons
+   category: Network;InstantMessaging;
+-  executableName: ferdium
++  executableName: caisheng-chat
+   synopsis: "Messaging app for WhatsApp, Slack, Telegram, Gmail, Google Chat, and many more."
+-  # Note: Please keep the description as a single-line string, as this will become the Comment in the ferdium.desktop Linux launcher file, which requires a single line.
++  # Keep this on one line because it becomes the desktop launcher comment.
+   description: 'Desktop app bringing all your messaging services into one installable'
+   artifactName: "${productName}-${os}-${version}.${ext}"
+   target:
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/package.json fusion_work/onechat-main/package.json
+--- fusion_base/onechat-main/package.json	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/package.json	2026-09-06 01:24:57.849379032 +0900
+@@ -1,16 +1,14 @@
+ {
+-  "name": "ferdium",
+-  "productName": "Ferdium",
+-  "desktopName": "ferdium.desktop",
+-  "appId": "org.ferdium.ferdium-app",
++  "name": "caisheng-multichat",
++  "productName": "财盛聚合聊天",
++  "desktopName": "caisheng-multichat.desktop",
++  "appId": "com.caisheng.multichat",
+   "version": "7.1.3-nightly.3",
+-  "description": "Messaging app for WhatsApp, Slack, Telegram, Hangouts and many many more.",
+-  "author": "Ferdium Contributors <hello@ferdium.org> (https://ferdium.org/)",
++  "description": "财盛多账号聚合聊天桌面客户端。",
++  "author": "Caisheng",
+   "license": "Apache-2.0",
+-  "copyright": "org.ferdium",
++  "copyright": "Copyright © 2026 Caisheng",
+   "main": "index.js",
+-  "homepage": "https://github.com/ferdium/ferdium-app",
+-  "repository": "https://github.com/ferdium/ferdium-app.git",
+   "private": true,
+   "engines": {
+     "node": "22.18.0",
+@@ -47,7 +45,7 @@
+     "minify-images": "./scripts/minify-images.sh",
+     "start:server": "ts-node src/internal-server/test.ts",
+     "add-crowdin-contributors": "ts-node scripts/add-crowdin-contributors.ts",
+-    "debug": "cross-env-shell DEBUG_COLORS=1 DEBUG=Ferdium:* pnpm start:all-dev"
++    "debug": "cross-env-shell DEBUG_COLORS=1 DEBUG=Caisheng:* pnpm start:all-dev"
+   },
+   "dependencies": {
+     "@adonisjs/ace": "5.1.0",
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/app.tsx fusion_work/onechat-main/src/app.tsx
+--- fusion_base/onechat-main/src/app.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/app.tsx	2026-09-06 01:23:31.390922747 +0900
+@@ -12,6 +12,7 @@
+ import MenuFactory from './lib/Menu';
+ import TouchBarFactory from './lib/TouchBar';
+ import storeFactory from './stores';
++import serverlessLogin from './helpers/serverless-helpers';
+ 
+ import I18N from './I18n';
+ import FerdiumRoutes from './routes';
+@@ -50,6 +51,16 @@
+     },
+   };
+   window['ferdium'].render();
++
++  // There is deliberately no product-level account gate. The bundled local
++  // server supplies the token used by the existing stores and APIs, while the
++  // individual Signal/WhatsApp/Telegram webviews retain their own logins in
++  // isolated service partitions.
++  if (!stores.user.isLoggedIn) {
++    window.setTimeout(() => serverlessLogin(actions), 500);
++  } else if (history.location.pathname.startsWith('/auth')) {
++    history.replace('/');
++  }
+ });
+ 
+ // Prevent back and forward mouse events for the app itself (not inside the recipe)
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/components/layout/Sidebar.tsx fusion_work/onechat-main/src/components/layout/Sidebar.tsx
+--- fusion_base/onechat-main/src/components/layout/Sidebar.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/components/layout/Sidebar.tsx	2026-09-06 01:24:52.717233539 +0900
+@@ -42,7 +42,7 @@
+ const messages = defineMessages({
+   addNewService: {
+     id: 'sidebar.addNewService',
+-    defaultMessage: 'Add new service',
++    defaultMessage: '新增服务',
+   },
+   splitModeToggle: {
+     id: 'sidebar.splitModeToggle',
+@@ -74,7 +74,7 @@
+   },
+   lockFerdium: {
+     id: 'sidebar.lockFerdium',
+-    defaultMessage: 'Lock Ferdium',
++    defaultMessage: '锁定财盛聚合聊天',
+   },
+ });
+ 
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/components/services/content/ServiceWebview.tsx fusion_work/onechat-main/src/components/services/content/ServiceWebview.tsx
+--- fusion_base/onechat-main/src/components/services/content/ServiceWebview.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/components/services/content/ServiceWebview.tsx	2026-09-06 01:23:35.887050413 +0900
+@@ -40,7 +40,7 @@
+           });
+           this.webview.view.addEventListener('did-navigate', () => {
+             if (this.props.service._webview) {
+-              document.title = `Ferdium - ${this.props.service.name} ${
++              document.title = `财盛聚合聊天 - ${this.props.service.name} ${
+                 this.props.service.dialogTitle
+                   ? ` - ${this.props.service.dialogTitle}`
+                   : ''
+@@ -68,7 +68,7 @@
+       webview.view.blur();
+       webview.view.focus();
+       window.setTimeout(() => {
+-        document.title = `Ferdium - ${this.props.service.name} ${
++        document.title = `财盛聚合聊天 - ${this.props.service.name} ${
+           this.props.service.dialogTitle
+             ? ` - ${this.props.service.dialogTitle}`
+             : ''
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/components/services/content/Services.tsx fusion_work/onechat-main/src/components/services/content/Services.tsx
+--- fusion_base/onechat-main/src/components/services/content/Services.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/components/services/content/Services.tsx	2026-09-06 01:24:51.645203114 +0900
+@@ -16,7 +16,7 @@
+ const messages = defineMessages({
+   getStarted: {
+     id: 'services.getStarted',
+-    defaultMessage: 'Get started',
++    defaultMessage: '新增服务',
+   },
+   login: {
+     id: 'services.login',
+@@ -121,11 +121,7 @@
+         {services.length === 0 && (
+           <Appear transitionName="slideUp">
+             <div className="services__no-service">
+-              <img
+-                src="./assets/images/logo-beard-only.svg"
+-                alt="Logo"
+-                style={{ maxHeight: '50vh' }}
+-              />
++              <h1>财盛聚合聊天</h1>
+               <Appear transitionName="slideUp">
+                 <Link to="/settings/recipes" className="button">
+                   {intl.formatMessage(messages.getStarted)}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/components/services/tabs/TabItem.tsx fusion_work/onechat-main/src/components/services/tabs/TabItem.tsx
+--- fusion_base/onechat-main/src/components/services/tabs/TabItem.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/components/services/tabs/TabItem.tsx	2026-09-06 01:23:55.999622292 +0900
+@@ -28,7 +28,7 @@
+ const messages = defineMessages({
+   reload: {
+     id: 'tabs.item.reload',
+-    defaultMessage: 'Reload',
++    defaultMessage: '刷新',
+   },
+   disableNotifications: {
+     id: 'tabs.item.disableNotifications',
+@@ -56,11 +56,11 @@
+   },
+   disableService: {
+     id: 'tabs.item.disableService',
+-    defaultMessage: 'Disable service',
++    defaultMessage: '停用账号',
+   },
+   enableService: {
+     id: 'tabs.item.enableService',
+-    defaultMessage: 'Enable service',
++    defaultMessage: '启用账号',
+   },
+   hibernateService: {
+     id: 'tabs.item.hibernateService',
+@@ -72,12 +72,20 @@
+   },
+   deleteService: {
+     id: 'tabs.item.deleteService',
+-    defaultMessage: 'Delete service',
++    defaultMessage: '删除账号',
+   },
+   confirmDeleteService: {
+     id: 'tabs.item.confirmDeleteService',
+     defaultMessage: 'Do you really want to delete the {serviceName} service?',
+   },
++  editRemark: {
++    id: 'tabs.item.editRemark',
++    defaultMessage: '修改备注',
++  },
++  changeAvatar: {
++    id: 'tabs.item.changeAvatar',
++    defaultMessage: '更换头像',
++  },
+ });
+ 
+ let pollIndicatorTransition = 'none';
+@@ -274,7 +282,14 @@
+         enabled: service.isEnabled,
+       },
+       {
+-        label: intl.formatMessage(globalMessages.edit),
++        label: intl.formatMessage(messages.editRemark),
++        click: () =>
++          openSettings({
++            path: `services/edit/${service.id}`,
++          }),
++      },
++      {
++        label: intl.formatMessage(messages.changeAvatar),
+         click: () =>
+           openSettings({
+             path: `services/edit/${service.id}`,
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/components/settings/navigation/SettingsNavigation.tsx fusion_work/onechat-main/src/components/settings/navigation/SettingsNavigation.tsx
+--- fusion_base/onechat-main/src/components/settings/navigation/SettingsNavigation.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/components/settings/navigation/SettingsNavigation.tsx	2026-09-06 01:25:33.098378757 +0900
+@@ -8,7 +8,6 @@
+ import { NavLink } from 'react-router-dom';
+ import type { StoresProps } from '../../../@types/ferdium-components.types';
+ import {
+-  LIVE_FERDIUM_API,
+   LIVE_FRANZ_API,
+   LOCAL_SERVER,
+ } from '../../../config';
+@@ -17,11 +16,11 @@
+ const messages = defineMessages({
+   availableServices: {
+     id: 'settings.navigation.availableServices',
+-    defaultMessage: 'Available services',
++    defaultMessage: '新增服务',
+   },
+   yourServices: {
+     id: 'settings.navigation.yourServices',
+-    defaultMessage: 'Your services',
++    defaultMessage: '账号管理',
+   },
+   yourWorkspaces: {
+     id: 'settings.navigation.yourWorkspaces',
+@@ -41,15 +40,7 @@
+   },
+   supportFerdium: {
+     id: 'settings.navigation.supportFerdium',
+-    defaultMessage: 'About Ferdium',
+-  },
+-  logout: {
+-    id: 'settings.navigation.logout',
+-    defaultMessage: 'Logout',
+-  },
+-  exitSession: {
+-    id: 'settings.navigation.exitSession',
+-    defaultMessage: 'Exit session',
++    defaultMessage: '关于财盛聚合聊天',
+   },
+ });
+ 
+@@ -61,31 +52,6 @@
+ @inject('stores', 'actions')
+ @observer
+ class SettingsNavigation extends Component<IProps> {
+-  handleLogout(): void {
+-    const isUsingWithoutAccount =
+-      this.props.stores!.settings.app.server === LOCAL_SERVER;
+-
+-    // Remove current auth token
+-    localStorage.removeItem('authToken');
+-
+-    if (isUsingWithoutAccount) {
+-      // Reset server back to Ferdium API
+-      this.props.actions!.settings.update({
+-        type: 'app',
+-        data: {
+-          server: LIVE_FERDIUM_API,
+-        },
+-      });
+-    }
+-    this.props.stores!.user.isLoggingOut = true;
+-
+-    this.props.stores!.router.push('/auth/welcome');
+-
+-    // Reload Ferdium, otherwise many settings won't sync correctly with the server
+-    // after logging into another account
+-    window.location.reload();
+-  }
+-
+   render() {
+     const { serviceCount, workspaceCount, stores, intl } = this.props;
+     const isUsingWithoutAccount = stores!.settings.app.server === LOCAL_SERVER;
+@@ -188,17 +154,6 @@
+           {intl.formatMessage(messages.supportFerdium)}
+         </NavLink>
+         <span className="settings-navigation__expander" />
+-        <button
+-          type="button"
+-          // @ts-expect-error  Fix me
+-          to="/auth/logout" // TODO: [TS DEBT] Need to check if button take this prop
+-          className="settings-navigation__link"
+-          onClick={this.handleLogout.bind(this)}
+-        >
+-          {isUsingWithoutAccount
+-            ? intl.formatMessage(messages.exitSession)
+-            : intl.formatMessage(messages.logout)}
+-        </button>
+       </div>
+     );
+   }
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/config.ts fusion_work/onechat-main/src/config.ts
+--- fusion_base/onechat-main/src/config.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/config.ts	2026-09-06 01:23:30.386894238 +0900
+@@ -568,7 +568,9 @@
+   enableGlobalHideShortcut: false,
+ 
+   // Ferdium specific options
+-  server: LIVE_FERDIUM_API,
++  // Caisheng is a local-first desktop client. Account data never needs a
++  // Ferdium cloud account, so always bootstrap against the bundled server.
++  server: LOCAL_SERVER,
+   predefinedTodoServer: TODO_TODOIST_URL,
+   autohideMenuBar: false,
+   isLockingFeatureEnabled: false,
+@@ -600,7 +602,7 @@
+   searchEngine: SEARCH_ENGINE_STARTPAGE,
+   translatorLanguage: 'en',
+   translatorEngine: TRANSLATOR_ENGINE_LIBRETRANSLATE,
+-  useHorizontalStyle: false,
++  useHorizontalStyle: true,
+   hideCollapseButton: false,
+   isMenuCollapsed: false,
+   hideRecipesButton: false,
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/containers/layout/AppLayoutContainer.tsx fusion_work/onechat-main/src/containers/layout/AppLayoutContainer.tsx
+--- fusion_base/onechat-main/src/containers/layout/AppLayoutContainer.tsx	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/containers/layout/AppLayoutContainer.tsx	2026-09-06 01:23:32.442952621 +0900
+@@ -23,18 +23,9 @@
+ @observer
+ class AppLayoutContainer extends Component<IProps> {
+   render(): ReactElement {
+-    const { app, features, services, ui, settings, requests, user, router } =
++    const { app, features, services, ui, settings, requests, user } =
+       this.props.stores;
+ 
+-    /* HOTFIX for:
+-      [mobx] Encountered an uncaught exception that was thrown by a reaction or observer component, in: 'Reaction[bound ]' TypeError: Cannot read properties of null (reading 'push')
+-      at RouterStore.push (store.js:25)
+-      at UserStore._requireAuthenticatedUser
+-    */
+-    if (!user.isLoggedIn) {
+-      router.push('/auth/welcome');
+-    }
+-
+     const {
+       setActive,
+       // handleIPCMessage,
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/electron/chatTranslation.ts fusion_work/onechat-main/src/electron/chatTranslation.ts
+--- fusion_base/onechat-main/src/electron/chatTranslation.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/electron/chatTranslation.ts	2026-09-06 01:24:20.444317131 +0900
+@@ -0,0 +1,220 @@
++import { ipcMain } from 'electron';
++import Settings from './Settings';
++
++export type ChatTranslationProvider = 'auto' | 'openai' | 'google' | 'mymemory';
++
++export type ChatTranslationConfig = {
++  enabled: boolean;
++  incomingBilingual: boolean;
++  inputMode: 'normal' | 'efficiency';
++  sourceLanguage: string;
++  incomingTargetLanguage: string;
++  outgoingTargetLanguage: string;
++  provider: ChatTranslationProvider;
++  openAIBaseUrl: string;
++  openAIApiKey: string;
++  openAIModel: string;
++  timeoutMs: number;
++};
++
++export type ChatTranslationRequest = {
++  text: string;
++  targetLanguage?: string;
++  sourceLanguage?: string;
++  direction?: 'incoming' | 'outgoing';
++};
++
++export const DEFAULT_CHAT_TRANSLATION_CONFIG: ChatTranslationConfig = {
++  enabled: true,
++  incomingBilingual: true,
++  inputMode: 'normal',
++  sourceLanguage: 'auto',
++  incomingTargetLanguage: 'zh-CN',
++  outgoingTargetLanguage: 'en',
++  provider: 'auto',
++  openAIBaseUrl: 'https://api.openai.com/v1',
++  openAIApiKey: '',
++  openAIModel: 'gpt-4o-mini',
++  timeoutMs: 20_000,
++};
++
++type Fetch = typeof fetch;
++
++function cleanBaseUrl(url: string): string {
++  return url.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
++}
++
++function pickOpenAIText(payload: any): string | undefined {
++  const content = payload?.choices?.[0]?.message?.content;
++  if (typeof content === 'string') return content.trim();
++  if (Array.isArray(content)) {
++    const text = content
++      .filter(part => part?.type === 'text' && typeof part.text === 'string')
++      .map(part => part.text)
++      .join('');
++    return text.trim() || undefined;
++  }
++  return undefined;
++}
++
++async function requestJson(
++  url: string,
++  init: RequestInit,
++  timeoutMs: number,
++  fetchImpl: Fetch,
++): Promise<any> {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetchImpl(url, { ...init, signal: controller.signal });
++    const body = await response.text();
++    let payload: any;
++    try {
++      payload = JSON.parse(body);
++    } catch {
++      payload = body;
++    }
++    if (!response.ok) {
++      throw new Error(
++        payload?.error?.message || payload?.message || body || `${response.status} ${response.statusText}`,
++      );
++    }
++    return payload;
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
++async function translateOpenAI(
++  text: string,
++  source: string,
++  target: string,
++  config: ChatTranslationConfig,
++  fetchImpl: Fetch,
++): Promise<string> {
++  if (!config.openAIApiKey.trim()) throw new Error('OpenAI compatible API key is not configured');
++  const payload = await requestJson(
++    `${cleanBaseUrl(config.openAIBaseUrl)}/chat/completions`,
++    {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        Authorization: `Bearer ${config.openAIApiKey.trim()}`,
++      },
++      body: JSON.stringify({
++        model: config.openAIModel,
++        temperature: 0.1,
++        messages: [
++          {
++            role: 'system',
++            content: `You are an expert translator. Translate from ${source} to ${target}. Return only the translation, preserving line breaks, emoji, names and URLs.`,
++          },
++          { role: 'user', content: text },
++        ],
++      }),
++    },
++    config.timeoutMs,
++    fetchImpl,
++  );
++  const translated = pickOpenAIText(payload);
++  if (!translated) throw new Error('OpenAI compatible API returned no translation');
++  return translated;
++}
++
++async function translateGoogle(
++  text: string,
++  source: string,
++  target: string,
++  config: ChatTranslationConfig,
++  fetchImpl: Fetch,
++): Promise<string> {
++  const query = new URLSearchParams({ client: 'gtx', sl: source, tl: target, dt: 't', q: text });
++  const payload = await requestJson(
++    `https://translate.googleapis.com/translate_a/single?${query}`,
++    { method: 'GET' },
++    config.timeoutMs,
++    fetchImpl,
++  );
++  const translated = Array.isArray(payload?.[0])
++    ? payload[0].map((part: any[]) => part?.[0] || '').join('').trim()
++    : '';
++  if (!translated) throw new Error('Google returned no translation');
++  return translated;
++}
++
++async function translateMyMemory(
++  text: string,
++  source: string,
++  target: string,
++  config: ChatTranslationConfig,
++  fetchImpl: Fetch,
++): Promise<string> {
++  // MyMemory requires a concrete source language. "Autodetect" is its supported auto value.
++  const query = new URLSearchParams({ q: text, langpair: `${source === 'auto' ? 'Autodetect' : source}|${target}` });
++  const payload = await requestJson(
++    `https://api.mymemory.translated.net/get?${query}`,
++    { method: 'GET' },
++    config.timeoutMs,
++    fetchImpl,
++  );
++  const translated = payload?.responseData?.translatedText;
++  if (typeof translated !== 'string' || !translated.trim()) {
++    throw new Error(payload?.responseDetails || 'MyMemory returned no translation');
++  }
++  return translated.trim();
++}
++
++export async function translateChatText(
++  request: ChatTranslationRequest,
++  config: ChatTranslationConfig,
++  fetchImpl: Fetch = fetch,
++): Promise<{ text: string; provider: Exclude<ChatTranslationProvider, 'auto'> }> {
++  const text = request.text?.trim();
++  if (!text) throw new Error('请输入需要翻译的文字');
++  if (text.length > 10_000) throw new Error('单次翻译不能超过 10000 个字符');
++  const source = request.sourceLanguage || config.sourceLanguage || 'auto';
++  const target =
++    request.targetLanguage ||
++    (request.direction === 'outgoing'
++      ? config.outgoingTargetLanguage
++      : config.incomingTargetLanguage);
++  const providers: Array<Exclude<ChatTranslationProvider, 'auto'>> =
++    config.provider === 'auto'
++      ? config.openAIApiKey.trim()
++        ? ['openai', 'google', 'mymemory']
++        : ['google', 'mymemory']
++      : [config.provider];
++  const errors: string[] = [];
++  for (const provider of providers) {
++    try {
++      const result =
++        provider === 'openai'
++          ? await translateOpenAI(text, source, target, config, fetchImpl)
++          : provider === 'google'
++            ? await translateGoogle(text, source, target, config, fetchImpl)
++            : await translateMyMemory(text, source, target, config, fetchImpl);
++      return { text: result, provider };
++    } catch (error) {
++      errors.push(`${provider}: ${error instanceof Error ? error.message : String(error)}`);
++    }
++  }
++  throw new Error(`翻译失败（${errors.join('; ')}）`);
++}
++
++export default function registerChatTranslation(): void {
++  const store = new Settings('chat-translation', DEFAULT_CHAT_TRANSLATION_CONFIG);
++  ipcMain.handle('chat-translation:get-config', () => {
++    const config = store.allSerialized as ChatTranslationConfig;
++    return { ...config, openAIApiKey: config.openAIApiKey ? '********' : '' };
++  });
++  ipcMain.handle('chat-translation:set-config', (_event, patch: Partial<ChatTranslationConfig>) => {
++    const safePatch = { ...patch };
++    if (safePatch.openAIApiKey === '********') delete safePatch.openAIApiKey;
++    store.set(safePatch);
++    const config = store.allSerialized as ChatTranslationConfig;
++    return { ...config, openAIApiKey: config.openAIApiKey ? '********' : '' };
++  });
++  ipcMain.handle('chat-translation:translate', (_event, request: ChatTranslationRequest) =>
++    translateChatText(request, store.allSerialized as ChatTranslationConfig),
++  );
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/catalog.ts fusion_work/onechat-main/src/features/signal-managed/catalog.ts
+--- fusion_base/onechat-main/src/features/signal-managed/catalog.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/catalog.ts	2026-09-06 01:24:02.339802735 +0900
+@@ -0,0 +1,54 @@
++import { createHash } from 'node:crypto';
++import type { SignalAvatar, SignalConversation } from './types';
++
++const COLORS = ['#3b45fd', '#3f8cff', '#00a884', '#7b61ff', '#d95763', '#cc7a00'];
++
++function text(...values: unknown[]): string {
++  return values.find((value) => typeof value === 'string' && value.trim())?.toString().trim() ?? '';
++}
++
++export function signalAvatar(title: string, avatarPath?: string): SignalAvatar {
++  const digest = createHash('sha256').update(title).digest();
++  const words = title.trim().split(/\s+/).filter(Boolean);
++  const initials = words.length > 1
++    ? `${words[0][0]}${words.at(-1)?.[0] ?? ''}`
++    : (words[0]?.slice(0, 2) || '?');
++  return { path: avatarPath || undefined, color: COLORS[digest[0] % COLORS.length], initials: initials.toUpperCase() };
++}
++
++export function normalizeSignalContacts(raw: unknown): SignalConversation[] {
++  if (!Array.isArray(raw)) return [];
++  return raw.flatMap((contact: any) => {
++    const recipient = text(contact?.number, contact?.uuid, contact?.aci, contact?.username);
++    if (!recipient) return [];
++    const profileName = [contact?.profile?.givenName, contact?.profile?.familyName].filter(Boolean).join(' ');
++    const localName = [contact?.givenName, contact?.familyName].filter(Boolean).join(' ');
++    const title = text(contact?.name, contact?.nickName, localName, profileName, contact?.username, recipient);
++    const avatarPath = text(contact?.profile?.avatar, contact?.avatar, contact?.avatarPath);
++    return [{
++      id: `contact:${recipient}`,
++      kind: 'contact' as const,
++      title,
++      subtitle: contact?.username ? `@${contact.username} · ${recipient}` : recipient,
++      recipient,
++      avatar: signalAvatar(title, avatarPath),
++    }];
++  });
++}
++
++export function normalizeSignalGroups(raw: unknown): SignalConversation[] {
++  if (!Array.isArray(raw)) return [];
++  return raw.flatMap((group: any) => {
++    if (!group?.id || group?.isMember === false) return [];
++    const title = text(group.name, 'Signal 群组');
++    const avatarPath = text(group?.avatar, group?.avatarPath);
++    return [{
++      id: `group:${String(group.id)}`,
++      kind: 'group' as const,
++      title,
++      subtitle: `${Array.isArray(group.members) ? group.members.length : 0} 位成员`,
++      groupId: String(group.id),
++      avatar: signalAvatar(title, avatarPath),
++    }];
++  });
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/index.ts fusion_work/onechat-main/src/features/signal-managed/index.ts
+--- fusion_base/onechat-main/src/features/signal-managed/index.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/index.ts	2026-09-06 01:24:04.379860753 +0900
+@@ -0,0 +1,5 @@
++export * from './catalog';
++export * from './manager';
++export * from './profile-store';
++export * from './runtime';
++export * from './types';
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/manager.ts fusion_work/onechat-main/src/features/signal-managed/manager.ts
+--- fusion_base/onechat-main/src/features/signal-managed/manager.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/manager.ts	2026-09-06 01:25:25.978176807 +0900
+@@ -0,0 +1,185 @@
++import { spawn, type ChildProcess } from 'node:child_process';
++import { randomUUID } from 'node:crypto';
++import { EventEmitter } from 'node:events';
++import { SignalProfileStore } from './profile-store';
++import { signalDaemonArgs, signalRuntimeCommand } from './runtime';
++import type { SignalStatus } from './types';
++
++type ManagedProcess = {
++  child: ChildProcess;
++  status: SignalStatus;
++  abort: AbortController;
++};
++
++const RPC_METHODS = new Set(['listAccounts', 'listContacts', 'listGroups', 'send', 'sendSyncRequest']);
++
++export class ManagedSignalService extends EventEmitter {
++  private readonly processes = new Map<string, ManagedProcess>();
++
++  constructor(private readonly profiles: SignalProfileStore) {
++    super();
++    this.setMaxListeners(100);
++  }
++
++  status(sessionId: string): SignalStatus {
++    return this.processes.get(sessionId)?.status ?? { sessionId, phase: 'idle' };
++  }
++
++  async start(sessionId: string): Promise<SignalStatus> {
++    const active = this.processes.get(sessionId);
++    if (active && active.child.exitCode === null) return active.status;
++    const profile = this.profiles.require(sessionId);
++    if (!profile.enabled) throw new Error('SIGNAL_SESSION_DISABLED');
++    const runtime = signalRuntimeCommand(profile);
++    const abort = new AbortController();
++    const child = spawn(runtime.executable, [...runtime.args, ...signalDaemonArgs(profile)], {
++      cwd: runtime.cwd,
++      windowsHide: true,
++      shell: false,
++      stdio: ['ignore', 'pipe', 'pipe'],
++    });
++    child.stdout?.resume();
++    child.stderr?.resume();
++    const process: ManagedProcess = { child, abort, status: { sessionId, phase: 'starting' } };
++    this.processes.set(sessionId, process);
++    this.setStatus(process, { sessionId, phase: 'starting', message: '正在启动 Signal 服务…' });
++    child.once('exit', () => {
++      abort.abort();
++      if (this.processes.get(sessionId) === process) {
++        this.processes.delete(sessionId);
++        this.emit('status', { sessionId, phase: 'stopped' } satisfies SignalStatus);
++      }
++    });
++    try {
++      await this.waitUntilReady(profile.port, child, abort.signal);
++      const accounts = this.accountList(await this.requestRaw(profile.port, 'listAccounts', {}, abort.signal));
++      if (accounts.length > 1) throw new Error('SIGNAL_PROFILE_HAS_MULTIPLE_ACCOUNTS');
++      if (accounts.length === 1) {
++        if (profile.account && profile.account !== accounts[0]) throw new Error('SIGNAL_ACCOUNT_MISMATCH');
++        this.profiles.update(sessionId, { account: accounts[0] });
++        this.setStatus(process, { sessionId, phase: 'ready', account: accounts[0] });
++        void this.readEvents(sessionId, profile.port, abort.signal);
++        return process.status;
++      }
++      const link = await this.requestRaw(profile.port, 'startLink', {}, abort.signal);
++      if (typeof link?.deviceLinkUri !== 'string' || !link.deviceLinkUri.startsWith('sgnl://linkdevice?')) {
++        throw new Error('SIGNAL_INVALID_QR');
++      }
++      this.setStatus(process, { sessionId, phase: 'pairing', qrUri: link.deviceLinkUri, message: '请用手机 Signal 扫码连接' });
++      void this.finishPairing(sessionId, link.deviceLinkUri, process);
++      return process.status;
++    } catch (error) {
++      await this.stop(sessionId);
++      throw error;
++    }
++  }
++
++  async stop(sessionId: string): Promise<void> {
++    const process = this.processes.get(sessionId);
++    if (!process) return;
++    this.processes.delete(sessionId);
++    process.abort.abort();
++    await new Promise<void>((resolve) => {
++      if (process.child.exitCode !== null) return resolve();
++      const timer = setTimeout(() => { process.child.kill('SIGKILL'); resolve(); }, 2500);
++      process.child.once('exit', () => { clearTimeout(timer); resolve(); });
++      process.child.kill('SIGTERM');
++    });
++    this.emit('status', { sessionId, phase: 'stopped' } satisfies SignalStatus);
++  }
++
++  async stopAll(): Promise<void> {
++    await Promise.all([...this.processes.keys()].map((id) => this.stop(id)));
++  }
++
++  async rpc(sessionId: string, method: string, params: Record<string, unknown> = {}): Promise<any> {
++    if (!RPC_METHODS.has(method)) throw new Error('SIGNAL_RPC_NOT_ALLOWED');
++    const profile = this.profiles.require(sessionId);
++    const process = this.processes.get(sessionId);
++    if (!process || process.status.phase !== 'ready') throw new Error('SIGNAL_NOT_READY');
++    return this.requestRaw(profile.port, method, { ...params, account: profile.account }, process.abort.signal);
++  }
++
++  private async finishPairing(sessionId: string, uri: string, process: ManagedProcess) {
++    try {
++      const profile = this.profiles.require(sessionId);
++      await this.requestRaw(profile.port, 'finishLink', { deviceLinkUri: uri, deviceName: `OneChat ${profile.name}` }, process.abort.signal, 180_000);
++      const accounts = this.accountList(await this.requestRaw(profile.port, 'listAccounts', {}, process.abort.signal));
++      if (accounts.length !== 1) throw new Error('SIGNAL_PAIRING_ACCOUNT_COUNT');
++      if (profile.account && profile.account !== accounts[0]) throw new Error('SIGNAL_ACCOUNT_MISMATCH');
++      this.profiles.update(sessionId, { account: accounts[0] });
++      this.setStatus(process, { sessionId, phase: 'ready', account: accounts[0] });
++      void this.readEvents(sessionId, profile.port, process.abort.signal);
++    } catch (error) {
++      if (!process.abort.signal.aborted) this.setStatus(process, { sessionId, phase: 'error', code: (error as Error).message });
++    }
++  }
++
++  private async readEvents(sessionId: string, port: number, signal: AbortSignal) {
++    try {
++      const response = await fetch(`http://127.0.0.1:${port}/api/v1/events`, { headers: { Accept: 'text/event-stream' }, signal });
++      if (!response.ok || !response.body) throw new Error('SIGNAL_EVENT_STREAM');
++      const reader = response.body.getReader();
++      const decoder = new TextDecoder();
++      let buffer = '';
++      while (!signal.aborted) {
++        const chunk = await reader.read();
++        if (chunk.done) break;
++        buffer += decoder.decode(chunk.value, { stream: true });
++        const frames = buffer.split(/\r?\n\r?\n/);
++        buffer = frames.pop() ?? '';
++        for (const frame of frames) {
++          const raw = frame.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
++          if (!raw) continue;
++          try { this.emit('event', { sessionId, payload: JSON.parse(raw) }); } catch { /* malformed event */ }
++        }
++      }
++    } catch (error) {
++      if (!signal.aborted) this.emit('service-error', { sessionId, error });
++    }
++  }
++
++  private setStatus(process: ManagedProcess, status: SignalStatus) {
++    process.status = status;
++    this.emit('status', status);
++  }
++
++  private accountList(raw: any): string[] {
++    const values = Array.isArray(raw) ? raw : raw?.accounts ?? [];
++    return values.map((value: any) => typeof value === 'string' ? value : value?.number ?? value?.account ?? '').filter(Boolean);
++  }
++
++  private async waitUntilReady(port: number, child: ChildProcess, signal: AbortSignal) {
++    const deadline = Date.now() + 45_000;
++    while (Date.now() < deadline && !signal.aborted) {
++      if (child.exitCode !== null || child.signalCode !== null) throw new Error('SIGNAL_CORE_EXIT');
++      try {
++        const response = await fetch(`http://127.0.0.1:${port}/api/v1/check`, { signal: AbortSignal.timeout(800) });
++        if (response.ok) return;
++      } catch { /* keep polling */ }
++      await new Promise((resolve) => setTimeout(resolve, 250));
++    }
++    throw new Error('SIGNAL_START_TIMEOUT');
++  }
++
++  private async requestRaw(port: number, method: string, params: Record<string, unknown>, signal: AbortSignal, timeout = 30_000): Promise<any> {
++    const controller = new AbortController();
++    const timer = setTimeout(() => controller.abort(), timeout);
++    const abort = () => controller.abort();
++    signal.addEventListener('abort', abort, { once: true });
++    try {
++      const response = await fetch(`http://127.0.0.1:${port}/api/v1/rpc`, {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        signal: controller.signal,
++        body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }),
++      });
++      const data = await response.json();
++      if (!response.ok || (data as any).error) throw new Error((data as any).error?.message ?? `SIGNAL_HTTP_${response.status}`);
++      return (data as any).result;
++    } finally {
++      clearTimeout(timer);
++      signal.removeEventListener('abort', abort);
++    }
++  }
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/profile-store.ts fusion_work/onechat-main/src/features/signal-managed/profile-store.ts
+--- fusion_base/onechat-main/src/features/signal-managed/profile-store.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/profile-store.ts	2026-09-06 01:26:27.931932786 +0900
+@@ -0,0 +1,106 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import type { SignalSessionProfile } from './types';
++
++const SESSION_ID = /^[a-zA-Z0-9_-]{1,64}$/;
++const FIRST_PORT = 7503;
++
++export class SignalProfileStore {
++  private readonly file: string;
++
++  constructor(private readonly userDataDir: string) {
++    this.file = path.join(userDataDir, 'signal-managed', 'profiles.json');
++  }
++
++  list(): SignalSessionProfile[] {
++    return Object.values(this.read()).sort((a, b) => a.createdAt - b.createdAt);
++  }
++
++  get(id: string): SignalSessionProfile | undefined {
++    this.assertId(id);
++    return this.read()[id];
++  }
++
++  create(id: string, name = 'Signal'): SignalSessionProfile {
++    this.assertId(id);
++    const profiles = this.read();
++    if (profiles[id]) throw new Error('SIGNAL_SESSION_EXISTS');
++    const ports = new Set(Object.values(profiles).map((profile) => profile.port));
++    let port = FIRST_PORT;
++    while (ports.has(port) && port < 65_535) port += 1;
++    if (port > 65_535) throw new Error('SIGNAL_NO_PORT');
++    const root = path.join(this.userDataDir, 'signal-managed', 'sessions', id);
++    const profile: SignalSessionProfile = {
++      id,
++      name: name.trim() || 'Signal',
++      account: '',
++      port,
++      dataDir: path.join(root, 'data'),
++      runtimeDir: path.join(root, 'runtime'),
++      enabled: true,
++      createdAt: Date.now(),
++    };
++    this.prepareDirectories(profile);
++    profiles[id] = profile;
++    this.write(profiles);
++    return profile;
++  }
++
++  require(id: string): SignalSessionProfile {
++    const profile = this.get(id);
++    if (!profile) throw new Error('SIGNAL_SESSION_NOT_FOUND');
++    this.prepareDirectories(profile);
++    return profile;
++  }
++
++  update(
++    id: string,
++    patch: Partial<Pick<SignalSessionProfile, 'name' | 'account' | 'port' | 'enabled'>>,
++  ): SignalSessionProfile {
++    const profiles = this.read();
++    const current = profiles[id];
++    if (!current) throw new Error('SIGNAL_SESSION_NOT_FOUND');
++    if (patch.port !== undefined && (!Number.isInteger(patch.port) || patch.port < 1024 || patch.port > 65_535)) {
++      throw new Error('SIGNAL_INVALID_PORT');
++    }
++    if (patch.port !== undefined && Object.values(profiles).some((item) => item.id !== id && item.port === patch.port)) {
++      throw new Error('SIGNAL_PORT_IN_USE');
++    }
++    profiles[id] = { ...current, ...patch, id: current.id, dataDir: current.dataDir, runtimeDir: current.runtimeDir };
++    this.write(profiles);
++    return profiles[id];
++  }
++
++  remove(id: string): void {
++    this.assertId(id);
++    const profiles = this.read();
++    if (!profiles[id]) return;
++    delete profiles[id];
++    this.write(profiles);
++  }
++
++  private assertId(id: string) {
++    if (!SESSION_ID.test(id)) throw new Error('SIGNAL_INVALID_SESSION_ID');
++  }
++
++  private prepareDirectories(profile: SignalSessionProfile) {
++    fs.mkdirSync(profile.dataDir, { recursive: true, mode: 0o700 });
++    fs.mkdirSync(profile.runtimeDir, { recursive: true, mode: 0o700 });
++  }
++
++  private read(): Record<string, SignalSessionProfile> {
++    try {
++      const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
++      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
++    } catch {
++      return {};
++    }
++  }
++
++  private write(profiles: Record<string, SignalSessionProfile>) {
++    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
++    const temporary = `${this.file}.tmp`;
++    fs.writeFileSync(temporary, JSON.stringify(profiles, null, 2), { mode: 0o600 });
++    fs.renameSync(temporary, this.file);
++  }
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/runtime.ts fusion_work/onechat-main/src/features/signal-managed/runtime.ts
+--- fusion_base/onechat-main/src/features/signal-managed/runtime.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/runtime.ts	2026-09-06 01:25:00.777461826 +0900
+@@ -0,0 +1,43 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import type { SignalSessionProfile } from './types';
++
++export type SignalRuntimeCommand = { executable: string; args: string[]; cwd: string };
++
++export function provisionSignalRuntime(templateDir: string, profile: SignalSessionProfile): void {
++  const manifest = path.join(templateDir, 'runtime-manifest.json');
++  const javaDir = path.join(templateDir, 'jre');
++  const signalCliDir = path.join(templateDir, 'signal-cli');
++  if (!fs.existsSync(manifest) || !fs.existsSync(javaDir) || !fs.existsSync(signalCliDir)) {
++    throw new Error('SIGNAL_RUNTIME_TEMPLATE_INVALID');
++  }
++  fs.mkdirSync(profile.runtimeDir, { recursive: true, mode: 0o700 });
++  fs.cpSync(javaDir, path.join(profile.runtimeDir, 'jre'), { recursive: true, force: false, errorOnExist: false });
++  fs.cpSync(signalCliDir, path.join(profile.runtimeDir, 'signal-cli'), { recursive: true, force: false, errorOnExist: false });
++  fs.copyFileSync(manifest, path.join(profile.runtimeDir, 'runtime-manifest.json'));
++}
++
++export function signalRuntimeCommand(profile: SignalSessionProfile): SignalRuntimeCommand {
++  const executable = path.join(profile.runtimeDir, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
++  const lib = path.join(profile.runtimeDir, 'signal-cli', 'lib');
++  const manifest = path.join(profile.runtimeDir, 'runtime-manifest.json');
++  if (!fs.existsSync(executable) || !fs.existsSync(lib) || !fs.existsSync(manifest)) {
++    throw new Error('SIGNAL_RUNTIME_MISSING');
++  }
++  return {
++    executable,
++    cwd: profile.runtimeDir,
++    args: [
++      '--enable-native-access=ALL-UNNAMED',
++      '-Xms32m',
++      '-Xmx256m',
++      '-cp',
++      path.join(lib, '*'),
++      'org.asamk.signal.Main',
++    ],
++  };
++}
++
++export function signalDaemonArgs(profile: SignalSessionProfile): string[] {
++  return ['--config', profile.dataDir, '--scrub-log', 'daemon', '--http', `127.0.0.1:${profile.port}`];
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/features/signal-managed/types.ts fusion_work/onechat-main/src/features/signal-managed/types.ts
+--- fusion_base/onechat-main/src/features/signal-managed/types.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/features/signal-managed/types.ts	2026-09-06 01:22:52.929830120 +0900
+@@ -0,0 +1,60 @@
++export type SignalSessionId = string;
++
++export type SignalPhase =
++  | 'idle'
++  | 'starting'
++  | 'pairing'
++  | 'ready'
++  | 'retrying'
++  | 'error'
++  | 'stopped';
++
++export type SignalSessionProfile = {
++  id: SignalSessionId;
++  name: string;
++  account: string;
++  port: number;
++  dataDir: string;
++  runtimeDir: string;
++  enabled: boolean;
++  createdAt: number;
++};
++
++export type SignalStatus = {
++  sessionId: SignalSessionId;
++  phase: SignalPhase;
++  account?: string;
++  qrUri?: string;
++  code?: string;
++  message?: string;
++};
++
++export type SignalAvatar = {
++  path?: string;
++  color: string;
++  initials: string;
++};
++
++export type SignalConversation = {
++  id: string;
++  kind: 'contact' | 'group';
++  title: string;
++  subtitle: string;
++  avatar: SignalAvatar;
++  recipient?: string;
++  groupId?: string;
++  lastText?: string;
++  lastAt?: number;
++  unread?: number;
++};
++
++export type SignalMessage = {
++  id: string;
++  conversationId: string;
++  direction: 'in' | 'out';
++  sender: string;
++  text: string;
++  translatedText?: string;
++  attachments?: string[];
++  at: number;
++};
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/index.html fusion_work/onechat-main/src/index.html
+--- fusion_base/onechat-main/src/index.html	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/index.html	2026-09-06 01:24:49.217134219 +0900
+@@ -1,7 +1,7 @@
+ <!DOCTYPE html>
+ <html lang="en">
+   <head>
+-    <title>Ferdium</title>
++    <title>财盛聚合聊天</title>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+     <link rel="stylesheet" type="text/css" href="./styles/main.css" />
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/index.ts fusion_work/onechat-main/src/index.ts
+--- fusion_base/onechat-main/src/index.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/index.ts	2026-09-06 01:26:29.115966348 +0900
+@@ -38,12 +38,17 @@
+ import { ifUndefined } from './jsUtils';
+ 
+ import Settings from './electron/Settings';
++import registerChatTranslation from './electron/chatTranslation';
+ import handleDeepLink from './electron/deepLinking';
+ import './electron/exception';
+ // eslint-disable-next-line import/no-cycle
+ import ipcApi from './electron/ipc-api';
+ import isPositionValid from './electron/windowUtils';
+ import { mainIpcHandler as basicAuthHandler } from './features/basicAuth';
++import {
++  ManagedSignalService,
++  SignalProfileStore,
++} from './features/signal-managed';
+ import DBus from './lib/DBus';
+ import TrayIcon from './lib/Tray';
+ // @ts-expect-error Cannot find module './package.json' or its corresponding type declarations.
+@@ -68,6 +73,8 @@
+ let mainWindow: BrowserWindow | undefined;
+ let willQuitApp = false;
+ let overrideAppQuitForUpdate = false;
++let managedSignal: ManagedSignalService | undefined;
++let signalProfiles: SignalProfileStore | undefined;
+ 
+ // eslint-disable-next-line unicorn/prefer-event-target
+ export const appEvents = new EventEmitter();
+@@ -102,6 +109,10 @@
+ const proxySettings = new Settings('proxy');
+ const shortcutSettings = new Settings('shortcuts', DEFAULT_SHORTCUTS);
+ 
++// Chat translation runs in the main process so embedded services never see API keys
++// and Google/MyMemory requests are not blocked by browser CORS.
++registerChatTranslation();
++
+ const retrieveSettingValue = (key: string, defaultValue: boolean | string) =>
+   ifUndefined<boolean | string>(settings.get(key), defaultValue);
+ 
+@@ -567,6 +578,20 @@
+ // initialization and is ready to create browser windows.
+ // Some APIs can only be used after this event occurs.
+ app.on('ready', () => {
++  signalProfiles = new SignalProfileStore(app.getPath('userData'));
++  managedSignal = new ManagedSignalService(signalProfiles);
++  managedSignal.on('status', status => {
++    mainWindow?.webContents.send('caisheng:signal-status', status);
++  });
++  managedSignal.on('event', event => {
++    mainWindow?.webContents.send('caisheng:signal-event', event);
++  });
++  managedSignal.on('service-error', error => {
++    mainWindow?.webContents.send('caisheng:signal-error', {
++      sessionId: error.sessionId,
++      message: String(error.error),
++    });
++  });
+   // force app to live in /Applications
+   enforceMacOSAppLocation();
+ 
+@@ -873,11 +898,38 @@
+   }
+   if (selection === yesButtonIndex) {
+     willQuitApp = true;
++    void managedSignal?.stopAll();
+   } else {
+     event.preventDefault();
+   }
+ });
+ 
++ipcMain.handle('caisheng:signal-list', () => signalProfiles?.list() ?? []);
++ipcMain.handle(
++  'caisheng:signal-create',
++  (_event, id: string, name?: string) => signalProfiles?.create(id, name),
++);
++ipcMain.handle('caisheng:signal-start', (_event, id: string) =>
++  managedSignal?.start(id),
++);
++ipcMain.handle('caisheng:signal-stop', (_event, id: string) =>
++  managedSignal?.stop(id),
++);
++ipcMain.handle(
++  'caisheng:signal-update',
++  (_event, id: string, value: { name?: string; enabled?: boolean }) =>
++    signalProfiles?.update(id, value),
++);
++ipcMain.handle('caisheng:signal-remove', async (_event, id: string) => {
++  await managedSignal?.stop(id);
++  signalProfiles?.remove(id);
++});
++ipcMain.handle(
++  'caisheng:signal-rpc',
++  (_event, id: string, method: string, params?: Record<string, unknown>) =>
++    managedSignal?.rpc(id, method, params),
++);
++
+ app.on('activate', () => {
+   // On macos it's common to re-create a window in the app when the dock icon is clicked and there are no other windows open.
+   if (mainWindow === null) {
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/lib/Menu.ts fusion_work/onechat-main/src/lib/Menu.ts
+--- fusion_base/onechat-main/src/lib/Menu.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/lib/Menu.ts	2026-09-06 01:24:50.629174282 +0900
+@@ -178,11 +178,11 @@
+   },
+   reloadFerdium: {
+     id: 'menu.view.reloadFerdium',
+-    defaultMessage: 'Reload Ferdium',
++    defaultMessage: '重启财盛聚合聊天',
+   },
+   lockFerdium: {
+     id: 'menu.view.lockFerdium',
+-    defaultMessage: 'Lock Ferdium',
++    defaultMessage: '锁定财盛聚合聊天',
+   },
+   reloadTodos: {
+     id: 'menu.view.reloadTodos',
+@@ -222,7 +222,7 @@
+   },
+   debugInfoCopiedHeadline: {
+     id: 'menu.help.debugInfoCopiedHeadline',
+-    defaultMessage: 'Ferdium Debug Information',
++    defaultMessage: '财盛聚合聊天调试信息',
+   },
+   debugInfoCopiedBody: {
+     id: 'menu.help.debugInfoCopiedBody',
+@@ -262,7 +262,7 @@
+   },
+   about: {
+     id: 'menu.app.about',
+-    defaultMessage: 'About Ferdium',
++    defaultMessage: '关于财盛聚合聊天',
+   },
+   checkForUpdates: {
+     id: 'menu.app.checkForUpdates',
+@@ -983,8 +983,8 @@
+         dialog
+           .showMessageBox({
+             type: 'info',
+-            title: 'Ferdium',
+-            message: 'Ferdium',
++            title: '财盛聚合聊天',
++            message: '财盛聚合聊天',
+             detail: aboutAppDetails,
+             buttons: [
+               intl.formatMessage(menuItems.ok),
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/models/Service.ts fusion_work/onechat-main/src/models/Service.ts
+--- fusion_base/onechat-main/src/models/Service.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/models/Service.ts	2026-09-06 01:24:48.201105380 +0900
+@@ -410,7 +410,10 @@
+   }
+ 
+   @computed get partition(): string {
+-    return this.recipe.partition || `persist:service-${this.id}`;
++    // Every account instance owns its cookies, cache, IndexedDB and login
++    // state. In particular, two WhatsApp or Telegram entries must never reuse
++    // a recipe-level partition.
++    return `persist:service-${this.id}`;
+   }
+ 
+   initializeWebViewEvents({ handleIPCMessage, openWindow, stores }): void {
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/stores/SettingsStore.ts fusion_work/onechat-main/src/stores/SettingsStore.ts
+--- fusion_base/onechat-main/src/stores/SettingsStore.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/stores/SettingsStore.ts	2026-09-06 01:23:54.827588927 +0900
+@@ -101,7 +101,16 @@
+       debug('Get appSettings resolves', resp.type, resp.data);
+       this.actions.settings.update({
+         type: resp.type,
+-        data: resp.data,
++        data:
++          resp.type === 'app'
++            ? {
++                ...resp.data,
++                server: LOCAL_SERVER,
++                useHorizontalStyle: true,
++                isLockingFeatureEnabled: false,
++                locked: false,
++              }
++            : resp.data,
+       });
+       this.setLoaded();
+       ipcRenderer.send('initialAppSettings', resp);
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/stores/UserStore.ts fusion_work/onechat-main/src/stores/UserStore.ts
+--- fusion_base/onechat-main/src/stores/UserStore.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/stores/UserStore.ts	2026-09-06 01:25:04.809576303 +0900
+@@ -314,7 +314,8 @@
+         }, 1000);
+       }
+     } else if (!this.isLoggedIn && !currentRoute.includes(this.BASE_ROUTE)) {
+-      router.push(this.WELCOME_ROUTE);
++      // Caisheng starts in local mode and logs in to the bundled data service
++      // automatically. Staying on the shell avoids any product-login flash.
+     } else if (this.isLoggedIn && currentRoute === this.LOGOUT_ROUTE) {
+       this.actions.user.logout();
+       router.push(this.LOGIN_ROUTE);
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/styles/vertical.scss fusion_work/onechat-main/src/styles/vertical.scss
+--- fusion_base/onechat-main/src/styles/vertical.scss	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/styles/vertical.scss	2026-09-06 01:23:38.975138086 +0900
+@@ -1,7 +1,7 @@
+ @import './globals.scss';
+ @import './config.scss';
+ 
+-$sidebar-width: 75px;
++$sidebar-width: 76px;
+ $sidebar-bias: 28px;
+ $tabitem-bias: 30px;
+ 
+@@ -14,6 +14,9 @@
+   right: 0;
+   padding-bottom: 0px;
+   overflow: hidden !important;
++  background: rgba(248, 250, 252, 0.96);
++  border-bottom: 1px solid rgba(15, 23, 42, 0.09);
++  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+ 
+   &::after {
+     top: -10px;
+@@ -32,6 +35,10 @@
+     flex-direction: row;
+ 
+     .tab-item {
++      margin: 7px 4px;
++      min-width: 62px;
++      height: 62px;
++      border-radius: 14px;
+       &.is-active {
+         overflow: hidden;
+         height: $sidebar-width + 4;
+@@ -50,6 +57,11 @@
+ 
+       .tab-item__icon {
+         margin-left: 0;
++        width: 36px;
++        height: 36px;
++        border-radius: 50%;
++        object-fit: cover;
++        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
+       }
+ 
+       &__label {
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/webview/chatTranslation.ts fusion_work/onechat-main/src/webview/chatTranslation.ts
+--- fusion_base/onechat-main/src/webview/chatTranslation.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/src/webview/chatTranslation.ts	2026-09-06 01:25:19.313987694 +0900
+@@ -0,0 +1,192 @@
++import { ipcRenderer } from 'electron';
++
++type TranslationConfig = {
++  enabled: boolean;
++  incomingBilingual: boolean;
++  inputMode: 'normal' | 'efficiency';
++  sourceLanguage: string;
++  incomingTargetLanguage: string;
++  outgoingTargetLanguage: string;
++};
++
++const MESSAGE_SELECTORS = [
++  // Signal Desktop / Signal-compatible surface
++  '.module-message__text',
++  '[data-testid="message-text"]',
++  // WhatsApp Web
++  '[data-pre-plain-text] .selectable-text',
++  '#main [role="row"] .selectable-text',
++  // Telegram Web
++  '.Message .text-content',
++  '.message .text-content',
++  // Generic service recipes may opt in explicitly.
++  '[data-onechat-message-text]',
++];
++
++const COMPOSER_SELECTORS = [
++  '[data-onechat-composer]',
++  '[contenteditable="true"][role="textbox"]',
++  'textarea',
++  'input[type="text"]',
++];
++
++const translated = new WeakSet<Element>();
++const translating = new WeakSet<Element>();
++let config: TranslationConfig | null = null;
++let observer: MutationObserver | null = null;
++
++function isOutgoingMessage(element: HTMLElement): boolean {
++  const container = element.closest<HTMLElement>(
++    '.message-out, .own, .is-outgoing, [data-message-author="self"], [data-is-outgoing="true"], [data-onechat-direction="outgoing"]',
++  );
++  if (container) return true;
++  // Signal's class names have changed over time, but consistently retain "outgoing".
++  for (let current: HTMLElement | null = element; current && current !== document.body; current = current.parentElement) {
++    if (/outgoing/i.test(current.className)) return true;
++  }
++  return false;
++}
++
++function editableText(element: HTMLElement): string {
++  return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
++    ? element.value
++    : element.innerText || element.textContent || '';
++}
++
++function replaceEditableText(element: HTMLElement, value: string): void {
++  element.focus();
++  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
++    const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
++    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
++    setter?.call(element, value);
++    element.dispatchEvent(new Event('input', { bubbles: true }));
++    element.dispatchEvent(new Event('change', { bubbles: true }));
++    element.setSelectionRange(value.length, value.length);
++    return;
++  }
++  // execCommand keeps React-controlled contenteditable composers in sync on WhatsApp/Telegram/Signal.
++  document.execCommand('selectAll', false);
++  document.execCommand('insertText', false, value);
++  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
++}
++
++function dispatchSend(element: HTMLElement): void {
++  for (const type of ['keydown', 'keypress', 'keyup']) {
++    element.dispatchEvent(
++      new KeyboardEvent(type, {
++        key: 'Enter',
++        code: 'Enter',
++        keyCode: 13,
++        which: 13,
++        bubbles: true,
++        cancelable: true,
++      }),
++    );
++  }
++}
++
++async function translateIncoming(element: HTMLElement): Promise<void> {
++  if (!config?.enabled || !config.incomingBilingual || translated.has(element) || translating.has(element)) return;
++  if (element.closest('[data-onechat-translation]')) return;
++  if (isOutgoingMessage(element)) return;
++  const original = (element.innerText || element.textContent || '').trim();
++  if (!original || original.length > 5000) return;
++  translating.add(element);
++  try {
++    const result = await ipcRenderer.invoke('chat-translation:translate', {
++      text: original,
++      direction: 'incoming',
++      sourceLanguage: config.sourceLanguage,
++      targetLanguage: config.incomingTargetLanguage,
++    });
++    if (!element.isConnected || !result?.text || result.text.trim() === original) return;
++    const line = document.createElement('div');
++    line.dataset.onechatTranslation = 'incoming';
++    line.setAttribute('aria-label', '翻译');
++    line.textContent = result.text;
++    line.style.cssText = 'margin-top:4px;padding-top:4px;border-top:1px solid rgba(128,128,128,.22);opacity:.82;font-size:.92em;white-space:pre-wrap;';
++    element.append(line);
++    translated.add(element);
++  } catch (error) {
++    console.warn('[OneChat translation] incoming translation failed', error);
++  } finally {
++    translating.delete(element);
++  }
++}
++
++function scanMessages(root: ParentNode = document): void {
++  const selector = MESSAGE_SELECTORS.join(',');
++  if (root instanceof HTMLElement && root.matches(selector)) void translateIncoming(root);
++  root.querySelectorAll<HTMLElement>(selector).forEach(element => void translateIncoming(element));
++}
++
++async function translateComposer(element: HTMLElement, sendAfter: boolean): Promise<void> {
++  if (element.dataset.onechatTranslating === '1' || !config) return;
++  const source = editableText(element).replace(/\s{3}$/, '').trim();
++  if (!source) return;
++  element.dataset.onechatTranslating = '1';
++  element.setAttribute('aria-busy', 'true');
++  try {
++    const result = await ipcRenderer.invoke('chat-translation:translate', {
++      text: source,
++      direction: 'outgoing',
++      sourceLanguage: config.sourceLanguage,
++      targetLanguage: config.outgoingTargetLanguage,
++    });
++    if (!result?.text) throw new Error('翻译服务未返回译文');
++    replaceEditableText(element, result.text);
++    if (sendAfter) setTimeout(() => dispatchSend(element), 0);
++  } catch (error) {
++    console.warn('[OneChat translation] outgoing translation failed', error);
++  } finally {
++    delete element.dataset.onechatTranslating;
++    element.removeAttribute('aria-busy');
++  }
++}
++
++function findComposer(target: EventTarget | null): HTMLElement | null {
++  const element = target instanceof HTMLElement ? target : null;
++  if (!element) return null;
++  return element.closest<HTMLElement>(COMPOSER_SELECTORS.join(','));
++}
++
++function onKeyDown(event: KeyboardEvent): void {
++  if (!config?.enabled || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
++  const composer = findComposer(event.target);
++  if (!composer) return;
++  if (config.inputMode === 'normal' && event.key === ' ' && /\s{2}$/.test(editableText(composer))) {
++    event.preventDefault();
++    event.stopImmediatePropagation();
++    void translateComposer(composer, false);
++    return;
++  }
++  if (config.inputMode === 'efficiency' && event.key === 'Enter' && !event.shiftKey) {
++    event.preventDefault();
++    event.stopImmediatePropagation();
++    void translateComposer(composer, true);
++  }
++}
++
++export async function initializeChatTranslation(): Promise<void> {
++  try {
++    config = await ipcRenderer.invoke('chat-translation:get-config');
++  } catch (error) {
++    console.warn('[OneChat translation] unable to load configuration', error);
++    return;
++  }
++  document.addEventListener('keydown', onKeyDown, true);
++  const start = () => {
++    scanMessages();
++    observer?.disconnect();
++    observer = new MutationObserver(records => {
++      for (const record of records) {
++        record.addedNodes.forEach(node => {
++          if (node instanceof HTMLElement) scanMessages(node);
++        });
++      }
++    });
++    observer.observe(document.body, { childList: true, subtree: true });
++  };
++  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
++  else start();
++}
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/src/webview/recipe.ts fusion_work/onechat-main/src/webview/recipe.ts
+--- fusion_base/onechat-main/src/webview/recipe.ts	2026-05-12 18:27:11.000000000 +0900
++++ fusion_work/onechat-main/src/webview/recipe.ts	2026-09-06 01:24:22.656379825 +0900
+@@ -34,6 +34,7 @@
+ } from './notifications';
+ import { getDisplayMediaSelector, screenShareJs } from './screenshare';
+ import SessionHandler from './sessionHandler';
++import { initializeChatTranslation } from './chatTranslation';
+ import {
+   getSpellcheckerLocaleByFuzzyIdentifier,
+   switchDict,
+@@ -187,6 +188,7 @@
+   findInPage: FindInPage | null = null;
+ 
+   async initialize() {
++    void initializeChatTranslation();
+     for (const channel of Object.keys(this.ipcEvents)) {
+       ipcRenderer.on(channel, (...args) => {
+         debug('Received IPC event for channel', channel, 'with', ...args);
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/test/chatTranslation.test.ts fusion_work/onechat-main/test/chatTranslation.test.ts
+--- fusion_base/onechat-main/test/chatTranslation.test.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/test/chatTranslation.test.ts	2026-09-06 01:25:01.497482253 +0900
+@@ -0,0 +1,62 @@
++jest.mock('electron', () => ({ ipcMain: { handle: jest.fn() } }));
++jest.mock('../src/electron/Settings', () => ({ default: jest.fn() }));
++
++import {
++  DEFAULT_CHAT_TRANSLATION_CONFIG,
++  translateChatText,
++} from '../src/electron/chatTranslation';
++
++const jsonResponse = (payload: unknown, ok = true) =>
++  ({
++    ok,
++    status: ok ? 200 : 500,
++    statusText: ok ? 'OK' : 'Error',
++    text: async () => JSON.stringify(payload),
++  }) as Response;
++
++describe('chat translation service', () => {
++  it('uses Google without exposing translation calls to the webview', async () => {
++    const fetchMock = jest.fn(async () => jsonResponse([[['你好', 'hello']]]));
++    const result = await translateChatText(
++      { text: 'hello', targetLanguage: 'zh-CN' },
++      { ...DEFAULT_CHAT_TRANSLATION_CONFIG, provider: 'google' },
++      fetchMock as typeof fetch,
++    );
++    expect(result).toEqual({ text: '你好', provider: 'google' });
++    expect(String(fetchMock.mock.calls[0][0])).toContain('translate.googleapis.com');
++  });
++
++  it('falls back from Google to MyMemory in automatic mode', async () => {
++    const fetchMock = jest
++      .fn()
++      .mockResolvedValueOnce(jsonResponse({ message: 'down' }, false))
++      .mockResolvedValueOnce(jsonResponse({ responseData: { translatedText: 'bonjour' } }));
++    const result = await translateChatText(
++      { text: 'hello', targetLanguage: 'fr' },
++      { ...DEFAULT_CHAT_TRANSLATION_CONFIG, provider: 'auto' },
++      fetchMock as typeof fetch,
++    );
++    expect(result).toEqual({ text: 'bonjour', provider: 'mymemory' });
++  });
++
++  it('supports an OpenAI-compatible endpoint', async () => {
++    const fetchMock = jest.fn(async () =>
++      jsonResponse({ choices: [{ message: { content: 'hola' } }] }),
++    );
++    const result = await translateChatText(
++      { text: 'hello', targetLanguage: 'es' },
++      {
++        ...DEFAULT_CHAT_TRANSLATION_CONFIG,
++        provider: 'openai',
++        openAIBaseUrl: 'https://example.test/v1/chat/completions',
++        openAIApiKey: 'secret',
++      },
++      fetchMock as typeof fetch,
++    );
++    expect(result).toEqual({ text: 'hola', provider: 'openai' });
++    expect(String(fetchMock.mock.calls[0][0])).toBe('https://example.test/v1/chat/completions');
++    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
++      Authorization: 'Bearer secret',
++    });
++  });
++});
+diff -ruN '--exclude=.github' '--exclude=caisheng.ico' '--exclude=caisheng.png' fusion_base/onechat-main/test/signal-managed.test.ts fusion_work/onechat-main/test/signal-managed.test.ts
+--- fusion_base/onechat-main/test/signal-managed.test.ts	1970-01-01 09:00:00.000000000 +0900
++++ fusion_work/onechat-main/test/signal-managed.test.ts	2026-09-06 01:25:01.829491685 +0900
+@@ -0,0 +1,79 @@
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { normalizeSignalContacts, normalizeSignalGroups } from '../src/features/signal-managed/catalog';
++import { SignalProfileStore } from '../src/features/signal-managed/profile-store';
++import { provisionSignalRuntime, signalDaemonArgs, signalRuntimeCommand } from '../src/features/signal-managed/runtime';
++
++describe('managed Signal accounts', () => {
++  let root: string;
++
++  beforeEach(() => {
++    root = fs.mkdtempSync(path.join(os.tmpdir(), 'onechat-signal-'));
++  });
++
++  afterEach(() => {
++    fs.rmSync(root, { recursive: true, force: true });
++  });
++
++  it('allocates an isolated runtime, data directory and port for every account', () => {
++    const store = new SignalProfileStore(root);
++    const first = store.create('signal-main', '工作号');
++    const second = store.create('signal-sales', '销售号');
++
++    expect(first.port).not.toBe(second.port);
++    expect(first.dataDir).not.toBe(second.dataDir);
++    expect(first.runtimeDir).not.toBe(second.runtimeDir);
++    expect(fs.existsSync(first.dataDir)).toBe(true);
++    expect(fs.existsSync(second.runtimeDir)).toBe(true);
++    expect(new SignalProfileStore(root).list()).toHaveLength(2);
++  });
++
++  it('rejects unsafe session ids and duplicate ports', () => {
++    const store = new SignalProfileStore(root);
++    expect(() => store.create('../escape')).toThrow('SIGNAL_INVALID_SESSION_ID');
++    const first = store.create('one');
++    store.create('two');
++    expect(() => store.update('two', { port: first.port })).toThrow('SIGNAL_PORT_IN_USE');
++  });
++
++  it('builds a command using only the selected account directories', () => {
++    const profile = new SignalProfileStore(root).create('one');
++    const java = path.join(profile.runtimeDir, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
++    fs.mkdirSync(path.dirname(java), { recursive: true });
++    fs.writeFileSync(java, '');
++    fs.mkdirSync(path.join(profile.runtimeDir, 'signal-cli', 'lib'), { recursive: true });
++    fs.writeFileSync(path.join(profile.runtimeDir, 'runtime-manifest.json'), '{}');
++
++    const command = signalRuntimeCommand(profile);
++    expect(command.executable).toBe(java);
++    expect(command.cwd).toBe(profile.runtimeDir);
++    expect(signalDaemonArgs(profile)).toEqual([
++      '--config', profile.dataDir, '--scrub-log', 'daemon', '--http', `127.0.0.1:${profile.port}`,
++    ]);
++  });
++
++  it('provisions a private JRE and signal-cli tree for an account', () => {
++    const profile = new SignalProfileStore(root).create('private-runtime');
++    const template = path.join(root, 'template');
++    fs.mkdirSync(path.join(template, 'jre', 'bin'), { recursive: true });
++    fs.mkdirSync(path.join(template, 'signal-cli', 'lib'), { recursive: true });
++    fs.writeFileSync(path.join(template, 'jre', 'bin', 'java'), 'java');
++    fs.writeFileSync(path.join(template, 'signal-cli', 'lib', 'signal.jar'), 'jar');
++    fs.writeFileSync(path.join(template, 'runtime-manifest.json'), '{}');
++
++    provisionSignalRuntime(template, profile);
++
++    expect(fs.readFileSync(path.join(profile.runtimeDir, 'jre', 'bin', 'java'), 'utf8')).toBe('java');
++    expect(fs.existsSync(path.join(profile.runtimeDir, 'signal-cli', 'lib', 'signal.jar'))).toBe(true);
++  });
++
++  it('preserves Signal-style contact and group identity including avatars', () => {
++    const contacts = normalizeSignalContacts([{ number: '+8613800000000', name: '张 三', profile: { avatar: '/avatar/a' } }]);
++    const groups = normalizeSignalGroups([{ id: 'group-id', name: '项目组', members: ['a', 'b'] }]);
++
++    expect(contacts[0]).toMatchObject({ id: 'contact:+8613800000000', title: '张 三', avatar: { path: '/avatar/a', initials: '张三' } });
++    expect(groups[0]).toMatchObject({ id: 'group:group-id', title: '项目组', subtitle: '2 位成员' });
++    expect(groups[0].avatar.color).toMatch(/^#/);
++  });
++});

@@ -1,0 +1,59 @@
+name: Build Caisheng Aggregator Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'fusion/**'
+      - '.github/workflows/build-caisheng-onechat.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      USE_HARD_LINKS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout aggregation framework
+        shell: bash
+        run: |
+          git clone https://github.com/ferdium/ferdium-app.git app
+          cd app
+          git checkout eae0848a32b963ea95e567c0dd4e263e81efe0ac
+          git apply -p2 ../fusion/caisheng-onechat.patch
+          git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git recipes
+          cp ../assets/windows/caisheng.ico build-helpers/images/caisheng.ico
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+      - uses: pnpm/action-setup@v4
+      - name: Install dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: Build recipes
+        working-directory: app/recipes
+        run: |
+          pnpm install
+          pnpm package
+      - name: Typecheck and tests
+        working-directory: app
+        run: |
+          pnpm typecheck
+          pnpm test -- --runInBand test/chatTranslation.test.ts test/signal-managed.test.ts
+      - name: Build setup and portable EXE
+        working-directory: app
+        run: pnpm build --win nsis portable --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Caisheng-MultiChat-Windows-x64
+          path: |
+            app/out/Caisheng-MultiChat-Windows-x64-Setup-*.exe
+            app/out/Caisheng-MultiChat-Windows-x64-Portable-*.exe
+          if-no-files-found: error
+          retention-days: 30
