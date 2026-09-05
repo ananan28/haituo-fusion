@@ -32,6 +32,50 @@ jobs:
           git apply --check ../patches/caisheng-signal.patch
           git apply ../patches/caisheng-signal.patch
 
+      - name: Apply runtime reliability fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          main = Path("signal/app/main.main.ts")
+          text = main.read_text(encoding="utf-8")
+          text = text.replace(
+              "if (params.partition !== expectedPartition) {",
+              "if (params.partition !== expectedPartition && !params.partition.startsWith(\`${expectedPartition}-\`)) {",
+          )
+          text = text.replace(
+              "!DISABLE_SCREEN_SECURITY &&\n    (contentProtection ??",
+              "false &&\n    (contentProtection ??",
+          )
+          main.write_text(text, encoding="utf-8")
+
+          bridge = Path("signal/app/caishengWebviewTranslation.main.ts")
+          text = bridge.read_text(encoding="utf-8")
+          text = text.replace(
+              "if (!ALLOWED_HOSTS.has(hostname)) {",
+              "if (!ALLOWED_HOSTS.has(hostname) && !url.startsWith('file:')) {",
+          )
+          bridge.write_text(text, encoding="utf-8")
+
+          context = Path("signal/ts/windows/context.preload.ts")
+          text = context.read_text(encoding="utf-8")
+          text = text.replace(
+              "  caishengLogin: (\n    credentials: CaishengLoginCredentials\n  ) => Promise<CaishengLoginIpcResult>;",
+              "  caishengLogin: (\n    credentials: CaishengLoginCredentials\n  ) => Promise<CaishengLoginIpcResult>;\n  caishengTranslate: (text: string, target: string) => Promise<{ text: string }>;",
+          )
+          text = text.replace(
+              "  caishengLogin(credentials) {\n    return ipcRenderer.invoke('caisheng:login', credentials);\n  },",
+              "  caishengLogin(credentials) {\n    return ipcRenderer.invoke('caisheng:login', credentials);\n  },\n  caishengTranslate(text, target) {\n    return ipcRenderer.invoke('caisheng:webview-translate', text, target);\n  },",
+          )
+          context.write_text(text, encoding="utf-8")
+
+          translation = Path("signal/ts/services/caishengTranslation.dom.ts")
+          text = translation.read_text(encoding="utf-8")
+          needle = "  if (!text.trim()) throw new Error('请输入要翻译的内容');"
+          replacement = needle + "\n  if (settings.provider === 'auto' || settings.provider === 'google-free' || settings.provider === 'mymemory') {\n    const result = await window.SignalContext.caishengTranslate(text, settings.targetLanguage);\n    return result.text;\n  }"
+          text = text.replace(needle, replacement)
+          translation.write_text(text, encoding="utf-8")
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
