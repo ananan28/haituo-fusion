@@ -36,6 +36,8 @@ jobs:
           git apply ../patches/caisheng-signal.patch
           git apply --check ../patches/caisheng-shell-ui.patch
           git apply ../patches/caisheng-shell-ui.patch
+          git apply --check ../patches/caisheng-release-fix.patch
+          git apply ../patches/caisheng-release-fix.patch
 
       - name: Apply Caisheng Windows identity
         shell: python
