@@ -41,7 +41,7 @@ jobs:
           text = main.read_text(encoding="utf-8")
           text = text.replace(
               "if (params.partition !== expectedPartition) {",
-              "if (params.partition !== expectedPartition && !params.partition.startsWith(\`${expectedPartition}-\`)) {",
+              "if (params.partition !== expectedPartition && !params.partition.startsWith(expectedPartition + '-')) {",
           )
           text = text.replace(
               "!DISABLE_SCREEN_SECURITY &&\n    (contentProtection ??",
