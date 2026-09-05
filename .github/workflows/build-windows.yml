@@ -1,13 +1,17 @@
-name: Build Caisheng Signal Windows
+name: Build Caisheng MultiChat Windows
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - patches/caisheng-signal.patch
+      - patches/**
+      - assets/windows/**
       - .github/workflows/build-windows.yml
+
+concurrency:
+  group: caisheng-windows-main
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -16,7 +20,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 120
-
     steps:
       - name: Checkout Caisheng build files
         uses: actions/checkout@v4
@@ -25,68 +28,106 @@ jobs:
         shell: bash
         run: git clone --depth 1 https://github.com/signalapp/Signal-Desktop.git signal
 
-      - name: Apply Caisheng patch
+      - name: Apply Caisheng product patches
         shell: bash
         run: |
           cd signal
           git apply --check ../patches/caisheng-signal.patch
           git apply ../patches/caisheng-signal.patch
 
-      - name: Apply runtime reliability fixes
+      - name: Apply Caisheng Windows identity
         shell: python
         run: |
+          import json
+          import shutil
           from pathlib import Path
 
-          main = Path("signal/app/main.main.ts")
-          text = main.read_text(encoding="utf-8")
-          text = text.replace(
-              "if (params.partition !== expectedPartition) {",
-              "if (params.partition !== expectedPartition && !params.partition.startsWith(expectedPartition + '-')) {",
+          root = Path('signal')
+          package_path = root / 'package.json'
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          package.update({
+              'name': 'caisheng-multichat',
+              'productName': '财盛聚合聊天',
+              'description': '财盛出海聚合聊天翻译平台',
+              'desktopName': 'caisheng-multichat.desktop',
+              'repository': 'https://github.com/ananan28/WS-',
+              'author': {'name': 'Caisheng Group'},
+          })
+          build = package['build']
+          build['appId'] = 'com.caisheng.multichat'
+          win = build['win']
+          win.pop('signtoolOptions', None)
+          win.update({
+              'executableName': 'CaishengMultiChat',
+              'icon': 'build/icons/win/icon.ico',
+              'publish': [],
+              'target': ['nsis', 'portable'],
+          })
+          nsis = build['nsis']
+          nsis.update({
+              'artifactName': 'Caisheng-MultiChat-Setup-${version}-${arch}.${ext}',
+              'oneClick': False,
+              'perMachine': False,
+              'allowElevation': True,
+              'allowToChangeInstallationDirectory': True,
+              'createDesktopShortcut': True,
+              'createStartMenuShortcut': True,
+              'shortcutName': '财盛聚合聊天',
+              'uninstallDisplayName': '财盛聚合聊天',
+              'deleteAppDataOnUninstall': False,
+              'runAfterFinish': True,
+              'installerIcon': 'build/installerIcon.ico',
+              'uninstallerIcon': 'build/installerIcon.ico',
+              'installerHeaderIcon': 'build/installerHeaderIcon.ico',
+              'installerLanguages': ['zh_CN', 'en_US'],
+              'languageSelector': False,
+          })
+          build['portable'] = {
+              'artifactName': 'Caisheng-MultiChat-Portable-${version}-${arch}.${ext}',
+              'requestExecutionLevel': 'user',
+          }
+          build['protocols'] = {
+              'name': 'caisheng-url-scheme',
+              'schemes': ['caisheng'],
+          }
+          package_path.write_text(
+              json.dumps(package, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
           )
-          text = text.replace(
-              "!DISABLE_SCREEN_SECURITY &&\n    (contentProtection ??",
-              "false &&\n    (contentProtection ??",
-          )
-          text = text.replace(
-              "ipc.once('ready-for-updates', readyForUpdates);",
-              "// Caisheng owns updates; Signal standalone updater is disabled.",
-          )
-          text = text.replace(
-              "setTimeout(readyForUpdates, TEN_MINUTES);",
-              "// Signal standalone update timer disabled.",
-          )
-          assert "ipc.once('ready-for-updates', readyForUpdates);" not in text
-          assert "setContentProtection(true)" in text
-          main.write_text(text, encoding="utf-8")
 
-          bridge = Path("signal/app/caishengWebviewTranslation.main.ts")
-          text = bridge.read_text(encoding="utf-8")
-          text = text.replace(
-              "if (!ALLOWED_HOSTS.has(hostname)) {",
-              "if (!ALLOWED_HOSTS.has(hostname) && !url.startsWith('file:')) {",
-          )
-          assert "url.startsWith('file:')" in text
-          bridge.write_text(text, encoding="utf-8")
+          icon = Path('assets/windows/caisheng.ico')
+          if not icon.exists():
+              raise FileNotFoundError('Missing assets/windows/caisheng.ico')
+          for target in (
+              root / 'build/icons/win/icon.ico',
+              root / 'build/installerIcon.ico',
+              root / 'build/installerHeaderIcon.ico',
+          ):
+              shutil.copyfile(icon, target)
 
-          context = Path("signal/ts/windows/context.preload.ts")
-          text = context.read_text(encoding="utf-8")
-          text = text.replace(
-              "  caishengLogin: (\n    credentials: CaishengLoginCredentials\n  ) => Promise<CaishengLoginIpcResult>;",
-              "  caishengLogin: (\n    credentials: CaishengLoginCredentials\n  ) => Promise<CaishengLoginIpcResult>;\n  caishengTranslate: (text: string, target: string) => Promise<{ text: string }>;",
+          installer = root / 'build/installer.nsh'
+          installer_text = installer.read_text(encoding='utf-8')
+          installer_text = installer_text.replace(
+              '!include SignalStrings.nsh', '!include CaishengStrings.nsh'
+          ).replace('OLD_SIGNAL_VERSION', 'OLD_CAISHENG_VERSION').replace(
+              'signalMinWinVersionErr', 'caishengMinWinVersionErr'
+          ).replace(
+              'signalMinAppVersionErr', 'caishengMinAppVersionErr'
+          ).replace(
+              "# Signal modification: '--start-in-tray' added",
+              '# Start the updated Caisheng platform in the tray.',
           )
-          text = text.replace(
-              "  caishengLogin(credentials) {\n    return ipcRenderer.invoke('caisheng:login', credentials);\n  },",
-              "  caishengLogin(credentials) {\n    return ipcRenderer.invoke('caisheng:login', credentials);\n  },\n  caishengTranslate(text, target) {\n    return ipcRenderer.invoke('caisheng:webview-translate', text, target);\n  },",
+          installer.write_text(installer_text, encoding='utf-8')
+          (root / 'build/CaishengStrings.nsh').write_text(
+              '''# Copyright 2026 Caisheng Group
+# SPDX-License-Identifier: AGPL-3.0-only
+LangString caishengMinWinVersionErr 1033 "Caisheng MultiChat cannot run on this computer. Please update Windows and try again."
+LangString caishengMinAppVersionErr 1033 "A newer version of Caisheng MultiChat is already installed. Do you want to continue?"
+LangString caishengMinWinVersionErr 2052 "财盛聚合聊天无法在此电脑上运行，请先更新 Windows 后重试。"
+LangString caishengMinAppVersionErr 2052 "电脑中已经安装了更新版本的财盛聚合聊天，是否继续安装？"
+''',
+              encoding='utf-8',
           )
-          context.write_text(text, encoding="utf-8")
-
-          translation = Path("signal/ts/services/caishengTranslation.dom.ts")
-          text = translation.read_text(encoding="utf-8")
-          needle = "  if (!text.trim()) throw new Error('请输入要翻译的内容');"
-          replacement = needle + "\n  if (settings.provider === 'auto' || settings.provider === 'google-free' || settings.provider === 'mymemory') {\n    const result = await window.SignalContext.caishengTranslate(text, settings.targetLanguage);\n    return result.text;\n  }"
-          text = text.replace(needle, replacement)
-          assert "window.SignalContext.caishengTranslate" in text
-          translation.write_text(text, encoding="utf-8")
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -112,14 +153,6 @@ jobs:
           pnpm install --frozen-lockfile
           rm noop.js
 
-      - name: Remove Signal signing certificate configuration
-        shell: cmd
-        working-directory: signal
-        run: |
-          copy package.json temp.json
-          del package.json
-          type temp.json | findstr /v certificateSubjectName | findstr /v certificateSha1 > package.json
-
       - name: Prepare build
         shell: bash
         working-directory: signal
@@ -128,24 +161,34 @@ jobs:
           pnpm run generate
           pnpm run build:preload-cache
 
-      - name: Run Caisheng translation tests
+      - name: Run Caisheng tests
         shell: bash
         working-directory: signal
         run: pnpm run test-node -- --grep "Caisheng translation"
 
-      - name: Build Windows x64 installer
+      - name: Build branded installer and portable app
         shell: bash
         working-directory: signal
         env:
           DISABLE_INSPECT_FUSE: on
         run: pnpm run build:release --publish=never --x64
 
-      - name: Upload Windows installer
+      - name: Verify Windows deliverables
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem signal/release/Caisheng-MultiChat-Setup-*-x64.exe
+          $portable = Get-ChildItem signal/release/Caisheng-MultiChat-Portable-*-x64.exe
+          if (-not $setup -or -not $portable) { throw 'Missing setup or portable EXE' }
+          Write-Host "Setup: $($setup.FullName)"
+          Write-Host "Portable: $($portable.FullName)"
+
+      - name: Upload Windows deliverables
         uses: actions/upload-artifact@v4
         with:
-          name: Caisheng-Signal-Windows-x64
+          name: Caisheng-MultiChat-Windows-x64
           path: |
-            signal/release/*.exe
+            signal/release/Caisheng-MultiChat-Setup-*-x64.exe
+            signal/release/Caisheng-MultiChat-Portable-*-x64.exe
             signal/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
