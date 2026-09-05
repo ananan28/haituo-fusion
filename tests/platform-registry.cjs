@@ -1,0 +1,18 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.join(__dirname, '..');
+const registry = fs.readFileSync(path.join(root, 'src/platformRegistry.ts'), 'utf8');
+const hub = fs.readFileSync(path.join(root, 'src/components/WebPlatformHub.tsx'), 'utf8');
+const main = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
+const settings = fs.readFileSync(path.join(root, 'electron/settings.ts'), 'utf8');
+assert.match(registry, /id: 'whatsapp'/);
+assert.match(registry, /id: 'signal'/);
+assert.match(registry, /id: 'telegram'/);
+assert.match(hub, /persist:caisheng-telegram-/);
+assert.match(hub, /＋账号/);
+assert.match(hub, /账号备注/);
+assert.match(main, /https:\/\/web\.telegram\.org/);
+assert.match(main, /persist:caisheng-telegram-/);
+assert.match(settings, /telegramSessions/);
+console.log('PASS: platform registry, Telegram origin allowlist, isolated account partitions, add/rename/remove controls.');

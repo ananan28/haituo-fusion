@@ -1,0 +1,14 @@
+{
+  "platform": "win32",
+  "arch": "x64",
+  "signal": {
+    "version": "0.14.7",
+    "url": "https://github.com/AsamK/signal-cli/releases/download/v0.14.7/signal-cli-0.14.7.tar.gz",
+    "sha256": "0e1eefdf4a2109edf7c899c9d1667167c54ac12c3ec824f27db7c1dac4fa7506"
+  },
+  "java": {
+    "version": "25.0.4.1+1",
+    "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jre_x64_windows_hotspot_25.0.4.1_1.zip",
+    "sha256": "4c95451cea98556def2c54f7782933f52a26d4a36bd85e1d59f0364464828b07"
+  }
+}
