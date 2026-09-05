@@ -935,13 +935,14 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuth
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
 --- a/ts/components/CaishengComposerTranslator.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/CaishengComposerTranslator.dom.tsx	2026-09-04 20:13:13.234848933 -0500
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,162 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
 +import { useCallback, useState, type JSX } from 'react';
 +import {
 +  loadCaishengTranslationSettings,
++  getCaishengTargetLanguage,
 +  saveCaishengTranslationSettings,
 +  translateCaishengText,
 +  type CaishengTranslationProvider,
@@ -979,7 +980,10 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 +      setBusy(true);
 +      setError('');
 +      try {
-+        const translated = await translateCaishengText(text, settings);
++        const translated = await translateCaishengText(text, {
++          ...settings,
++          targetLanguage: getCaishengTargetLanguage(text),
++        });
 +        if (send) {
 +          onSendTranslation(translated);
 +        } else {
@@ -1546,11 +1550,11 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengCompos
 +export function getCaishengTripleSpaceAction(
 +  currentText: string
 +): CaishengTripleSpaceAction {
-+  if (!currentText.endsWith('  ')) {
++  if (!/ {2}(?:\n)?$/u.test(currentText)) {
 +    return { shouldTranslate: false, sourceText: currentText };
 +  }
 +
-+  const sourceText = currentText.slice(0, -2).trimEnd();
++  const sourceText = currentText.replace(/ {2}(?:\n)?$/u, '').trimEnd();
 +  return { shouldTranslate: sourceText.length > 0, sourceText };
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengPlatform.std.ts b/ts/services/caishengPlatform.std.ts
