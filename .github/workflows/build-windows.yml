@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - patches/**
+      - overlays/**
       - assets/windows/**
       - .github/workflows/build-windows.yml
 
