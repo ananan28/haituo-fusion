@@ -1421,12 +1421,11 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation
  
  function getSizeClass(str: string): FunJumboEmojiSize | null {
    const count = Emoji.getJumboEmojiCount(str);
-@@ -189,6 +190,11 @@
+@@ -189,6 +190,10 @@
        />
  
        {endNotification}
-+      {direction === 'incoming' &&
-+      renderLocation === RenderLocation.Timeline &&
++      {renderLocation === RenderLocation.Timeline &&
 +      text.trim() ? (
 +        <CaishengMessageTranslation text={text} />
 +      ) : null}
