@@ -64,6 +64,7 @@ jobs:
               'target': ['nsis', 'portable'],
           })
           nsis = build['nsis']
+          nsis.pop('languageSelector', None)
           nsis.update({
               'artifactName': 'Caisheng-MultiChat-Setup-${version}-${arch}.${ext}',
               'oneClick': False,
