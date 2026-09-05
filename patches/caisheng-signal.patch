@@ -122,7 +122,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/caishengWebviewTransla
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/main.main.ts
 --- a/app/main.main.ts	2026-09-03 11:53:55.000000000 -0500
-+++ b/app/main.main.ts	2026-09-04 20:10:48.971170165 -0500
++++ b/app/main.main.ts	2026-09-04 20:52:17.689859482 -0500
 @@ -75,6 +75,7 @@
  import * as updater from '../ts/updater/index.main.ts';
  import { updateDefaultSession } from './updateDefaultSession.main.ts';
@@ -184,7 +184,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
    mainWindow.webContents.on('preload-error', (_event, _preloadPath, error) => {
      log.error(Errors.toLogFormat(error));
      if (isTestEnvironment(getEnvironment())) {
-@@ -1060,6 +1093,117 @@
+@@ -1060,6 +1093,135 @@
    );
  }
  
@@ -195,6 +195,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
 +const CaishengLoginCredentialsSchema = z.object({
 +  username: z.string().trim().min(1).max(128),
 +  password: z.string().regex(/^\d{6}$/),
++  proxyUrl: z.string().trim().max(256).optional(),
 +});
 +const CaishengLoginResponseSchema = z.object({
 +  ok: z.literal(true),
@@ -245,6 +246,23 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
 +  const controller = new AbortController();
 +  const timeout = setTimeout(() => controller.abort(), 15_000);
 +  try {
++    const proxyUrl = credentials.data.proxyUrl;
++    if (proxyUrl) {
++      if (!/^(https?|socks5):\/\//i.test(proxyUrl)) {
++        return {
++          ok: false,
++          code: 'INVALID_REQUEST',
++          error: '代理地址必须以 http://、https:// 或 socks5:// 开头',
++        } satisfies CaishengLoginIpcResult;
++      }
++      await session.defaultSession.setProxy({
++        mode: 'fixed_servers',
++        proxyRules: proxyUrl,
++      });
++    } else {
++      await session.defaultSession.setProxy({ mode: 'system' });
++    }
++    await session.defaultSession.closeAllConnections();
 +    const response = await net.fetch(CAISHENG_LOGIN_URL, {
 +      method: 'POST',
 +      headers: {
@@ -302,7 +320,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/mai
  // Renderer asks if we are done with the database
  ipc.handle('database-ready', async () => {
    if (!sqlInitPromise) {
-@@ -2667,17 +2811,22 @@
+@@ -2667,17 +2829,22 @@
    }
  });
  
@@ -741,8 +759,8 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/manifest.scss 
 +@use 'components/CaishengPlatformShell.scss';
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuthGate.dom.tsx b/ts/components/CaishengAuthGate.dom.tsx
 --- a/ts/components/CaishengAuthGate.dom.tsx	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/components/CaishengAuthGate.dom.tsx	2026-09-04 16:00:32.235493619 -0500
-@@ -0,0 +1,124 @@
++++ b/ts/components/CaishengAuthGate.dom.tsx	2026-09-04 20:52:15.321802775 -0500
+@@ -0,0 +1,134 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
@@ -776,6 +794,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuth
 +  const [login, setLogin] = useState<CaishengLoginResult | null>(null);
 +  const [username, setUsername] = useState('');
 +  const [password, setPassword] = useState('');
++  const [proxyUrl, setProxyUrl] = useState('');
 +  const [error, setError] = useState('');
 +  const [busy, setBusy] = useState(false);
 +
@@ -795,7 +814,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuth
 +    setBusy(true);
 +    setError('');
 +    try {
-+      setLogin(await loginToCaisheng(username, password));
++      setLogin(await loginToCaisheng(username, password, proxyUrl.trim() || undefined));
 +    } catch (reason) {
 +      const message = reason instanceof Error ? reason.message : '登录失败';
 +      setError(
@@ -856,6 +875,15 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuth
 +            onChange={event =>
 +              setPassword(event.target.value.replace(/\D/g, '').slice(0, 6))
 +            }
++          />
++        </label>
++        <label>
++          代理地址（无法连接时填写）
++          <input
++            autoComplete="off"
++            placeholder="例如 http://127.0.0.1:7890"
++            value={proxyUrl}
++            onChange={event => setProxyUrl(event.target.value)}
 +          />
 +        </label>
 +        {error ? <div className="CaishengLogin__error">{error}</div> : null}
@@ -1348,8 +1376,8 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation
  }
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.dom.ts b/ts/services/caishengAuth.dom.ts
 --- a/ts/services/caishengAuth.dom.ts	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/services/caishengAuth.dom.ts	2026-09-04 20:08:56.484184891 -0500
-@@ -0,0 +1,24 @@
++++ b/ts/services/caishengAuth.dom.ts	2026-09-04 20:52:14.209776148 -0500
+@@ -0,0 +1,26 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
@@ -1363,11 +1391,13 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.d
 +
 +export async function loginToCaisheng(
 +  username: string,
-+  password: string
++  password: string,
++  proxyUrl?: string
 +): Promise<CaishengLoginResult> {
 +  const result = await window.SignalContext.caishengLogin({
 +    username: username.trim(),
 +    password,
++    proxyUrl,
 +  });
 +  if (!result.ok) {
 +    throw new Error(result.error);
@@ -1376,8 +1406,8 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.d
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.std.ts b/ts/services/caishengAuth.std.ts
 --- a/ts/services/caishengAuth.std.ts	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/services/caishengAuth.std.ts	2026-09-04 20:10:20.430417905 -0500
-@@ -0,0 +1,39 @@
++++ b/ts/services/caishengAuth.std.ts	2026-09-04 20:52:13.097749518 -0500
+@@ -0,0 +1,40 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
@@ -1416,6 +1446,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.s
 +export type CaishengLoginCredentials = Readonly<{
 +  username: string;
 +  password: string;
++  proxyUrl?: string;
 +}>;
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengComposer.std.ts b/ts/services/caishengComposer.std.ts
 --- a/ts/services/caishengComposer.std.ts	1969-12-31 18:00:00.000000000 -0600
