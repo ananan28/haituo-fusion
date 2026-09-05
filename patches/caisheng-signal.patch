@@ -1073,7 +1073,6 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlat
 +  type JSX,
 +  type ReactNode,
 +} from 'react';
-+import { useCaishengAuth } from './CaishengAuthGate.dom.tsx';
 +import {
 +  getCaishengPlatforms,
 +  getDefaultCaishengPlatform,
@@ -1083,8 +1082,15 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlat
 +export function CaishengPlatformShell({
 +  signal,
 +}: Readonly<{ signal: ReactNode }>): JSX.Element {
-+  const { user } = useCaishengAuth();
-+  const platforms = useMemo(() => getCaishengPlatforms(user), [user]);
++  const platforms = useMemo(
++    () =>
++      getCaishengPlatforms({
++        signalEnabled: true,
++        whatsappEnabled: true,
++        telegramEnabled: true,
++      }),
++    []
++  );
 +  const [active, setActive] = useState<CaishengPlatform>(
 +    getDefaultCaishengPlatform(platforms) ?? 'signal'
 +  );
@@ -1316,7 +1322,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation
 +
 +  useEffect(() => {
 +    const settings = loadCaishengTranslationSettings();
-+    if (!settings.autoTranslateIncoming || !settings.apiKey.trim()) {
++    if (!settings.autoTranslateIncoming) {
 +      return;
 +    }
 +    void translate();
@@ -1656,7 +1662,6 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.p
  import { SmartApp } from '../smart/App.preload.tsx';
  import { SmartVoiceNotesPlaybackProvider } from '../smart/VoiceNotesPlaybackProvider.preload.tsx';
  import { AppProvider } from '../../windows/AppProvider.dom.tsx';
-+import { CaishengAuthGate } from '../../components/CaishengAuthGate.dom.tsx';
 +import { CaishengPlatformShell } from '../../components/CaishengPlatformShell.dom.tsx';
  
  export const createApp = (store: Store): ReactElement => (
@@ -1664,9 +1669,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.p
      <Provider store={store}>
        <SmartVoiceNotesPlaybackProvider>
 -        <SmartApp />
-+        <CaishengAuthGate>
-+          <CaishengPlatformShell signal={<SmartApp />} />
-+        </CaishengAuthGate>
++        <CaishengPlatformShell signal={<SmartApp />} />
        </SmartVoiceNotesPlaybackProvider>
      </Provider>
    </AppProvider>
