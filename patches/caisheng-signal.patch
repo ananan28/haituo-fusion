@@ -1,4 +1,4 @@
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/BUILD-TEST-REPORT.md b/BUILD-TEST-REPORT.md
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/BUILD-TEST-REPORT.md b/BUILD-TEST-REPORT.md
 --- a/BUILD-TEST-REPORT.md	1969-12-31 18:00:00.000000000 -0600
 +++ b/BUILD-TEST-REPORT.md	2026-09-04 16:01:02.612219341 -0500
 @@ -0,0 +1,23 @@
@@ -25,7 +25,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +## 当前结论
 +
 +财盛功能已经源码级接入官方 Signal Desktop，不依赖外部 `Signal.exe`。当前交付是开发测试版源码，并非已经通过 Windows 实机验收的最终安装包。
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/CAISHENG-BUILD.md b/CAISHENG-BUILD.md
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/CAISHENG-BUILD.md b/CAISHENG-BUILD.md
 --- a/CAISHENG-BUILD.md	1969-12-31 18:00:00.000000000 -0600
 +++ b/CAISHENG-BUILD.md	2026-09-04 16:00:20.691214744 -0500
 @@ -0,0 +1,27 @@
@@ -56,7 +56,45 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +## 安全说明
 +
 +不要把私密 API Key 写进源码或提交到版本库。发布前还应将翻译请求迁移到财盛服务端代理，以便保护供应商密钥、执行套餐限额和记录翻译用量。
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/package.json b/package.json
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/app/main.main.ts b/app/main.main.ts
+--- a/app/main.main.ts	2026-09-03 11:53:55.000000000 -0500
++++ b/app/main.main.ts	2026-09-04 19:55:50.804288525 -0500
+@@ -718,6 +718,7 @@
+       ...defaultWebPrefs,
+       nodeIntegration: false,
+       nodeIntegrationInWorker: false,
++      webviewTag: true,
+       sandbox: false,
+       contextIsolation: !isTestEnvironment(getEnvironment()),
+       preload: isTestEnvironment(getEnvironment())
+@@ -772,6 +773,26 @@
+   // Create the browser window.
+   mainWindow = new BrowserWindow(windowOptions);
+ 
++  mainWindow.webContents.on(
++    'will-attach-webview',
++    (event, preferences, params) => {
++      let hostname = '';
++      try {
++        hostname = new URL(params.src).hostname;
++      } catch {
++        event.preventDefault();
++        return;
++      }
++      if (!['web.whatsapp.com', 'web.telegram.org'].includes(hostname)) {
++        event.preventDefault();
++        return;
++      }
++      preferences.nodeIntegration = false;
++      preferences.contextIsolation = true;
++      preferences.sandbox = true;
++    }
++  );
++
+   mainWindow.webContents.on('preload-error', (_event, _preloadPath, error) => {
+     log.error(Errors.toLogFormat(error));
+     if (isTestEnvironment(getEnvironment())) {
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/package.json b/package.json
 --- a/package.json	2026-09-03 11:53:55.000000000 -0500
 +++ b/package.json	2026-09-04 16:01:01.508192858 -0500
 @@ -3,8 +3,8 @@
@@ -70,7 +108,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
    "desktopName": "signal.desktop",
    "repository": "https://github.com/signalapp/Signal-Desktop.git",
    "version": "8.29.0-alpha.1",
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/scripts/build-caisheng-windows.ps1 b/scripts/build-caisheng-windows.ps1
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/scripts/build-caisheng-windows.ps1 b/scripts/build-caisheng-windows.ps1
 --- a/scripts/build-caisheng-windows.ps1	1969-12-31 18:00:00.000000000 -0600
 +++ b/scripts/build-caisheng-windows.ps1	2026-09-04 16:00:19.583187906 -0500
 @@ -0,0 +1,15 @@
@@ -89,7 +127,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +corepack pnpm run build-win32-all
 +
 +Write-Host 'Build complete. Check the release directory.'
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/components/CaishengAuthGate.scss b/stylesheets/components/CaishengAuthGate.scss
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengAuthGate.scss b/stylesheets/components/CaishengAuthGate.scss
 --- a/stylesheets/components/CaishengAuthGate.scss	1969-12-31 18:00:00.000000000 -0600
 +++ b/stylesheets/components/CaishengAuthGate.scss	2026-09-04 15:09:34.354313918 -0500
 @@ -0,0 +1,81 @@
@@ -174,7 +212,22 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    text-align: center;
 +  }
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/components/CompositionArea.scss b/stylesheets/components/CompositionArea.scss
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
+--- a/stylesheets/components/CaishengPlatformShell.scss	1969-12-31 18:00:00.000000000 -0600
++++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 19:55:39.331999690 -0500
+@@ -0,0 +1,11 @@
++.CaishengPlatformShell {
++  display: flex; flex-direction: column; height: 100vh; width: 100vw;
++  &__nav { align-items: center; background: #111827; color: #fff; display: flex; flex: 0 0 48px; gap: 8px; padding: 0 14px; }
++  &__nav strong { margin-inline-end: 12px; }
++  &__nav button { background: transparent; border: 0; border-radius: 7px; color: #cbd5e1; cursor: pointer; padding: 8px 14px; }
++  &__nav button.is-active { background: #2563eb; color: #fff; }
++  &__nav button:disabled { cursor: not-allowed; opacity: .35; }
++  &__content, &__signal, &__webview { height: 100%; width: 100%; }
++  &__content { flex: 1 1 auto; min-height: 0; }
++  &__signal[hidden], &__webview[hidden] { display: none; }
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CompositionArea.scss b/stylesheets/components/CompositionArea.scss
 --- a/stylesheets/components/CompositionArea.scss	2026-09-03 11:53:55.000000000 -0500
 +++ b/stylesheets/components/CompositionArea.scss	2026-09-04 15:12:51.206991719 -0500
 @@ -225,3 +225,68 @@
@@ -246,9 +299,9 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    color: variables.$color-accent-red;
 +  }
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/stylesheets/manifest.scss b/stylesheets/manifest.scss
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/manifest.scss b/stylesheets/manifest.scss
 --- a/stylesheets/manifest.scss	2026-09-03 11:53:55.000000000 -0500
-+++ b/stylesheets/manifest.scss	2026-09-04 15:09:35.530342206 -0500
++++ b/stylesheets/manifest.scss	2026-09-04 19:55:41.640057873 -0500
 @@ -67,6 +67,7 @@
  @use 'components/CollidingAvatars.scss';
  @use 'components/ComposeStepButton.scss';
@@ -257,7 +310,12 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
  @use 'components/CompositionRecording.scss';
  @use 'components/CompositionRecordingDraft.scss';
  @use 'components/CompositionInput.scss';
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CaishengAuthGate.dom.tsx b/ts/components/CaishengAuthGate.dom.tsx
+@@ -186,3 +187,4 @@
+ @use 'components/UsernameLinkEditor.scss';
+ @use 'components/UsernameMegaphone.scss';
+ @use 'components/WhatsNew.scss';
++@use 'components/CaishengPlatformShell.scss';
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengAuthGate.dom.tsx b/ts/components/CaishengAuthGate.dom.tsx
 --- a/ts/components/CaishengAuthGate.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/CaishengAuthGate.dom.tsx	2026-09-04 16:00:32.235493619 -0500
 @@ -0,0 +1,124 @@
@@ -385,7 +443,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    </main>
 +  );
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
 --- a/ts/components/CaishengComposerTranslator.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/CaishengComposerTranslator.dom.tsx	2026-09-04 16:00:32.215493133 -0500
 @@ -0,0 +1,137 @@
@@ -526,7 +584,41 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    </div>
 +  );
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
+--- a/ts/components/CaishengPlatformShell.dom.tsx	1969-12-31 18:00:00.000000000 -0600
++++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-04 19:55:38.215971538 -0500
+@@ -0,0 +1,30 @@
++// Copyright 2026 Caisheng
++// SPDX-License-Identifier: AGPL-3.0-only
++
++import { createElement, useMemo, useState, type JSX, type ReactNode } from 'react';
++import { useCaishengAuth } from './CaishengAuthGate.dom.tsx';
++
++type Platform = 'signal' | 'whatsapp' | 'telegram';
++
++export function CaishengPlatformShell({ signal }: Readonly<{ signal: ReactNode }>): JSX.Element {
++  const { user } = useCaishengAuth();
++  const platforms = useMemo(() => [
++    { id: 'signal' as const, label: 'Signal', enabled: user.signalEnabled },
++    { id: 'whatsapp' as const, label: 'WhatsApp', enabled: user.whatsappEnabled, url: 'https://web.whatsapp.com/' },
++    { id: 'telegram' as const, label: 'Telegram', enabled: user.telegramEnabled, url: 'https://web.telegram.org/k/' },
++  ], [user]);
++  const [active, setActive] = useState<Platform>(platforms.find(item => item.enabled)?.id ?? 'signal');
++  return <div className="CaishengPlatformShell">
++    <nav className="CaishengPlatformShell__nav" aria-label="财盛应用">
++      <strong>财盛翻译</strong>
++      {platforms.map(item => <button className={active === item.id ? 'is-active' : undefined} disabled={!item.enabled} key={item.id} onClick={() => setActive(item.id)} type="button">{item.label}</button>)}
++    </nav>
++    <section className="CaishengPlatformShell__content">
++      <div hidden={active !== 'signal'} className="CaishengPlatformShell__signal">{signal}</div>
++      {platforms.filter(item => item.id !== 'signal' && item.enabled && item.url).map(item => createElement('webview', {
++        className: 'CaishengPlatformShell__webview', hidden: active !== item.id, key: item.id,
++        partition: `persist:caisheng-${item.id}`, src: item.url,
++      }))}
++    </section>
++  </div>;
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionArea.dom.tsx b/ts/components/CompositionArea.dom.tsx
 --- a/ts/components/CompositionArea.dom.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/components/CompositionArea.dom.tsx	2026-09-04 14:58:25.653077989 -0500
 @@ -91,6 +91,7 @@
@@ -587,7 +679,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
        {!isViewOnceActive && large ? (
          <div
            className={classNames(
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/CompositionInput.dom.tsx b/ts/components/CompositionInput.dom.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CompositionInput.dom.tsx b/ts/components/CompositionInput.dom.tsx
 --- a/ts/components/CompositionInput.dom.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/components/CompositionInput.dom.tsx	2026-09-04 16:00:32.323495760 -0500
 @@ -95,6 +95,11 @@
@@ -665,7 +757,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
                },
              },
              emojiCompletion: {
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/conversation/CaishengMessageTranslation.dom.tsx b/ts/components/conversation/CaishengMessageTranslation.dom.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation/CaishengMessageTranslation.dom.tsx b/ts/components/conversation/CaishengMessageTranslation.dom.tsx
 --- a/ts/components/conversation/CaishengMessageTranslation.dom.tsx	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/components/conversation/CaishengMessageTranslation.dom.tsx	2026-09-04 16:00:17.375134423 -0500
 @@ -0,0 +1,63 @@
@@ -732,7 +824,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    </span>
 +  );
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/components/conversation/MessageBody.dom.tsx b/ts/components/conversation/MessageBody.dom.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/conversation/MessageBody.dom.tsx b/ts/components/conversation/MessageBody.dom.tsx
 --- a/ts/components/conversation/MessageBody.dom.tsx	2026-09-03 11:53:55.000000000 -0500
 +++ b/ts/components/conversation/MessageBody.dom.tsx	2026-09-04 16:00:32.347496344 -0500
 @@ -8,12 +8,13 @@
@@ -762,7 +854,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
      </span>
    );
  }
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/services/caishengAuth.dom.ts b/ts/services/caishengAuth.dom.ts
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengAuth.dom.ts b/ts/services/caishengAuth.dom.ts
 --- a/ts/services/caishengAuth.dom.ts	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/services/caishengAuth.dom.ts	2026-09-04 15:09:31.002233229 -0500
 @@ -0,0 +1,52 @@
@@ -818,7 +910,7 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +  }
 +  return body as CaishengLoginResult;
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
 --- a/ts/services/caishengTranslation.dom.ts	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/services/caishengTranslation.dom.ts	2026-09-04 16:00:14.399061845 -0500
 @@ -0,0 +1,121 @@
@@ -943,14 +1035,15 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
 +    ? translateWithGoogle(text, settings)
 +    : translateWithOpenAI(text, settings);
 +}
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/state/roots/createApp.preload.tsx b/ts/state/roots/createApp.preload.tsx
 --- a/ts/state/roots/createApp.preload.tsx	2026-09-03 11:53:55.000000000 -0500
-+++ b/ts/state/roots/createApp.preload.tsx	2026-09-04 15:09:33.230286890 -0500
-@@ -9,12 +9,15 @@
++++ b/ts/state/roots/createApp.preload.tsx	2026-09-04 19:55:40.460028141 -0500
+@@ -9,12 +9,16 @@
  import { SmartApp } from '../smart/App.preload.tsx';
  import { SmartVoiceNotesPlaybackProvider } from '../smart/VoiceNotesPlaybackProvider.preload.tsx';
  import { AppProvider } from '../../windows/AppProvider.dom.tsx';
 +import { CaishengAuthGate } from '../../components/CaishengAuthGate.dom.tsx';
++import { CaishengPlatformShell } from '../../components/CaishengPlatformShell.dom.tsx';
  
  export const createApp = (store: Store): ReactElement => (
    <AppProvider>
@@ -958,12 +1051,12 @@ diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exc
        <SmartVoiceNotesPlaybackProvider>
 -        <SmartApp />
 +        <CaishengAuthGate>
-+          <SmartApp />
++          <CaishengPlatformShell signal={<SmartApp />} />
 +        </CaishengAuthGate>
        </SmartVoiceNotesPlaybackProvider>
      </Provider>
    </AppProvider>
-diff -ruN '--exclude=node_modules' '--exclude=release' '--exclude=.cache' '--exclude=*.log' a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
+diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
 --- a/ts/test-node/services/caishengTranslation_test.node.ts	1969-12-31 18:00:00.000000000 -0600
 +++ b/ts/test-node/services/caishengTranslation_test.node.ts	2026-09-04 16:00:18.479161171 -0500
 @@ -0,0 +1,21 @@
