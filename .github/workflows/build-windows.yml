@@ -80,7 +80,7 @@ jobs:
               'uninstallerIcon': 'build/installerIcon.ico',
               'installerHeaderIcon': 'build/installerHeaderIcon.ico',
               'installerLanguages': ['zh_CN', 'en_US'],
-              'languageSelector': False,
+              'displayLanguageSelector': False,
           })
           build['portable'] = {
               'artifactName': 'Caisheng-MultiChat-Portable-${version}-${arch}.${ext}',
