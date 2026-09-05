@@ -603,7 +603,7 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
 --- a/stylesheets/components/CaishengPlatformShell.scss	1969-12-31 18:00:00.000000000 -0600
 +++ b/stylesheets/components/CaishengPlatformShell.scss	2026-09-04 20:11:48.816711581 -0500
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,85 @@
 +.CaishengPlatformShell {
 +  display: flex;
 +  flex-direction: column;
@@ -626,6 +626,12 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 +    margin-inline-end: 12px;
 +  }
 +
++  &__tab {
++    align-items: center;
++    display: inline-flex;
++    position: relative;
++  }
++
 +  &__nav button {
 +    background: transparent;
 +    border: 0;
@@ -640,9 +646,14 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 +    color: #fff;
 +  }
 +
-+  &__nav button:disabled {
-+    cursor: not-allowed;
-+    opacity: 0.35;
++  &__remove {
++    margin-left: -8px;
++    padding-inline: 7px !important;
++  }
++
++  &__add {
++    font-size: 22px;
++    margin-left: auto;
 +  }
 +
 +  &__content {
@@ -661,6 +672,14 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/stylesheets/components/Cai
 +    min-height: 0;
 +    min-width: 0;
 +    position: absolute;
++    width: 100%;
++  }
++
++  &__signal > * {
++    flex: 1 1 auto;
++    height: 100%;
++    min-height: 0;
++    min-width: 0;
 +    width: 100%;
 +  }
 +
@@ -1059,88 +1078,122 @@ diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengComp
 +}
 diff -ruN '--exclude=node_modules' '--exclude=.git' a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
 --- a/ts/components/CaishengPlatformShell.dom.tsx	1969-12-31 18:00:00.000000000 -0600
-+++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-04 20:11:47.660681874 -0500
-@@ -0,0 +1,85 @@
++++ b/ts/components/CaishengPlatformShell.dom.tsx	2026-09-05 02:45:00.000000000 -0500
+@@ -0,0 +1,122 @@
 +// Copyright 2026 Caisheng
 +// SPDX-License-Identifier: AGPL-3.0-only
 +
-+import {
-+  createElement,
-+  useEffect,
-+  useMemo,
-+  useState,
-+  type HTMLAttributes,
-+  type JSX,
-+  type ReactNode,
-+} from 'react';
-+import {
-+  getCaishengPlatforms,
-+  getDefaultCaishengPlatform,
-+  type CaishengPlatform,
-+} from '../services/caishengPlatform.std.ts';
++import { createElement, useEffect, useState, type HTMLAttributes, type JSX, type ReactNode } from 'react';
 +
-+export function CaishengPlatformShell({
-+  signal,
-+}: Readonly<{ signal: ReactNode }>): JSX.Element {
-+  const platforms = useMemo(
-+    () =>
-+      getCaishengPlatforms({
-+        signalEnabled: true,
-+        whatsappEnabled: true,
-+        telegramEnabled: true,
-+      }),
-+    []
-+  );
-+  const [active, setActive] = useState<CaishengPlatform>(
-+    getDefaultCaishengPlatform(platforms) ?? 'signal'
-+  );
++type Workspace = Readonly<{
++  id: string;
++  platform: 'signal' | 'whatsapp' | 'telegram';
++  label: string;
++  url?: string;
++}>;
++
++const STORAGE_KEY = 'caisheng.workspaces.v2';
++const DEFAULT_WORKSPACES: ReadonlyArray<Workspace> = [
++  { id: 'signal-main', platform: 'signal', label: 'Signal' },
++  { id: 'whatsapp-1', platform: 'whatsapp', label: 'WhatsApp 1', url: 'https://web.whatsapp.com/' },
++  { id: 'telegram-1', platform: 'telegram', label: 'Telegram 1', url: 'https://web.telegram.org/k/' },
++];
++
++function loadWorkspaces(): ReadonlyArray<Workspace> {
++  try {
++    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
++    return Array.isArray(value) && value.length ? value : DEFAULT_WORKSPACES;
++  } catch {
++    return DEFAULT_WORKSPACES;
++  }
++}
++
++export function CaishengPlatformShell({ signal }: Readonly<{ signal: ReactNode }>): JSX.Element {
++  const [workspaces, setWorkspaces] = useState(loadWorkspaces);
++  const [activeId, setActiveId] = useState(workspaces[0]?.id ?? 'signal-main');
 +
 +  useEffect(() => {
-+    if (!platforms.some(item => item.id === active && item.enabled)) {
-+      setActive(getDefaultCaishengPlatform(platforms) ?? 'signal');
++    localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaces));
++    if (!workspaces.some(item => item.id === activeId)) {
++      setActiveId(workspaces[0]?.id ?? 'signal-main');
 +    }
-+  }, [active, platforms]);
++  }, [activeId, workspaces]);
++
++  function addWorkspace(): void {
++    const answer = window.prompt('输入 1 添加 WhatsApp，输入 2 添加 Telegram', '1');
++    const platform = answer === '2' ? 'telegram' : answer === '1' ? 'whatsapp' : null;
++    if (!platform) return;
++    const id = `${platform}-${Date.now()}`;
++    const count = workspaces.filter(item => item.platform === platform).length + 1;
++    const item: Workspace = {
++      id,
++      platform,
++      label: `${platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'} ${count}`,
++      url: platform === 'whatsapp' ? 'https://web.whatsapp.com/' : 'https://web.telegram.org/k/',
++    };
++    setWorkspaces(current => [...current, item]);
++    setActiveId(id);
++  }
++
++  function renameWorkspace(item: Workspace): void {
++    const label = window.prompt('账号备注', item.label)?.trim();
++    if (!label) return;
++    setWorkspaces(current =>
++      current.map(value => value.id === item.id ? { ...value, label } : value)
++    );
++  }
++
++  function removeWorkspace(item: Workspace): void {
++    if (item.platform === 'signal') return;
++    setWorkspaces(current => current.filter(value => value.id !== item.id));
++  }
 +
 +  return (
 +    <div className="CaishengPlatformShell">
-+      <nav className="CaishengPlatformShell__nav" aria-label="财盛应用">
++      <nav className="CaishengPlatformShell__nav" aria-label="财盛多账号翻译工作台">
 +        <strong>财盛翻译</strong>
-+        {platforms.map(item => (
-+          <button
-+            aria-pressed={active === item.id}
-+            className={active === item.id ? 'is-active' : undefined}
-+            disabled={!item.enabled}
-+            key={item.id}
-+            onClick={() => setActive(item.id)}
-+            type="button"
-+          >
-+            {item.label}
-+          </button>
++        {workspaces.map(item => (
++          <span className="CaishengPlatformShell__tab" key={item.id}>
++            <button
++              aria-pressed={activeId === item.id}
++              className={activeId === item.id ? 'is-active' : undefined}
++              onClick={() => setActiveId(item.id)}
++              onDoubleClick={() => renameWorkspace(item)}
++              title="双击修改备注"
++              type="button"
++            >
++              {item.label}
++            </button>
++            {item.platform !== 'signal' ? (
++              <button
++                aria-label={`删除 ${item.label}`}
++                className="CaishengPlatformShell__remove"
++                onClick={() => removeWorkspace(item)}
++                type="button"
++              >
++                ×
++              </button>
++            ) : null}
++          </span>
 +        ))}
++        <button className="CaishengPlatformShell__add" onClick={addWorkspace} type="button">
++          ＋
++        </button>
 +      </nav>
 +      <section className="CaishengPlatformShell__content">
-+        <div
-+          hidden={active !== 'signal'}
-+          className="CaishengPlatformShell__signal"
-+        >
++        <div hidden={activeId !== 'signal-main'} className="CaishengPlatformShell__signal">
 +          {signal}
 +        </div>
-+        {platforms
-+          .filter(item => item.id !== 'signal' && item.enabled && item.url)
++        {workspaces
++          .filter(item => item.platform !== 'signal' && item.url)
 +          .map(item =>
-+            createElement(
-+              'webview',
-+              {
-+                className: 'CaishengPlatformShell__webview',
-+                hidden: active !== item.id,
-+                key: item.id,
-+                partition: `persist:caisheng-${item.id}`,
-+                src: item.url,
-+              } as HTMLAttributes<HTMLElement> & {
-+                partition: string;
-+                src: string;
-+              }
-+            )
++            createElement('webview', {
++              className: 'CaishengPlatformShell__webview',
++              hidden: activeId !== item.id,
++              key: item.id,
++              partition: `persist:caisheng-${item.id}`,
++              src: item.url,
++            } as HTMLAttributes<HTMLElement> & { partition: string; src: string })
 +          )}
 +      </section>
 +    </div>
