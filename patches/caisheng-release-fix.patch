@@ -1,0 +1,267 @@
+Cloning into 'signal-baseline'...
+../caisheng-signal.patch:88: new blank line at EOF.
++
+../caisheng-signal.patch:5775: new blank line at EOF.
++
+../caisheng-signal.patch:5992: new blank line at EOF.
++
+warning: 3 lines add whitespace errors.
+diff --git a/app/main.main.ts b/app/main.main.ts
+index 5c23a6c..c64126c 100644
+--- a/app/main.main.ts
++++ b/app/main.main.ts
+@@ -390,19 +390,8 @@ async function getBackgroundColor(
+ }
+ 
+ function getLocaleOverrideSetting(): string | null {
+-  const value = ephemeralConfig.get("localeOverride");
+-  // oxlint-disable-next-line eqeqeq -- Checking for null explicitly
+-  if (typeof value === "string" || value === null) {
+-    log.info("got fast localeOverride setting", value);
+-    return value;
+-  }
+-
+-  // Default to `null` if setting doesn't exist yet
+-  ephemeralConfig.set("localeOverride", null);
+-
+-  log.info("initializing localeOverride setting", null);
+-
+-  return null;
++  ephemeralConfig.set("localeOverride", "zh-CN");
++  return "zh-CN";
+ }
+ 
+ const zoomFactorService = new ZoomFactorService({
+@@ -775,6 +764,9 @@ async function createWindow() {
+ 
+   // Create the browser window.
+   mainWindow = new BrowserWindow(windowOptions);
++  Menu.setApplicationMenu(null);
++  mainWindow.setMenuBarVisibility(false);
++  mainWindow.autoHideMenuBar = true;
+ 
+   mainWindow.webContents.on(
+     "will-attach-webview",
+diff --git a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
+index 6e17e79..93942b9 100644
+--- a/ts/components/CaishengPlatformShell.dom.tsx
++++ b/ts/components/CaishengPlatformShell.dom.tsx
+@@ -227,7 +227,10 @@ export function CaishengPlatformShell({
+       }}
+     >
+       <nav className="CaishengPlatformShell__nav" aria-label="财盛多账号工作台">
+-        <strong>财盛翻译</strong>
++        <div className="CaishengPlatformShell__brand">
++          <span className="CaishengPlatformShell__brandMark">财</span>
++          <span><strong>财盛聚合聊天</strong><small>消息工作台</small></span>
++        </div>
+         <div className="CaishengPlatformShell__tabs">
+           {items
+             .filter((item) => allowed(item.platformId, user))
+@@ -260,6 +263,7 @@ export function CaishengPlatformShell({
+                 )}
+                 <span className="CaishengPlatformShell__tabLabel">
+                   {item.label}
++                  <small>{item.platformId === "signal" ? "Signal 服务" : item.platformId === "whatsapp" ? "WhatsApp 服务" : "Telegram 服务"}</small>
+                 </span>
+               </button>
+             ))}
+@@ -276,7 +280,7 @@ export function CaishengPlatformShell({
+           }}
+           type="button"
+         >
+-          ＋
++          <span>＋</span><small>添加服务</small>
+         </button>
+         <button
+           aria-expanded={showSettings}
+@@ -288,7 +292,7 @@ export function CaishengPlatformShell({
+           }}
+           type="button"
+         >
+-          ⚙
++          <span>⚙</span><small>翻译设置</small>
+         </button>
+         {adding ? (
+           <div
+diff --git a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
+index cb4ab44..571fbe6 100644
+--- a/stylesheets/components/CaishengPlatformShell.scss
++++ b/stylesheets/components/CaishengPlatformShell.scss
+@@ -1,48 +1,70 @@
+ .CaishengPlatformShell {
+   display: flex;
+-  flex-direction: column;
++  flex-direction: row;
+   height: 100vh;
+   overflow: hidden;
+   width: 100vw;
+ 
+   &__nav {
+-    align-items: center;
+-    background: #f1f2f4;
+-    border-bottom: 1px solid #d8dadd;
+-    color: #16181b;
++    align-items: stretch;
++    background: linear-gradient(180deg, #242736 0%, #1b1d29 100%);
++    border-right: 1px solid #303445;
++    color: #fff;
+     display: flex;
+-    flex: 0 0 56px;
++    flex: 0 0 214px;
++    flex-direction: column;
+     gap: 7px;
+-    padding: 0 12px;
++    padding: 16px 12px;
+     z-index: 2147483000;
+     position: relative;
+   }
+ 
+   &__tabs {
+     display: flex;
++    flex-direction: column;
+     gap: 7px;
+     min-width: 0;
+-    overflow-x: auto;
++    overflow-y: auto;
+   }
+ 
+-  &__nav strong {
+-    color: #202124;
++  &__brand {
++    align-items: center;
++    display: flex;
++    gap: 10px;
++    margin: 0 4px 12px;
++  }
++  &__brand > span:last-child,
++  &__tabLabel { display: flex; flex-direction: column; }
++  &__brand strong {
++    color: #fff;
+     font-size: 15px;
+-    margin-inline-end: 10px;
+     white-space: nowrap;
+   }
++  &__brand small,
++  &__tabLabel small,
++  &__nav button > small { color: #9da4b8; font-size: 11px; }
++  &__brandMark {
++    align-items: center;
++    background: linear-gradient(135deg, #7c5cff, #5d3ee8);
++    border-radius: 12px;
++    display: inline-flex;
++    font-weight: 800;
++    height: 40px;
++    justify-content: center;
++    width: 40px;
++  }
+ 
+   &__nav button {
+     background: transparent;
+     border: 0;
+     border: 1px solid transparent;
+     border-radius: 10px;
+-    color: #30343b;
++    color: #e8eaf2;
+     cursor: pointer;
+     height: 44px;
+-    justify-content: center;
+-    padding: 4px;
+-    width: 44px;
++    justify-content: flex-start;
++    padding: 6px 8px;
++    width: 100%;
+     align-items: center;
+     display: inline-flex;
+     flex: none;
+@@ -50,10 +72,10 @@
+   }
+ 
+   &__nav button.is-active {
+-    background: #fff;
+-    border-color: #f59e0b;
+-    box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+-    color: #111827;
++    background: #6d55e8;
++    border-color: #8772ef;
++    box-shadow: 0 6px 18px rgb(71 50 180 / 28%);
++    color: #fff;
+   }
+ 
+   &__nav button:disabled {
+@@ -62,16 +84,16 @@
+   }
+ 
+   &__add {
+-    background: #fff !important;
+-    border-color: #d8dadd !important;
+-    color: #111827 !important;
+-    font-size: 28px;
+-    margin-left: auto;
++    background: #303445 !important;
++    border-color: #42475c !important;
++    color: #fff !important;
++    margin-top: auto;
+   }
+   &__settingsButton {
+-    font-size: 18px;
+     padding-inline: 9px !important;
+   }
++  &__add > span { font-size: 25px; }
++  &__settingsButton > span { font-size: 18px; }
+   &__icon,
+   &__iconFallback {
+     border-radius: 9px;
+@@ -108,9 +130,10 @@
+   }
+   &__picker {
+     position: absolute;
+-    right: 12px;
++    bottom: 74px;
++    left: 204px;
+     min-width: 230px;
+-    top: 54px;
++    top: auto;
+     z-index: 1000;
+   }
+   &__settings {
+@@ -121,8 +144,9 @@
+     color: #111827;
+     padding: 12px;
+     position: absolute;
+-    right: 12px;
+-    top: 54px;
++    bottom: 16px;
++    left: 204px;
++    top: auto;
+     width: 290px;
+     z-index: 1001;
+   }
+@@ -165,7 +189,10 @@
+     color: #dc2626;
+   }
+   &__tabLabel {
+-    display: none;
++    align-items: flex-start;
++    line-height: 1.25;
++    overflow: hidden;
++    text-align: left;
+   }
+   &__menuIcon {
+     align-items: center;
+diff --git a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
+index 0e0f29e..217f486 100644
+--- a/ts/services/caishengTranslation.dom.ts
++++ b/ts/services/caishengTranslation.dom.ts
+@@ -37,8 +37,8 @@ export function getCaishengProviderOrder(settings: CaishengTranslationSettings):
+     ? (settings.compatibleEndpoint?.trim() ? ['qwen'] as const : ['openai'] as const)
+     : [];
+   return settings.libreEndpoint?.trim()
+-    ? [...configuredAI, 'google-free', 'mymemory', 'libre']
+-    : [...configuredAI, 'google-free', 'mymemory'];
++    ? [...configuredAI, 'mymemory', 'google-free', 'libre']
++    : [...configuredAI, 'mymemory', 'google-free'];
+ }
+ async function withProvider(text: string, settings: CaishengTranslationSettings, provider: CaishengTranslationProvider): Promise<string> {
+   const result = await window.SignalContext.caishengTranslate({
+
