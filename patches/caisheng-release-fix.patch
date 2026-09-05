@@ -34,6 +34,28 @@ index 5c23a6c..c64126c 100644
  
    mainWindow.webContents.on(
      "will-attach-webview",
+diff --git a/app/caishengWebviewTranslation.main.ts b/app/caishengWebviewTranslation.main.ts
+index ba15cd2..dc3bf8f 100644
+--- a/app/caishengWebviewTranslation.main.ts
++++ b/app/caishengWebviewTranslation.main.ts
+@@ -59,10 +59,13 @@ async function performTranslation(input: TranslationRequest): Promise<{ text: st
+     url.searchParams.set('api-version', '3.0'); url.searchParams.set('to', target);
+     const body = await fetchJson(url.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': input.apiKey, ...(input.region ? { 'Ocp-Apim-Subscription-Region': String(input.region) } : {}) }, body: JSON.stringify([{ Text: text }]) }, timeout);
+     translated = body?.[0]?.translations?.[0]?.text?.trim() ?? '';
+-  } else if (provider === 'openai' || provider === 'qwen' || provider === 'glm') {
+-    if (typeof input.apiKey !== 'string' || !input.apiKey) throw new Error(`${provider} 需要 API Key`);
+-    const endpoint = typeof input.endpoint === 'string' && input.endpoint ? input.endpoint.replace(/\/$/u, '') : 'https://api.openai.com/v1';
+-    const body = await fetchJson(`${endpoint}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: input.model || 'gpt-4.1-mini', temperature: 0, messages: [{ role: 'system', content: 'You are a precise chat translator. Preserve names, numbers, URLs, emojis, line breaks and tone. Return only the translation.' }, { role: 'user', content: `Target language: ${target}\n\n${text}` }] }) }, timeout);
++  } else if (provider === 'openai' || provider === 'qwen' || provider === 'glm' || provider === 'local') {
++    if (provider !== 'local' && (typeof input.apiKey !== 'string' || !input.apiKey)) throw new Error(`${provider} 需要 API Key`);
++    const endpoint = typeof input.endpoint === 'string' && input.endpoint ? input.endpoint.replace(/\/$/u, '') : provider === 'local' ? '' : 'https://api.openai.com/v1';
++    if (!endpoint) throw new Error('请填写本地或内网模型地址');
++    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
++    if (typeof input.apiKey === 'string' && input.apiKey) headers.Authorization = `Bearer ${input.apiKey}`;
++    const body = await fetchJson(`${endpoint}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ model: input.model || 'qwen2.5:7b', temperature: 0, messages: [{ role: 'system', content: 'You are a precise chat translator. Preserve names, numbers, URLs, emojis, line breaks and tone. Return only the translation.' }, { role: 'user', content: `Target language: ${target}\n\n${text}` }] }) }, timeout);
+     translated = body?.choices?.[0]?.message?.content?.trim() ?? '';
+   } else throw new Error('不支持的翻译服务');
+   if (!translated) throw new Error('翻译服务未返回结果');
 diff --git a/ts/components/CaishengPlatformShell.dom.tsx b/ts/components/CaishengPlatformShell.dom.tsx
 index 6e17e79..93942b9 100644
 --- a/ts/components/CaishengPlatformShell.dom.tsx
@@ -76,6 +98,44 @@ index 6e17e79..93942b9 100644
          </button>
          {adding ? (
            <div
+diff --git a/ts/components/CaishengComposerTranslator.dom.tsx b/ts/components/CaishengComposerTranslator.dom.tsx
+index 73b06e8..ea6d83e 100644
+--- a/ts/components/CaishengComposerTranslator.dom.tsx
++++ b/ts/components/CaishengComposerTranslator.dom.tsx
+@@ -101,6 +101,7 @@ export function CaishengComposerTranslator({
+             }
+           >
+             <option value="auto">自动选择（免费优先）</option>
++            <option value="local">本地/内网模型（推荐）</option>
+             <option value="google-free">Google 免费公共翻译</option>
+             <option value="mymemory">MyMemory 免费翻译</option>
+             <option value="libre">LibreTranslate</option>
+@@ -116,10 +117,11 @@ export function CaishengComposerTranslator({
+             placeholder="API Key（仅保存在本机）"
+             onChange={event => update({ apiKey: event.target.value })}
+           />
+-          {settings.provider === 'openai' ? (
++          {settings.provider === 'openai' || settings.provider === 'local' ? (
+             <input
+-              aria-label="OpenAI 模型"
++              aria-label="翻译模型"
+               value={settings.openAIModel}
++              placeholder="模型名称"
+               onChange={event => update({ openAIModel: event.target.value })}
+             />
+           ) : null}
+@@ -133,9 +135,9 @@ export function CaishengComposerTranslator({
+               placeholder="Azure 区域（如 eastasia）"
+               onChange={event => update({ microsoftRegion: event.target.value })} />
+           ) : null}
+-          {settings.provider === 'qwen' || settings.provider === 'glm' ? (
++          {settings.provider === 'qwen' || settings.provider === 'glm' || settings.provider === 'local' ? (
+             <input aria-label="OpenAI 兼容 API 地址" value={settings.compatibleEndpoint}
+-              placeholder="OpenAI 兼容 API 地址"
++              placeholder={settings.provider === 'local' ? '例如 http://127.0.0.1:11434/v1' : 'OpenAI 兼容 API 地址'}
+               onChange={event => update({ compatibleEndpoint: event.target.value })} />
+           ) : null}
+           <label>
 diff --git a/stylesheets/components/CaishengPlatformShell.scss b/stylesheets/components/CaishengPlatformShell.scss
 index cb4ab44..571fbe6 100644
 --- a/stylesheets/components/CaishengPlatformShell.scss
@@ -242,9 +302,18 @@ index cb4ab44..571fbe6 100644
    &__menuIcon {
      align-items: center;
 diff --git a/ts/services/caishengTranslation.dom.ts b/ts/services/caishengTranslation.dom.ts
-index 0e0f29e..217f486 100644
+index 0e0f29e..ab59680 100644
 --- a/ts/services/caishengTranslation.dom.ts
 +++ b/ts/services/caishengTranslation.dom.ts
+@@ -1,7 +1,7 @@
+ // Copyright 2026 Caisheng
+ // SPDX-License-Identifier: AGPL-3.0-only
+ 
+-export type CaishengTranslationProvider = 'auto' | 'google-free' | 'mymemory' | 'libre' | 'microsoft' | 'openai' | 'qwen' | 'glm';
++export type CaishengTranslationProvider = 'auto' | 'local' | 'google-free' | 'mymemory' | 'libre' | 'microsoft' | 'openai' | 'qwen' | 'glm';
+ export type CaishengTranslationSettings = Readonly<{
+   provider: CaishengTranslationProvider; apiKey: string; targetLanguage: string;
+   openAIModel: string; autoTranslateIncoming: boolean; libreEndpoint: string;
 @@ -37,8 +37,8 @@ export function getCaishengProviderOrder(settings: CaishengTranslationSettings):
      ? (settings.compatibleEndpoint?.trim() ? ['qwen'] as const : ['openai'] as const)
      : [];
@@ -257,7 +326,7 @@ index 0e0f29e..217f486 100644
  async function withProvider(text: string, settings: CaishengTranslationSettings, provider: CaishengTranslationProvider): Promise<string> {
    const result = await window.SignalContext.caishengTranslate({
 diff --git a/ts/test-node/services/caishengTranslation_test.node.ts b/ts/test-node/services/caishengTranslation_test.node.ts
-index 77479d8..c087c99 100644
+index 77479d8..d1d073a 100644
 --- a/ts/test-node/services/caishengTranslation_test.node.ts
 +++ b/ts/test-node/services/caishengTranslation_test.node.ts
 @@ -25,8 +25,8 @@ describe('Caisheng translation', () => {
@@ -271,7 +340,19 @@ index 77479d8..c087c99 100644
    });
  
    it('does not fall back when a provider is explicitly selected', () => {
-@@ -43,8 +43,8 @@ describe('Caisheng translation', () => {
+@@ -34,6 +34,11 @@ describe('Caisheng translation', () => {
+     assert.deepEqual(getCaishengProviderOrder(settings), ['microsoft']);
+   });
+ 
++  it('supports a local or LAN translation endpoint without public fallback', () => {
++    const settings = { provider: 'local', compatibleEndpoint: 'http://127.0.0.1:11434/v1' } as CaishengTranslationSettings;
++    assert.deepEqual(getCaishengProviderOrder(settings), ['local']);
++  });
++
+   it('prefers a configured AI provider for accurate translation', () => {
+     const settings = {
+       provider: 'auto',
+@@ -43,8 +48,8 @@ describe('Caisheng translation', () => {
      } as CaishengTranslationSettings;
      assert.deepEqual(getCaishengProviderOrder(settings), [
        'openai',
