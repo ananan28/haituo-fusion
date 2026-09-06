@@ -135,7 +135,7 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
 
   const send = async () => {
     const body = draft.trim();
-    if (!body || !selectedId || rejectChinese(body)) return;
+    if (!body || !selectedId || rejectChinese(`${body}\n${replyTo?.body || ''}`)) return;
     setDraft('');
     try {
       const message = await adapter.sendMessage(accountId, selectedId, body, quote(replyTo));
@@ -146,12 +146,12 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
   const sendFile = async (file: File, voiceNote = false) => {
     if (!selectedId) return;
     const caption = voiceNote ? '' : draft.trim();
-    if (rejectChinese(caption)) return;
+    if (rejectChinese(`${caption}\n${replyTo?.body || ''}`)) return;
     setSendingAttachment(true);
     try {
       const attachment = { ...(await fileToDraft(file, voiceNote)), caption };
       const message = await adapter.sendAttachment(accountId, selectedId, attachment, quote(replyTo));
-      setMessages(items => [...items, message]); setReplyTo(undefined); await loadConversations();
+      setMessages(items => [...items, message]); setReplyTo(undefined); setDraft(''); await loadConversations();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '附件发送失败，请稍后重试'); }
     finally { setSendingAttachment(false); }
   };
@@ -197,7 +197,7 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
   const edit = async (message: SignalMessage) => {
     if (!selectedId) return;
     const body = window.prompt('编辑消息', message.body)?.trim();
-    if (!body || body === message.body) return;
+    if (!body || body === message.body || rejectChinese(body)) return;
     try {
       const updated = await adapter.editMessage(accountId, selectedId, message.sentAt, body);
       setMessages(items => items.map(item => item.id === message.id ? updated : item));
