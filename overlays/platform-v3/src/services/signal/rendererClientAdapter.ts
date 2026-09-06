@@ -2,12 +2,24 @@ import { ipcRenderer } from 'electron';
 import qrcode from 'qrcode-generator';
 import { signalClient } from '../../features/caisheng/signal/rendererClient';
 import type { SignalRuntimeEvent } from '../../features/caisheng/signal/types';
-import type { SignalAccountSummary, SignalConversation, SignalMessage, SignalServiceAdapter, SignalServiceEvent } from './types';
+import type {
+  SignalAccountSummary,
+  SignalAttachmentDraft,
+  SignalConversation,
+  SignalMessage,
+  SignalQuote,
+  SignalServiceAdapter,
+  SignalServiceEvent,
+} from './types';
 
 const summaries = new Map<string, SignalAccountSummary>();
 function qr(uri: string): string { const code = qrcode(0, 'M'); code.addData(uri); code.make(); return code.createDataURL(6, 4); }
 async function ensure(accountId: string): Promise<void> { await ipcRenderer.invoke('caisheng:signal:accounts:ensure', accountId, 'Signal'); }
 function summary(accountId: string): SignalAccountSummary { return summaries.get(accountId) ?? { id: accountId, label: 'Signal', connectionState: 'unlinked' }; }
+
+// 富消息方法由财盛 Signal 适配器提供；不加载 Signal Desktop 窗口或资源。
+const richCall = <T>(method: string, params: unknown): Promise<T> =>
+  (signalClient.call as unknown as (name: string, value: unknown) => Promise<T>)(method, params);
 
 class RendererClientSignalAdapter implements SignalServiceAdapter {
   async getAccount(accountId: string): Promise<SignalAccountSummary> {
@@ -32,8 +44,20 @@ class RendererClientSignalAdapter implements SignalServiceAdapter {
   async listMessages(accountId: string, conversationId: string, before?: number): Promise<SignalMessage[]> {
     return (await signalClient.call('listMessages', { accountId, conversationId, before, limit: 100 })).items;
   }
-  sendMessage(accountId: string, conversationId: string, body: string): Promise<SignalMessage> {
-    return signalClient.call('sendMessage', { accountId, conversationId, body });
+  sendMessage(accountId: string, conversationId: string, body: string, quote?: SignalQuote): Promise<SignalMessage> {
+    return richCall('sendMessage', { accountId, conversationId, body, quote });
+  }
+  sendAttachment(accountId: string, conversationId: string, attachment: SignalAttachmentDraft, quote?: SignalQuote): Promise<SignalMessage> {
+    return richCall('sendAttachment', { accountId, conversationId, attachment, quote });
+  }
+  reactMessage(accountId: string, conversationId: string, targetSentAt: number, emoji: string, remove = false): Promise<void> {
+    return richCall('reactMessage', { accountId, conversationId, targetSentAt, emoji, remove });
+  }
+  deleteMessage(accountId: string, conversationId: string, targetSentAt: number): Promise<void> {
+    return richCall('deleteMessage', { accountId, conversationId, targetSentAt });
+  }
+  editMessage(accountId: string, conversationId: string, targetSentAt: number, body: string): Promise<SignalMessage> {
+    return richCall('editMessage', { accountId, conversationId, targetSentAt, body });
   }
   markRead(accountId: string, conversationId: string): Promise<void> {
     return signalClient.call('markRead', { accountId, conversationId, through: Date.now() });
