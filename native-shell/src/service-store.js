@@ -118,6 +118,7 @@ class ServiceStore {
     if ('color' in patch && /^#[0-9a-f]{6}$/i.test(patch.color)) s.color = patch.color;
     for (const key of ['enabled', 'muted', 'notifications']) if (key in patch) s[key] = Boolean(patch[key]);
     if ('unread' in patch) s.unread = Math.max(0, Math.floor(Number(patch.unread) || 0));
+    if ('lastOpenedAt' in patch) s.lastOpenedAt = Math.max(0, Math.floor(Number(patch.lastOpenedAt) || 0));
     if (patch.fingerprint) s.fingerprint = validateFingerprint({ ...s.fingerprint, ...patch.fingerprint });
     this.persist(); return s;
   }
@@ -148,24 +149,54 @@ class ServiceStore {
     if (!service || service.kind !== 'web') return null;
     const fp = service.fingerprint;
     const ses = session.fromPartition(servicePartition(service.id), { cache: true });
+
+    // partition、Cookie、IndexedDB、Service Worker、缓存及代理均按账号 ID 隔离。
     if (fp.userAgent) ses.setUserAgent(fp.userAgent, fp.language);
-    if (fp.proxy.mode === 'direct' || !fp.proxy.server) await ses.setProxy({ mode: 'direct' });
+    const proxy = fp.proxy || {};
+    if (proxy.mode === 'direct' || !proxy.server) await ses.setProxy({ mode: 'direct' });
     else {
-      const scheme = fp.proxy.mode === 'socks5' ? 'socks5' : fp.proxy.mode;
-      const rule = fp.proxy.server.includes('://') ? fp.proxy.server : scheme + '://' + fp.proxy.server;
+      const scheme = proxy.mode === 'socks5' ? 'socks5' : proxy.mode;
+      const rule = proxy.server.includes('://') ? proxy.server : scheme + '://' + proxy.server;
       await ses.setProxy({ mode: 'fixed_servers', proxyRules: rule });
     }
+
+    ses.webRequest.onBeforeSendHeaders((details, callback) => {
+      details.requestHeaders['Accept-Language'] = fp.language + ',' + fp.language.split('-')[0] + ';q=0.9';
+      callback({ requestHeaders: details.requestHeaders });
+    });
+    ses.setPermissionCheckHandler((_wc, permission) => (
+      ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
+    ));
     ses.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(['notifications', 'media', 'clipboard-read'].includes(permission));
+      callback(['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission));
     });
     return ses;
   }
-  async clearAccount(id) {
+
+  // 强制刷新只清理当前账号的网络/代码/Service Worker 缓存，保留 Cookie 和登录状态。
+  async clearAccountCache(id) {
     const s = this.get(id); if (!s || s.kind !== 'web') return;
     const ses = session.fromPartition(servicePartition(id));
     await ses.clearCache();
+    if (typeof ses.clearCodeCaches === 'function') await ses.clearCodeCaches({});
+    if (typeof ses.clearHostResolverCache === 'function') await ses.clearHostResolverCache();
     await ses.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+    ses.flushStorageData();
   }
+
+  // 删除账号时才清除该 partition 的 Cookie、历史存储和缓存，不影响其他账号。
+  async purgeAccount(id) {
+    const s = this.get(id); if (!s || s.kind !== 'web') return;
+    const ses = session.fromPartition(servicePartition(id));
+    await ses.clearCache();
+    await ses.clearStorageData({
+      storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+    });
+    ses.flushStorageData();
+  }
+
+  async clearAccount(id) { return this.clearAccountCache(id); }
+}
 }
 
 module.exports = { ServiceStore, DEFAULT_FINGERPRINT, servicePartition, validateFingerprint };
