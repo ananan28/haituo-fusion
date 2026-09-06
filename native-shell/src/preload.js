@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('caisheng', {
   update: (id, patch) => invoke('services:update', id, patch),
   move: (id, direction) => invoke('services:move', id, direction),
   remove: id => invoke('services:remove', id),
-  open: service => invoke('services:open', service),
+  open: service => invoke('services:open', typeof service === 'string' ? service : service?.id),
   refresh: (id, mode) => invoke('services:refresh', id, mode),
   testProxy: id => invoke('services:test-proxy', id),
   hide: () => invoke('view:hide'),
