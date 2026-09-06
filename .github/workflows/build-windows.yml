@@ -114,13 +114,16 @@ jobs:
           }
           if (-not (Test-Path $smokeFile)) {
             if (Test-Path $smokeLog) { Get-Content $smokeLog }
-            & taskkill /PID $process.Id /T /F 2>$null | Out-Null
+            Start-Process taskkill -ArgumentList @('/PID',[string]$process.Id,'/T','/F') -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+            $global:LASTEXITCODE = 0
             throw '启动冒烟测试超时：未收到主界面成功哨兵'
           }
           $result = (Get-Content $smokeFile -Raw).Trim()
-          & taskkill /PID $process.Id /T /F 2>$null | Out-Null
+          Start-Process taskkill -ArgumentList @('/PID',[string]$process.Id,'/T','/F') -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+            $global:LASTEXITCODE = 0
           if ($result -ne 'OK') { throw "启动冒烟测试返回无效结果：$result" }
           Write-Host '财盛主界面启动验证通过'
+          exit 0
 
       - name: 验证安装版与便携版
         shell: pwsh
