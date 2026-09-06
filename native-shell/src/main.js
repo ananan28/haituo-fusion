@@ -16,6 +16,11 @@ const CATALOG = Object.freeze([
   { id: 'whatsapp', name: 'WhatsApp', kind: 'web', url: 'https://web.whatsapp.com/', color: '#13a45a' }
 ]);
 const smoke = process.argv.includes('--smoke-test') || process.env.CAISHENG_SMOKE_TEST === '1';
+const smokeFile = process.env.CAISHENG_SMOKE_FILE || '';
+function smokeLog(message) {
+  if (!smokeFile) return;
+  try { fs.appendFileSync(smokeFile + '.log', new Date().toISOString() + ' ' + message + '\n', 'utf8'); } catch {}
+}
 let win;
 let tray;
 let store;
@@ -144,6 +149,7 @@ function makeTray() {
   tray.on('double-click', () => win.show());
 }
 app.whenReady().then(() => {
+  smokeLog('APP_READY');
   store = new ServiceStore(app.getPath('userData'));
   whatsapp = new WhatsAppRuntime(store, payload => send('service:state', payload));
   if (!smoke) {
@@ -164,9 +170,10 @@ app.whenReady().then(() => {
   whatsapp.setWindow(win);
   const rendererFile = path.join(__dirname, 'renderer', 'index.html');
   if (smoke) {
-    const hardTimeout = setTimeout(() => process.exit(2), 30000);
+    const hardTimeout = setTimeout(() => { smokeLog('MAIN_TIMEOUT'); process.exit(2); }, 30000);
     win.webContents.once('did-fail-load', (_event, code, description) => {
       console.error('CAISHENG_RENDERER_FAILED', code, description);
+      smokeLog('RENDERER_FAILED ' + code + ' ' + description);
       process.exit(3);
     });
     win.loadFile(rendererFile).then(async () => {
@@ -176,10 +183,18 @@ app.whenReady().then(() => {
       ).catch(() => false);
       clearTimeout(hardTimeout);
       console.log(healthy ? 'CAISHENG_RENDERER_READY' : 'CAISHENG_RENDERER_INVALID');
-      process.exit(healthy ? 0 : 4);
+      if (healthy && smokeFile) {
+        fs.mkdirSync(path.dirname(smokeFile), { recursive: true });
+        fs.writeFileSync(smokeFile, 'OK', 'utf8');
+        smokeLog('RENDERER_READY');
+      } else if (!healthy) {
+        smokeLog('RENDERER_INVALID');
+      }
+      setTimeout(() => process.exit(healthy ? 0 : 4), 250);
     }).catch(error => {
       clearTimeout(hardTimeout);
       console.error('CAISHENG_RENDERER_LOAD_REJECTED', error);
+      smokeLog('LOAD_REJECTED ' + String(error));
       process.exit(3);
     });
   } else {
