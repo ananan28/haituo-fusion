@@ -12,3 +12,20 @@
 .cs-signal-chat > footer { background: white; border-top: 1px solid #e7e9f0; padding: 12px; display: flex; gap: 10px; }.cs-signal-chat textarea { flex: 1; resize: none; border: 1px solid #dfe2ea; border-radius: 12px; padding: 10px; min-height: 40px; }.cs-signal-chat > footer button, .cs-signal-link button { border: 0; border-radius: 10px; padding: 0 22px; background: #6552e8; color: white; cursor: pointer; }
 .cs-signal-link { height: 100%; display: grid; place-items: center; background: #f6f7fb; }.cs-signal-link__card { width: min(440px, 90%); text-align: center; padding: 34px; border-radius: 20px; background: white; box-shadow: 0 12px 40px #27224c1c; }.cs-signal-mark { margin: auto; width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; color: white; background: #6552e8; font-size: 24px; font-weight: 700; }.cs-signal-qr { display: block; width: 270px; height: 270px; margin: 22px auto; }.cs-signal-link button { min-height: 42px; }.cs-link-button { display: block; margin: 12px auto 0; }.cs-signal-error { color: #cc3344; }.cs-signal-toast { position: absolute; right: 18px; bottom: 82px; border: 0; background: #272b35; color: white; padding: 10px 14px; border-radius: 9px; }
 @media (max-width: 760px) { .cs-signal-shell { grid-template-columns: 250px minmax(0, 1fr); }.cs-signal-message { max-width: 84%; } }
+
+.cs-signal-message blockquote { margin: 0 0 8px; padding: 7px 9px; border-left: 3px solid currentColor; background: #0000000d; border-radius: 5px; display: flex; flex-direction: column; opacity: .78; }
+.cs-signal-media { display: block; max-width: min(420px, 100%); max-height: 330px; margin-top: 7px; border-radius: 10px; }
+.cs-signal-audio { display: block; width: min(340px, 100%); margin-top: 7px; }
+.cs-signal-file { display: block; margin-top: 7px; color: inherit; overflow-wrap: anywhere; }
+.cs-signal-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; opacity: 0; transition: opacity .15s; }
+.cs-signal-message:hover .cs-signal-actions, .cs-signal-message:focus-within .cs-signal-actions { opacity: 1; }
+.cs-signal-actions button { font-size: 12px; }
+.cs-signal-reactions { display: flex; gap: 4px; margin-top: 5px; }.cs-signal-reactions span { background: #ffffffb8; color: #222; border-radius: 12px; padding: 2px 6px; }
+.cs-signal-edited { margin-left: 4px; opacity: .62; }
+.cs-signal-reply { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; background: #f0edff; border-top: 1px solid #ddd7ff; }
+.cs-signal-reply button { border: 0; background: transparent; color: #6552e8; cursor: pointer; }
+.cs-signal-compose-settings { display: flex; gap: 16px; align-items: center; min-height: 34px; padding: 4px 14px; background: #fff; border-top: 1px solid #e7e9f0; font-size: 12px; color: #606777; }
+.cs-signal-compose-settings label { display: flex; align-items: center; gap: 5px; }.cs-signal-compose-settings select { border: 1px solid #dfe2ea; border-radius: 6px; padding: 3px 5px; }
+.cs-signal-tool { flex: none; width: 42px; padding: 0 !important; font-size: 18px; background: #eef0f6 !important; color: #303746 !important; }
+.cs-signal-tool.is-recording { background: #d9344f !important; color: #fff !important; animation: cs-signal-pulse 1s infinite alternate; }
+@keyframes cs-signal-pulse { to { opacity: .58; } }
