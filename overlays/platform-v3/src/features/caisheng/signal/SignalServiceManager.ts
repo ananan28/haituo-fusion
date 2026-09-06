@@ -23,6 +23,7 @@ export class SignalServiceManager {
 
   async start(accountId: string): Promise<void> {
     if (this.instances.has(accountId)) return;
+    await this.accounts.update(accountId, { status: 'starting', lastError: undefined });
     if (!(await this.accounts.list()).some(item => item.id === accountId)) throw new Error('Signal 账号不存在');
     const runtime = new SignalNativeProcess(accountId, this.runtimeRoot, this.accounts.dataDir(accountId));
     runtime.on('receive', payload => { void this.receive(accountId, payload); });
@@ -33,11 +34,17 @@ export class SignalServiceManager {
       const accounts = await runtime.rpc('listAccounts');
       const number = accounts?.[0]?.number ?? accounts?.[0]?.account ?? accounts?.[0];
       if (typeof number === 'string') this.numbers.set(accountId, number);
-    } catch (error) { this.instances.delete(accountId); throw error; }
+      await this.accounts.update(accountId, { status: 'ready', phoneNumber: typeof number === 'string' ? number : undefined, lastError: undefined });
+    } catch (error: any) {
+      this.instances.delete(accountId);
+      await this.accounts.update(accountId, { status: 'error', lastError: String(error?.message || error) });
+      throw error;
+    }
   }
 
   async beginLink(accountId: string, deviceName: string): Promise<SignalLinkState> {
     await this.start(accountId);
+    await this.accounts.update(accountId, { status: 'linking', deviceName: deviceName || '财盛聚合聊天', lastError: undefined });
     const runtime = this.instances.get(accountId)!;
     const started = await runtime.rpc('startLink', {}, 30_000);
     const uri = started?.deviceLinkUri;
@@ -49,10 +56,15 @@ export class SignalServiceManager {
         const accounts = await runtime.rpc('listAccounts');
         const number = accounts?.[0]?.number ?? accounts?.[0]?.account ?? accounts?.[0];
         if (typeof number === 'string') this.numbers.set(accountId, number);
+        await this.accounts.update(accountId, { status: 'ready', phoneNumber: typeof number === 'string' ? number : undefined, deviceName: deviceName || '财盛聚合聊天', lastError: undefined });
         this.publish({ type: 'link', link: { accountId, state: 'linked' } });
         await runtime.rpc('sendSyncRequest', { account: number });
       })
-      .catch(error => this.publish({ type: 'link', link: { accountId, state: 'failed', error: String(error.message || error) } }));
+      .catch(async error => {
+        const message = String(error.message || error);
+        await this.accounts.update(accountId, { status: 'error', lastError: message });
+        this.publish({ type: 'link', link: { accountId, state: 'failed', error: message } });
+      });
     return link;
   }
 
@@ -104,7 +116,7 @@ export class SignalServiceManager {
     await this.history(accountId).append(message); this.publish({ type: 'message', accountId, message });
   }
 
-  async stop(accountId: string) { const item = this.instances.get(accountId); if (item) await item.stop(); this.instances.delete(accountId); }
+  async stop(accountId: string) { const item = this.instances.get(accountId); if (item) await item.stop(); this.instances.delete(accountId); this.numbers.delete(accountId); await this.accounts.update(accountId, { status: 'stopped', lastError: undefined }); }
   async shutdown() { await Promise.allSettled([...this.instances.values()].map(item => item.stop())); this.instances.clear(); }
 
   async call<M extends SignalMethod>(method: M, p: SignalRequestMap[M]): Promise<SignalResponseMap[M]> {
