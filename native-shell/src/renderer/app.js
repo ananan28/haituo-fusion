@@ -162,8 +162,9 @@ async function refresh(mode = 'normal') {
   try { await caisheng.refresh(service.id, mode); toast(mode === 'clear' ? '已清理缓存并刷新' : mode === 'restart' ? '服务已重新启动' : '正在刷新'); }
   catch (error) { toast(error.message, true); }
 }
-function fillAccount(service) {
+async function fillAccount(service) {
   const form = $('#accountForm'), fp = service.fingerprint || {}, proxy = fp.proxy || {};
+  const translation = await translationScope(service, '');
   for (const key of ['name', 'note', 'color']) if (form.elements[key]) form.elements[key].value = service[key] || '';
   for (const key of ['enabled', 'muted', 'notifications']) form.elements[key].checked = Boolean(service[key]);
   for (const key of ['language', 'timezone', 'width', 'height', 'scaleFactor', 'cpuCores', 'memoryGB', 'userAgent', 'webglVendor', 'webglRenderer', 'latitude', 'longitude']) form.elements[key].value = fp[key] ?? '';
@@ -171,10 +172,15 @@ function fillAccount(service) {
   form.elements.webrtc.checked = fp.webRTCPolicy !== 'default';
   form.elements.proxyMode.value = proxy.mode || 'direct'; form.elements.proxyServer.value = proxy.server || '';
   form.elements.proxyUsername.value = proxy.username || ''; form.elements.proxyPassword.value = proxy.password || '';
+  form.elements.accountSpaceTranslate.checked = Boolean(translation.spaceTranslate);
+  form.elements.accountBlockChinese.checked = Boolean(translation.blockChinese);
+  form.elements.accountAutoTranslateIncoming.checked = Boolean(translation.autoTranslateIncoming);
+  form.elements.accountAutoSend.checked = Boolean(translation.autoSend);
+  form.elements.accountTarget.value = translation.target || translation.defaultTarget || 'en';
 }
-function editAccount() {
+async function editAccount() {
   const service = active(); if (!service) return toast('请先选择一个账号', true);
-  accountEditingId = service.id; fillAccount(service); $('#accountPane').showModal();
+  accountEditingId = service.id; await fillAccount(service); $('#accountPane').showModal();
 }
 function accountPatch(form) {
   const e = form.elements;
@@ -202,8 +208,15 @@ async function toggleField(field) {
 }
 async function openSettings() {
   await caisheng.hide();
-  const settings = await caisheng.getSettings(), form = $('#settingsForm');
+  const settings = await caisheng.getSettings(), translation = await caisheng.translation.getSettings(), form = $('#settingsForm');
   for (const [key, value] of Object.entries(settings)) if (form.elements[key]?.type === 'checkbox') form.elements[key].checked = value;
+  form.elements.translationProvider.value=translation.provider||'google';
+  form.elements.translationFallback.value=translation.fallbackProvider||'google-cn';
+  form.elements.translationTarget.value=translation.defaultTarget||'en';
+  form.elements.libreUrl.value=translation.libreUrl||'';form.elements.openaiUrl.value=translation.openaiUrl||'';form.elements.openaiModel.value=translation.openaiModel||'';
+  form.elements.apiKey.value='';$('#apiKeyState').textContent=translation.hasApiKey?'API 密钥已安全保存':'尚未设置 API 密钥';
+  form.elements.translationEnabled.checked=translation.enabled!==false;form.elements.spaceTranslate.checked=Boolean(translation.spaceTranslate);
+  form.elements.blockChinese.checked=Boolean(translation.blockChinese);form.elements.showOriginal.checked=translation.showOriginal!==false;form.elements.autoSend.checked=Boolean(translation.autoSend);
   $('#settingsPane').showModal();
 }
 $('#add').onclick = picker; $('#addTop').onclick = picker; $('#first').onclick = picker; $('#home').onclick = home;
@@ -213,6 +226,7 @@ $('#restartCurrent').onclick = () => refresh('restart'); $('#muteCurrent').oncli
 $('#notifyCurrent').onclick = () => toggleField('notifications'); $('#moveUp').onclick = () => move(-1); $('#moveDown').onclick = () => move(1);
 $('#minimize').onclick = caisheng.minimize; $('#maximize').onclick = caisheng.maximize; $('#windowClose').onclick = caisheng.closeWindow;
 $('#dataFolder').onclick = caisheng.showDataFolder;
+$('#clearTranslationCache').onclick = () => caisheng.translation.clearCache().then(()=>toast('翻译缓存已清空')).catch(error=>toast(error.message,true));
 $$('[data-close]').forEach(button => button.onclick = () => $('#' + button.dataset.close).close());
 $$('.tab').forEach(button => button.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === button));
@@ -220,7 +234,15 @@ $$('.tab').forEach(button => button.onclick = () => {
 });
 $('#accountForm').onsubmit = async event => {
   event.preventDefault();
-  await caisheng.update(accountEditingId, accountPatch(event.currentTarget)); $('#accountPane').close();
+  await caisheng.update(accountEditingId, accountPatch(event.currentTarget));
+  await caisheng.translation.updateAccount(accountEditingId, {
+    target:event.currentTarget.elements.accountTarget.value,
+    spaceTranslate:event.currentTarget.elements.accountSpaceTranslate.checked,
+    blockChinese:event.currentTarget.elements.accountBlockChinese.checked,
+    autoTranslateIncoming:event.currentTarget.elements.accountAutoTranslateIncoming.checked,
+    autoSend:event.currentTarget.elements.accountAutoSend.checked
+  });
+  $('#accountPane').close();
   await loadServices(); const service = active(); if (service?.kind === 'web') await refresh('restart'); toast('账号设置已保存');
 };
 $('#deleteAccount').onclick = async () => {
@@ -236,7 +258,15 @@ $('#testProxy').onclick = async () => {
 $('#settingsForm').onsubmit = async event => {
   event.preventDefault(); const patch = {};
   for (const name of ['startAtLogin', 'minimizeToTray', 'closeToTray', 'defaultMute', 'defaultNotifications']) patch[name] = event.currentTarget.elements[name].checked;
-  await caisheng.setSettings(patch); $('#settingsPane').close(); toast('平台设置已保存');
+  await caisheng.setSettings(patch);
+  const e=event.currentTarget.elements, translationPatch={
+    enabled:e.translationEnabled.checked,provider:e.translationProvider.value,fallbackProvider:e.translationFallback.value,
+    defaultTarget:e.translationTarget.value,libreUrl:e.libreUrl.value.trim(),openaiUrl:e.openaiUrl.value.trim(),openaiModel:e.openaiModel.value.trim(),
+    spaceTranslate:e.spaceTranslate.checked,blockChinese:e.blockChinese.checked,showOriginal:e.showOriginal.checked,autoSend:e.autoSend.checked
+  };
+  if(e.apiKey.value)translationPatch.apiKey=e.apiKey.value;
+  await caisheng.translation.updateSettings(translationPatch); e.apiKey.value='';
+  $('#settingsPane').close(); toast('平台与翻译设置已保存');
 };
 $$('#serviceMenu [data-action]').forEach(button => button.onclick = async () => {
   const action = button.dataset.action; $('#serviceMenu').close();
