@@ -100,10 +100,26 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = Get-ChildItem 'out/win-unpacked/*.exe' | Where-Object Name -eq '财盛聚合聊天.exe' | Select-Object -First 1
           if (-not $exe) { throw '找不到财盛聚合聊天未打包程序' }
+          $smokeFile = Join-Path $env:RUNNER_TEMP 'caisheng-smoke.ok'
+          $smokeLog = $smokeFile + '.log'
+          Remove-Item $smokeFile,$smokeLog -Force -ErrorAction SilentlyContinue
           $env:CAISHENG_SMOKE_TEST = '1'
+          $env:CAISHENG_SMOKE_FILE = $smokeFile
           $process = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -PassThru
-          if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id -Force; throw '启动冒烟测试超时' }
-          if ($process.ExitCode -ne 0) { throw "启动冒烟测试失败：$($process.ExitCode)" }
+          $deadline = (Get-Date).AddSeconds(45)
+          while ((Get-Date) -lt $deadline -and -not (Test-Path $smokeFile)) {
+            Start-Sleep -Milliseconds 250
+          }
+          if (Test-Path $smokeFile) {
+            $result = (Get-Content $smokeFile -Raw).Trim()
+            if ($result -ne 'OK') { throw "启动冒烟测试返回无效结果：$result" }
+            & taskkill /PID $process.Id /T /F 2>$null | Out-Null
+            Write-Host '财盛主界面启动验证通过'
+          } else {
+            if (Test-Path $smokeLog) { Get-Content $smokeLog }
+            & taskkill /PID $process.Id /T /F 2>$null | Out-Null
+            throw '启动冒烟测试超时：未收到主界面成功哨兵'
+          }
 
       - name: 验证安装版与便携版
         shell: pwsh
