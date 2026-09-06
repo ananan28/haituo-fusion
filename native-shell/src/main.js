@@ -15,7 +15,7 @@ const CATALOG = Object.freeze([
   { id: 'signal', name: 'Signal', kind: 'native', color: '#3a76f0' },
   { id: 'whatsapp', name: 'WhatsApp', kind: 'web', url: 'https://web.whatsapp.com/', color: '#13a45a' }
 ]);
-const smoke = process.argv.includes('--smoke-test');
+const smoke = process.argv.includes('--smoke-test') || process.env.CAISHENG_SMOKE_TEST === '1';
 let win;
 let tray;
 let store;
@@ -162,16 +162,28 @@ app.whenReady().then(() => {
   });
   win.setMenu(null);
   whatsapp.setWindow(win);
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const rendererFile = path.join(__dirname, 'renderer', 'index.html');
   if (smoke) {
-    win.webContents.once('did-finish-load', () => {
-      console.log('CAISHENG_RENDERER_LOADED');
-      setImmediate(() => app.exit(0));
-    });
+    const hardTimeout = setTimeout(() => process.exit(2), 30000);
     win.webContents.once('did-fail-load', (_event, code, description) => {
       console.error('CAISHENG_RENDERER_FAILED', code, description);
-      app.exit(3);
+      process.exit(3);
     });
+    win.loadFile(rendererFile).then(async () => {
+      const healthy = await win.webContents.executeJavaScript(
+        "Boolean(window.caisheng && document.querySelector('#content') && document.querySelector('#services'))",
+        true
+      ).catch(() => false);
+      clearTimeout(hardTimeout);
+      console.log(healthy ? 'CAISHENG_RENDERER_READY' : 'CAISHENG_RENDERER_INVALID');
+      process.exit(healthy ? 0 : 4);
+    }).catch(error => {
+      clearTimeout(hardTimeout);
+      console.error('CAISHENG_RENDERER_LOAD_REJECTED', error);
+      process.exit(3);
+    });
+  } else {
+    win.loadFile(rendererFile);
   }
   win.once('ready-to-show', () => { if (!smoke) win.show(); });
   win.on('resize', () => whatsapp.resizeAll());
@@ -182,7 +194,6 @@ app.whenReady().then(() => {
   });
   if (state.maximized) win.maximize();
   if (!smoke) makeTray();
-  if (smoke) setTimeout(() => app.exit(2), 20000);
 });
 app.on('before-quit', event => {
   quitting = true;
