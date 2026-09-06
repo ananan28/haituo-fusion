@@ -66,21 +66,22 @@ jobs:
               raise FileNotFoundError("Missing Caisheng Windows icon")
           shutil.copyfile(icon, root / "build-helpers/images/icon.ico")
 
-          for path in (root / "src").rglob("*"):
-              if path.is_file() and path.suffix in {".ts", ".tsx", ".js", ".json", ".html"}:
-                  value = path.read_text(encoding="utf-8")
-                  value = value.replace("Ferdium", "财盛聚合聊天").replace("FERDIUM", "财盛")
+          for name in ("zh-HANS.json", "zh.json"):
+              path = root / "src/i18n/locales" / name
+              if path.exists():
+                  value = path.read_text(encoding="utf-8").replace("Ferdium", "财盛聚合聊天")
                   path.write_text(value, encoding="utf-8")
 
           welcome = root / "src/components/auth/Welcome.tsx"
           value = welcome.read_text(encoding="utf-8")
           marker = "class Welcome extends Component<IProps> {"
           value = value.replace(marker, marker + "\n  componentDidMount(): void {\n    serverlessLogin(this.props.actions);\n  }")
+          value = value.replace("<H1>Ferdium</H1>", "<H1>财盛聚合聊天</H1>")
           welcome.write_text(value, encoding="utf-8")
 
           translation = root / "src/helpers/translation-helpers.ts"
           value = translation.read_text(encoding="utf-8")
-          value = value.replace("财盛 ERROR: An error occurred. Please select less text to translate or try again later.", "翻译失败，请缩短内容或稍后重试。")
+          value = value.replace("FERDIUM ERROR: An error occurred. Please select less text to translate or try again later.", "翻译失败，请缩短内容或稍后重试。")
           translation.write_text(value, encoding="utf-8")
 
       - name: Overlay Caisheng platform modules
