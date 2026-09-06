@@ -9,6 +9,15 @@ const WHATSAPP_URL = 'https://web.whatsapp.com/';
 const ALLOWED_HOSTS = /(^|\.)whatsapp\.com$/i;
 const RETRY_DELAYS = [1200, 3000, 8000];
 
+function isAllowedWhatsAppURL(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ALLOWED_HOSTS.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function chineseNetworkError(code, description = '') {
   const messages = {
     '-2': '网络请求失败，请检查网络或代理设置。',
@@ -135,13 +144,13 @@ class WhatsAppRuntime {
     wc.setWindowOpenHandler(({ url }) => {
       try {
         const parsed = new URL(url);
-        if (ALLOWED_HOSTS.test(parsed.hostname)) wc.loadURL(url).catch(() => {});
+        if (isAllowedWhatsAppURL(url)) wc.loadURL(url).catch(() => {});
         else if (/^https?:$/.test(parsed.protocol)) shell.openExternal(url).catch(() => {});
       } catch {}
       return { action: 'deny' };
     });
     wc.on('will-navigate', (event, url) => {
-      try { if (!ALLOWED_HOSTS.test(new URL(url).hostname)) event.preventDefault(); } catch { event.preventDefault(); }
+      if (!isAllowedWhatsAppURL(url)) event.preventDefault();
     });
     wc.on('did-start-loading', () => {
       clearTimeout(account.loadTimer);
@@ -265,4 +274,4 @@ class WhatsAppRuntime {
   }
 }
 
-module.exports = { WhatsAppRuntime, WHATSAPP_URL, chineseNetworkError, publicProfile };
+module.exports = { WhatsAppRuntime, WHATSAPP_URL, chineseNetworkError, publicProfile, isAllowedWhatsAppURL };
