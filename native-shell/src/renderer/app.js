@@ -12,6 +12,18 @@ function toast(message, bad = false) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = ''; }, 2600);
 }
 function active() { return services.find(x => x.id === currentId); }
+function friendlyError(error, fallback = '操作失败，请稍后重试') {
+  const raw = String(error?.message || error || '').trim();
+  if (!raw) return fallback;
+  return raw.replace(/^Error:\s*/i, '').replace(/ERR_[A-Z_]+/g, '网络连接异常');
+}
+function makeLoading(text = '正在加载服务…') {
+  const section = document.createElement('section'); section.className = 'loading-page';
+  const spinner = document.createElement('div'); spinner.className = 'spinner';
+  const title = document.createElement('strong'); title.textContent = text;
+  const hint = document.createElement('p'); hint.textContent = '若网络较慢，请稍候或使用右侧刷新按钮。';
+  section.append(spinner, title, hint); return section;
+}
 function makeIcon(service) {
   const icon = document.createElement('i');
   icon.style.background = service.color; icon.textContent = (service.name || '?').trim().charAt(0).toUpperCase();
@@ -59,7 +71,7 @@ function signalMessageNode(m,service){
 async function renderSignal(service){
   const model=signalStateFor(service.id), section=document.createElement('section');section.className='signalWorkspace';
   const side=document.createElement('div');side.className='signalConversations';
-  const head=document.createElement('div');head.className='signalAccountHead';head.innerHTML='<b></b><span></span>';head.children[0].textContent=service.name;head.children[1].textContent=model.status;
+  const head=document.createElement('div');head.className='signalAccountHead';const accountName=document.createElement('b'),accountState=document.createElement('span');accountName.textContent=service.name;accountState.textContent=model.status;head.append(accountName,accountState);
   const actions=document.createElement('div');
   const link=document.createElement('button');link.textContent='扫码连接';link.onclick=async()=>{try{const x=await caisheng.signal.link(service.id);const box=document.createElement('div');box.className='signalLink';const title=document.createElement('b');title.textContent='请用 Signal 手机端扫描';const uri=document.createElement('textarea');uri.readOnly=true;uri.value=x.uri;const copy=document.createElement('button');copy.textContent='复制连接码';copy.onclick=()=>navigator.clipboard.writeText(x.uri);box.append(title,uri,copy);$('#content').replaceChildren(box);toast('二维码连接信息已生成')}catch(e){toast(e.message,true)}};
   const reconnect=document.createElement('button');reconnect.textContent='重新连接';reconnect.onclick=()=>caisheng.signal.reconnect(service.id).then(()=>renderSignal(service)).catch(e=>toast(e.message,true));actions.append(link,reconnect);side.append(head,actions);
@@ -81,8 +93,8 @@ async function open(service) {
     await caisheng.open(service);
     await renderSignal(service);
   } else {
-    $('#content').replaceChildren();
-    try { await caisheng.open(service); } catch (error) { showError(error.message); }
+    $('#content').replaceChildren(makeLoading('正在打开 ' + service.name + '…'));
+    try { await caisheng.open(service); } catch (error) { showError(friendlyError(error)); }
   }
 }
 function showError(message) {
@@ -99,7 +111,12 @@ async function picker() {
     const button = document.createElement('button'), icon = document.createElement('i');
     icon.style.background = recipe.color; icon.textContent = recipe.name.charAt(0);
     button.append(icon, document.createTextNode(recipe.name));
-    button.onclick = async () => { $('#picker').close(); const service = await caisheng.add(recipe.id); await loadServices(); await open(service); };
+    button.onclick = async () => {
+      button.disabled = true;
+      try { $('#picker').close(); const service = await caisheng.add(recipe.id); await loadServices(); await open(service); }
+      catch (error) { showError('添加服务失败：' + friendlyError(error)); }
+      finally { button.disabled = false; }
+    };
     catalog.append(button);
   }
   $('#picker').showModal();
@@ -199,7 +216,9 @@ caisheng.onServiceState(update => {
   state.set(update.id, update); renderServices();
   if (update.id === currentId && update.error) showError(update.error);
 });
-loadServices().then(() => caisheng.ready()).catch(error => { showError('平台初始化失败：' + error.message); caisheng.ready(); });
+window.addEventListener('unhandledrejection', event => { event.preventDefault(); toast(friendlyError(event.reason), true); });
+window.addEventListener('error', event => { toast('界面运行异常，请尝试刷新当前服务', true); console.error(event.error || event.message); });
+loadServices().then(() => caisheng.ready()).catch(error => { showError('平台初始化失败：' + friendlyError(error)); caisheng.ready(); });
 
 caisheng.signal.onState(update=>{const m=signalStateFor(update.id);m.status=update.status;if(update.id===currentId){const s=active();if(s)renderSignal(s)}});
 caisheng.signal.onMessage(message=>{const m=signalStateFor(message.accountId);m.messages.push(message);if(message.accountId===currentId&&message.conversationId===m.conversation){const s=active();if(s)renderSignal(s)}});
