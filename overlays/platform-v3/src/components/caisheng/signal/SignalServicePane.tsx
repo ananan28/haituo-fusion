@@ -10,7 +10,7 @@ import type {
   SignalServiceAdapter,
 } from '../../../services/signal/types';
 
-type Props = { accountId: string; adapter: SignalServiceAdapter; translate?: (text: string) => Promise<string> };
+type Props = { accountId: string; adapter: SignalServiceAdapter; translate?: (text: string, targetLanguage?: string) => Promise<string> };
 const initials = (name: string) => name.trim().slice(0, 1).toUpperCase() || 'S';
 const Avatar = ({ conversation }: { conversation: SignalConversation }) => conversation.avatarUrl
   ? <img className="cs-signal-avatar" src={conversation.avatarUrl} alt="" />
@@ -51,6 +51,9 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
   const [replyTo, setReplyTo] = useState<SignalMessage>();
   const [sendingAttachment, setSendingAttachment] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [translateOnSpace, setTranslateOnSpace] = useState(() => localStorage.getItem(`cs.signal.spaceTranslate.${accountId}`) !== '0');
+  const [targetLanguage, setTargetLanguage] = useState(() => localStorage.getItem(`cs.signal.targetLanguage.${accountId}`) || 'en');
+  const [translatingDraft, setTranslatingDraft] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder>();
   const recorderStream = useRef<MediaStream>();
@@ -87,6 +90,28 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
     return keyword ? conversations.filter(item => item.title.toLocaleLowerCase().includes(keyword)) : conversations;
   }, [conversations, search]);
   const selected = conversations.find(item => item.id === selectedId);
+  const saveTranslationSetting = (enabled: boolean) => {
+    setTranslateOnSpace(enabled);
+    localStorage.setItem(`cs.signal.spaceTranslate.${accountId}`, enabled ? '1' : '0');
+  };
+  const saveTargetLanguage = (language: string) => {
+    setTargetLanguage(language);
+    localStorage.setItem(`cs.signal.targetLanguage.${accountId}`, language);
+  };
+  const translateDraftOnSpace = async () => {
+    const source = draft.trim();
+    if (!translate || !translateOnSpace || !source || translatingDraft) return;
+    setTranslatingDraft(true);
+    try {
+      const hasChinese = /[\u3400-\u9fff]/u.test(source);
+      const translated = await translate(source, hasChinese ? targetLanguage : 'zh-CN');
+      if (translated.trim()) setDraft(`${translated.trim()} `);
+    } catch {
+      setError('空格翻译失败，已保留原文，请检查网络后重试');
+    } finally {
+      setTranslatingDraft(false);
+    }
+  };
   const quote = (message?: SignalMessage): SignalQuote | undefined => message ? { messageId: message.id, sentAt: message.sentAt, body: message.body } : undefined;
 
   const send = async () => {
@@ -199,11 +224,27 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
           <time>{new Date(message.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
         </article>)}</div>
       {replyTo && <div className="cs-signal-reply"><span>回复：{replyTo.body || '附件消息'}</span><button type="button" onClick={() => setReplyTo(undefined)}>取消</button></div>}
+      <div className="cs-signal-compose-settings">
+        <label><input type="checkbox" checked={translateOnSpace} onChange={event => saveTranslationSetting(event.target.checked)} /> 空格翻译</label>
+        <label>中文发送为
+          <select value={targetLanguage} onChange={event => saveTargetLanguage(event.target.value)}>
+            <option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option>
+            <option value="es">西班牙语</option><option value="fr">法语</option><option value="de">德语</option>
+            <option value="ru">俄语</option><option value="ar">阿拉伯语</option>
+          </select>
+        </label>
+        {translatingDraft && <span>翻译中…</span>}
+      </div>
       <footer>
         <input ref={fileInput} hidden type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" onChange={event => { const file = event.target.files?.[0]; if (file) void sendFile(file); event.target.value = ''; }} />
         <button type="button" className="cs-signal-tool" disabled={!selectedId || sendingAttachment} title="发送图片、视频或文件" onClick={() => fileInput.current?.click()}>📎</button>
         <button type="button" className={`cs-signal-tool ${recording ? 'is-recording' : ''}`} disabled={!selectedId || sendingAttachment} title={recording ? '停止并发送语音' : '录制语音'} onClick={() => void toggleRecording()}>{recording ? '■' : '🎙'}</button>
-        <textarea value={draft} disabled={!selectedId} placeholder="输入消息，Enter 发送，Shift+Enter 换行" onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} />
+        <textarea value={draft} disabled={!selectedId} placeholder="输入消息，Enter 发送，Shift+Enter 换行" onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+          if (event.key === ' ' && translateOnSpace && translate && draft.trim() && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.nativeEvent.isComposing) {
+            event.preventDefault(); void translateDraftOnSpace(); return;
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
+        }} />
         <button type="button" disabled={!draft.trim() || !selectedId} onClick={() => void send()}>发送</button>
       </footer>
       {error && <button className="cs-signal-toast" type="button" onClick={() => setError('')}>{error}</button>}
