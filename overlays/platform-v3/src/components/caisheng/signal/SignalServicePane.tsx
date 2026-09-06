@@ -11,6 +11,7 @@ import type {
 } from '../../../services/signal/types';
 
 type Props = { accountId: string; adapter: SignalServiceAdapter; translate?: (text: string, targetLanguage?: string) => Promise<string> };
+const containsHan = (value: string) => /\p{Script=Han}/u.test(value);
 const initials = (name: string) => name.trim().slice(0, 1).toUpperCase() || 'S';
 const Avatar = ({ conversation }: { conversation: SignalConversation }) => conversation.avatarUrl
   ? <img className="cs-signal-avatar" src={conversation.avatarUrl} alt="" />
@@ -54,6 +55,7 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
   const [translateOnSpace, setTranslateOnSpace] = useState(() => localStorage.getItem(`cs.signal.spaceTranslate.${accountId}`) !== '0');
   const [targetLanguage, setTargetLanguage] = useState(() => localStorage.getItem(`cs.signal.targetLanguage.${accountId}`) || 'en');
   const [translatingDraft, setTranslatingDraft] = useState(false);
+  const [blockChinese, setBlockChinese] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder>();
   const recorderStream = useRef<MediaStream>();
@@ -90,6 +92,23 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
     return keyword ? conversations.filter(item => item.title.toLocaleLowerCase().includes(keyword)) : conversations;
   }, [conversations, search]);
   const selected = conversations.find(item => item.id === selectedId);
+  useEffect(() => {
+    const accountDefault = localStorage.getItem(`cs.signal.blockChinese.${accountId}.default`);
+    const conversationValue = selectedId ? localStorage.getItem(`cs.signal.blockChinese.${accountId}.${selectedId}`) : null;
+    setBlockChinese(conversationValue !== null ? conversationValue !== '0' : accountDefault !== '0');
+  }, [accountId, selectedId]);
+  const saveBlockChinese = (enabled: boolean) => {
+    setBlockChinese(enabled);
+    const key = selectedId
+      ? `cs.signal.blockChinese.${accountId}.${selectedId}`
+      : `cs.signal.blockChinese.${accountId}.default`;
+    localStorage.setItem(key, enabled ? '1' : '0');
+  };
+  const rejectChinese = (value: string) => {
+    if (!blockChinese || !containsHan(value)) return false;
+    setError('检测到中文，请先翻译后再发送');
+    return true;
+  };
   const saveTranslationSetting = (enabled: boolean) => {
     setTranslateOnSpace(enabled);
     localStorage.setItem(`cs.signal.spaceTranslate.${accountId}`, enabled ? '1' : '0');
@@ -116,19 +135,21 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
 
   const send = async () => {
     const body = draft.trim();
-    if (!body || !selectedId) return;
+    if (!body || !selectedId || rejectChinese(body)) return;
     setDraft('');
     try {
       const message = await adapter.sendMessage(accountId, selectedId, body, quote(replyTo));
-      setMessages(items => [...items, message]); setReplyTo(undefined); await loadConversations();
+      setMessages(items => [...items, message]); setReplyTo(undefined); setDraft(''); await loadConversations();
     } catch { setDraft(body); setError('消息发送失败，请检查网络后重试'); }
   };
 
   const sendFile = async (file: File, voiceNote = false) => {
     if (!selectedId) return;
+    const caption = voiceNote ? '' : draft.trim();
+    if (rejectChinese(caption)) return;
     setSendingAttachment(true);
     try {
-      const attachment = await fileToDraft(file, voiceNote);
+      const attachment = { ...(await fileToDraft(file, voiceNote)), caption };
       const message = await adapter.sendAttachment(accountId, selectedId, attachment, quote(replyTo));
       setMessages(items => [...items, message]); setReplyTo(undefined); await loadConversations();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '附件发送失败，请稍后重试'); }
@@ -225,6 +246,7 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
         </article>)}</div>
       {replyTo && <div className="cs-signal-reply"><span>回复：{replyTo.body || '附件消息'}</span><button type="button" onClick={() => setReplyTo(undefined)}>取消</button></div>}
       <div className="cs-signal-compose-settings">
+        <label><input type="checkbox" checked={blockChinese} onChange={event => saveBlockChinese(event.target.checked)} /> 禁止发送中文</label>
         <label><input type="checkbox" checked={translateOnSpace} onChange={event => saveTranslationSetting(event.target.checked)} /> 空格翻译</label>
         <label>中文发送为
           <select value={targetLanguage} onChange={event => saveTargetLanguage(event.target.value)}>
