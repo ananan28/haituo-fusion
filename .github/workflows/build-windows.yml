@@ -98,7 +98,8 @@ jobs:
           package = Path("platform/package.json").read_text(encoding="utf-8")
           workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
           assert "财盛聚合聊天" in package
-          assert "signalapp/Signal-Desktop" not in workflow
+          forbidden = "signalapp/" + "Signal-Desktop"
+          assert workflow.count(forbidden) == 0
           assert "OneChat-Dev/onechat" in workflow
 
       - name: Setup Node.js
