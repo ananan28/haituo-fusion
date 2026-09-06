@@ -6,12 +6,26 @@ let currentId = '';
 let accountEditingId = '';
 const signalUi = new Map();
 const state = new Map();
+const translatedMessages = new Map();
+const HAN = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u;
+let composing = false;
+let translating = false;
 
 function toast(message, bad = false) {
   const el = $('#toast'); el.textContent = message; el.className = bad ? 'show bad' : 'show';
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = ''; }, 2600);
 }
 function active() { return services.find(x => x.id === currentId); }
+async function translationScope(service, conversationId) {
+  return caisheng.translation.getScope(service.id, conversationId || '当前会话');
+}
+async function translateValue(service, conversationId, text) {
+  const scope = await translationScope(service, conversationId);
+  return caisheng.translation.translate({
+    accountId: service.id, conversationId: conversationId || '当前会话', text,
+    target: HAN.test(text) ? (scope.target || scope.defaultTarget || 'en') : 'zh-CN'
+  });
+}
 function friendlyError(error, fallback = '操作失败，请稍后重试') {
   const raw = String(error?.message || error || '').trim();
   if (!raw) return fallback;
@@ -63,9 +77,12 @@ function signalMessageNode(m,service){
   const who=document.createElement('b'); who.textContent=m.sender||'消息';
   const text=document.createElement('p'); text.textContent=m.text||((m.attachments||[]).length?'[附件]':'');
   row.append(who,text);
+  const translationKey=service.id+':'+m.conversationId+':'+m.id;
+  const known=translatedMessages.get(translationKey);
+  if(known){const translated=document.createElement('p');translated.className='translatedText';translated.textContent='译文：'+known;text.after(translated)}
   for(const a of m.attachments||[]){const el=document.createElement(a.contentType?.startsWith('image/')?'img':a.contentType?.startsWith('video/')?'video':a.contentType?.startsWith('audio/')?'audio':'a');if(el.tagName==='A'){el.textContent=a.filename||'下载附件';el.href='#'}else{el.controls=true;el.src=a.localPath||a.path||''}row.append(el)}
   const tools=document.createElement('div'); tools.className='messageTools';
-  for(const [label,fn] of [['回复',()=>{signalStateFor(service.id).quote={timestamp:m.timestamp,author:m.sender,text:m.text};toast('已引用该消息')}],['回应',async()=>{await caisheng.signal.reaction(service.id,signalStateFor(service.id).conversation,'👍',{timestamp:m.timestamp,author:m.sender},false)}],['编辑',async()=>{const x=prompt('编辑消息',m.text||'');if(x!=null)await caisheng.signal.edit(service.id,signalStateFor(service.id).conversation,m.timestamp,x)}],['撤回',async()=>{if(confirm('确定撤回这条消息吗？'))await caisheng.signal.delete(service.id,signalStateFor(service.id).conversation,m.timestamp)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>fn().catch(e=>toast(e.message,true));tools.append(b)}
+  for(const [label,fn] of [['翻译',async()=>{const result=await translateValue(service,m.conversationId,m.text||'');translatedMessages.set(translationKey,result.translatedText);const scope=await translationScope(service,m.conversationId);if(scope.showOriginal===false)text.hidden=true;const translated=document.createElement('p');translated.className='translatedText';translated.textContent='译文：'+result.translatedText;text.after(translated)}],['回复',()=>{signalStateFor(service.id).quote={timestamp:m.timestamp,author:m.sender,text:m.text};toast('已引用该消息')}],['回应',async()=>{await caisheng.signal.reaction(service.id,signalStateFor(service.id).conversation,'👍',{timestamp:m.timestamp,author:m.sender},false)}],['编辑',async()=>{const x=prompt('编辑消息',m.text||'');if(x!=null)await caisheng.signal.edit(service.id,signalStateFor(service.id).conversation,m.timestamp,x)}],['撤回',async()=>{if(confirm('确定撤回这条消息吗？'))await caisheng.signal.delete(service.id,signalStateFor(service.id).conversation,m.timestamp)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>fn().catch(e=>toast(e.message,true));tools.append(b)}
   row.append(tools);return row;
 }
 async function renderSignal(service){
@@ -77,12 +94,31 @@ async function renderSignal(service){
   const reconnect=document.createElement('button');reconnect.textContent='重新连接';reconnect.onclick=()=>caisheng.signal.reconnect(service.id).then(()=>renderSignal(service)).catch(e=>toast(e.message,true));actions.append(link,reconnect);side.append(head,actions);
   const list=document.createElement('div');list.className='conversationList';side.append(list);
   const chat=document.createElement('div');chat.className='signalChat';const messages=document.createElement('div');messages.className='signalMessages';chat.append(messages);
-  const composer=document.createElement('form');composer.className='signalComposer';const input=document.createElement('textarea');input.placeholder='输入消息';const file=document.createElement('input');file.type='file';file.multiple=true;file.accept='image/*,video/*,audio/*,*/*';const send=document.createElement('button');send.textContent='发送';composer.append(input,file,send);chat.append(composer);section.append(side,chat);$('#content').replaceChildren(section);
+  const composer=document.createElement('form');composer.className='signalComposer';
+  const input=document.createElement('textarea');input.placeholder='输入消息，按空格可翻译';
+  const preview=document.createElement('div');preview.className='translationPreview';
+  const options=document.createElement('div');options.className='composerOptions';
+  const target=document.createElement('select');target.title='当前会话目标语言';
+  for(const [value,label] of [['en','英语'],['zh-CN','简体中文'],['ja','日语'],['ko','韩语'],['es','西班牙语'],['fr','法语'],['de','德语'],['ru','俄语']]){const option=document.createElement('option');option.value=value;option.textContent=label;target.append(option)}
+  const space=document.createElement('label'),spaceCheck=document.createElement('input');spaceCheck.type='checkbox';space.append(spaceCheck,document.createTextNode(' 空格翻译'));
+  const block=document.createElement('label'),blockCheck=document.createElement('input');blockCheck.type='checkbox';block.append(blockCheck,document.createTextNode(' 禁止发送中文'));
+  const undo=document.createElement('button');undo.type='button';undo.textContent='撤销翻译';undo.disabled=true;
+  const translate=document.createElement('button');translate.type='button';translate.textContent='翻译输入';
+  options.append(target,space,block,undo,translate);
+  const file=document.createElement('input');file.type='file';file.multiple=true;file.accept='image/*,video/*,audio/*,*/*';
+  const send=document.createElement('button');send.textContent='发送';composer.append(input,preview,options,file,send);chat.append(composer);section.append(side,chat);$('#content').replaceChildren(section);
+  let originalDraft='';
+  const updateConversationSettings=async()=>{if(!model.conversation)return;await caisheng.translation.updateScope(service.id,model.conversation,{target:target.value,spaceTranslate:spaceCheck.checked,blockChinese:blockCheck.checked})};
+  target.onchange=updateConversationSettings;spaceCheck.onchange=updateConversationSettings;blockCheck.onchange=updateConversationSettings;
+  const translateDraft=async()=>{if(translating||!input.value.trim())return;translating=true;originalDraft=input.value;translate.disabled=true;try{const result=await translateValue(service,model.conversation,input.value);input.value=result.translatedText;preview.textContent='原文：'+originalDraft;undo.disabled=false;toast('翻译完成')}catch(error){toast(error.message||'翻译失败，已保留原文',true)}finally{translating=false;translate.disabled=false}};
+  translate.onclick=translateDraft;undo.onclick=()=>{if(!originalDraft)return;input.value=originalDraft;originalDraft='';preview.textContent='';undo.disabled=true;input.focus()};
+  input.addEventListener('compositionstart',()=>{composing=true});input.addEventListener('compositionend',()=>{composing=false});
+  input.addEventListener('keydown',async event=>{if(event.code!=='Space'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey||event.isComposing||composing||translating||!input.value.trim())return;const scope=await translationScope(service,model.conversation);if(!scope.spaceTranslate)return;event.preventDefault();await translateDraft();if(scope.autoSend)composer.requestSubmit()});
   try{const st=await caisheng.signal.state(service.id);model.status=st.status||'未连接';head.children[1].textContent=model.status;if(st.status!=='未连接'&&st.status!=='等待扫码'){await caisheng.signal.start(service.id);model.conversations=await caisheng.signal.conversations(service.id)}}
   catch(e){model.status='连接错误';head.children[1].textContent='连接错误：'+e.message}
-  const choose=async conv=>{model.conversation=conv.id;model.messages=await caisheng.signal.history(service.id,conv.id,500);messages.replaceChildren(...model.messages.map(m=>signalMessageNode(m,service)));messages.scrollTop=messages.scrollHeight};
+  const choose=async conv=>{model.conversation=conv.id;model.messages=await caisheng.signal.history(service.id,conv.id,500);const scope=await translationScope(service,conv.id);target.value=scope.target||scope.defaultTarget||'en';spaceCheck.checked=Boolean(scope.spaceTranslate);blockCheck.checked=Boolean(scope.blockChinese);messages.replaceChildren(...model.messages.map(m=>signalMessageNode(m,service)));messages.scrollTop=messages.scrollHeight;if(scope.autoTranslateIncoming){for(const m of model.messages.filter(x=>x.text)){const key=service.id+':'+m.conversationId+':'+m.id;if(!translatedMessages.has(key)){translateValue(service,m.conversationId,m.text).then(result=>{translatedMessages.set(key,result.translatedText);if(currentId===service.id&&model.conversation===conv.id)choose(conv)}).catch(()=>{})}}}};
   for(const conv of model.conversations){const b=document.createElement('button');const av=document.createElement('i');av.textContent=(conv.name||'?')[0];const n=document.createElement('span');n.textContent=conv.name||conv.id;b.append(av,n);b.onclick=()=>choose(conv).catch(e=>toast(e.message,true));list.append(b)}
-  composer.onsubmit=async e=>{e.preventDefault();if(!model.conversation)return toast('请先选择会话',true);const text=input.value,files=[...file.files].map(x=>x.path).filter(Boolean);if(!text.trim()&&!files.length)return;try{await caisheng.signal.send(service.id,model.conversation,text,files,model.quote);input.value='';file.value='';model.quote=null;toast('消息已发送')}catch(err){toast('发送失败：'+err.message,true)}};
+  composer.onsubmit=async e=>{e.preventDefault();if(!model.conversation)return toast('请先选择会话',true);const text=input.value,files=[...file.files].map(x=>x.path).filter(Boolean);if(!text.trim()&&!files.length)return;try{const check=await caisheng.translation.validate({accountId:service.id,conversationId:model.conversation,text,quote:model.quote});if(!check.allowed)return toast(check.message,true);await caisheng.signal.send(service.id,model.conversation,text,files,model.quote);input.value='';file.value='';model.quote=null;originalDraft='';preview.textContent='';undo.disabled=true;toast('消息已发送')}catch(err){toast('发送失败：'+err.message,true)}};
 }
 
 async function open(service) {
