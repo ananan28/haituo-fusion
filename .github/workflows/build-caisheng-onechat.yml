@@ -1,60 +1,20 @@
-name: Build Caisheng Aggregator Windows
+name: 已停用：旧 OneChat/Ferdium 构建
 
+# 此工作流故意不提供任何触发器。
+# 财盛聚合聊天只能由 build-windows.yml 构建仓库内 native-shell，
+# 禁止重新引入 OneChat、Ferdium 或 Signal Desktop 外壳。
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'fusion/**'
-      - '.github/workflows/build-caisheng-onechat.yml'
 
 permissions:
   contents: read
 
 jobs:
-  build-windows:
-    runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      USE_HARD_LINKS: 'false'
+  legacy-build-disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Checkout aggregation framework
-        shell: bash
+      - name: 旧外壳构建已永久停用
         run: |
-          cat fusion/source.part-* > caisheng-onechat-source.zip
-          powershell -NoProfile -Command "Expand-Archive -Path caisheng-onechat-source.zip -DestinationPath app -Force"
-          git -C app init
-          git -C app remote add origin https://github.com/ananan28/WS-.git
-          git clone --depth 1 https://github.com/ferdium/ferdium-recipes.git app/recipes
-      - name: Restore upstream UI module
-        shell: bash
-        run: |
-          mkdir -p app/src/components/ui/icon
-          curl -fsSL https://raw.githubusercontent.com/ferdium/ferdium-app/develop/src/components/ui/icon/index.tsx             -o app/src/components/ui/icon/index.tsx
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: app/.nvmrc
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: app/package.json
-      - name: Install dependencies
-        working-directory: app
-        run: pnpm install --frozen-lockfile
-      - name: Build recipes
-        working-directory: app/recipes
-        run: |
-          pnpm install
-          pnpm package
-      - name: Build setup and portable EXE
-        working-directory: app
-        run: pnpm build --win nsis portable --x64 --publish never
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Caisheng-MultiChat-Windows-x64
-          path: |
-            app/out/Caisheng-MultiChat-Windows-x64-Setup-*.exe
-            app/out/Caisheng-MultiChat-Windows-x64-Portable-*.exe
-          if-no-files-found: error
-          retention-days: 30
+          echo "请使用 .github/workflows/build-windows.yml"
+          exit 1
