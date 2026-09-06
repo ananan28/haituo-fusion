@@ -100,6 +100,15 @@ jobs:
           )
           recipe.write_text(value, encoding="utf-8")
 
+          ipc_index = root / "src/electron/ipc-api/index.ts"
+          value = ipc_index.read_text(encoding="utf-8")
+          value = value.replace("import settings from './settings';", "import settings from './settings';\nimport signal from './signal';")
+          value = value.replace("  focusState(params);", "  focusState(params);\n  signal(params);")
+          ipc_index.write_text(value, encoding="utf-8")
+
+          with builder_path.open("a", encoding="utf-8") as output:
+              output.write("\nextraResources:\n  - from: vendor/signal-runtime\n    to: signal-runtime\n    filter:\n      - signal-cli/lib/**\n      - jre/bin/**\n      - jre/conf/**\n      - jre/legal/**\n      - jre/lib/**\n")
+
       - name: Overlay Caisheng platform modules
         shell: bash
         run: |
@@ -133,12 +142,36 @@ jobs:
       - name: Install dependencies
         shell: bash
         working-directory: platform
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm add qrcode-generator@1.4.4
+          pnpm add -D @types/qrcode-generator@1.4.5
 
       - name: Typecheck independent platform
         shell: bash
         working-directory: platform
         run: pnpm typecheck
+
+      - name: Bundle Signal protocol runtime
+        shell: pwsh
+        working-directory: platform
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vendor = Join-Path $PWD 'vendor/signal-runtime'
+          New-Item -ItemType Directory -Force -Path $vendor | Out-Null
+          $signalArchive = Join-Path $env:RUNNER_TEMP 'signal-cli-0.14.7.tar.gz'
+          Invoke-WebRequest -Uri 'https://github.com/AsamK/signal-cli/releases/download/v0.14.7/signal-cli-0.14.7.tar.gz' -OutFile $signalArchive
+          New-Item -ItemType Directory -Force -Path (Join-Path $vendor 'signal-cli') | Out-Null
+          tar -xzf $signalArchive -C (Join-Path $vendor 'signal-cli') --strip-components=1
+          $javaArchive = Join-Path $env:RUNNER_TEMP 'temurin-jre25.zip'
+          Invoke-WebRequest -Uri 'https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jre/hotspot/normal/eclipse' -OutFile $javaArchive
+          $expanded = Join-Path $env:RUNNER_TEMP 'temurin-jre25'
+          Expand-Archive -Path $javaArchive -DestinationPath $expanded -Force
+          $javaHome = Get-ChildItem $expanded -Directory | Select-Object -First 1
+          Copy-Item -Recurse -Force $javaHome.FullName (Join-Path $vendor 'jre')
+          & (Join-Path $vendor 'jre/bin/java.exe') --version
+          & (Join-Path $vendor 'jre/bin/java.exe') '-Djava.awt.headless=true' '-cp' (Join-Path $vendor 'signal-cli/lib/*') 'org.asamk.signal.Main' '--version'
+          if ($LASTEXITCODE -ne 0) { throw 'Signal runtime verification failed' }
 
       - name: Build installer and portable app
         shell: bash

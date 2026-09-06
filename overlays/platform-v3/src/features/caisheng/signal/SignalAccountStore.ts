@@ -40,6 +40,18 @@ export class SignalAccountStore {
     return account;
   }
 
+  async ensure(accountId: string, label = 'Signal'): Promise<SignalAccount> {
+    this.assertId(accountId);
+    const accounts = await this.list();
+    const existing = accounts.find(account => account.id === accountId);
+    if (existing) return existing;
+    const account: SignalAccount = { id: accountId, label, status: 'stopped' };
+    accounts.push(account);
+    await this.write(accounts);
+    await mkdir(this.dataDir(accountId), { recursive: true, mode: 0o700 });
+    return account;
+  }
+
   async remove(accountId: string): Promise<void> {
     this.assertId(accountId);
     // Account data is deliberately not deleted here. Destructive deletion must be

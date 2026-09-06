@@ -86,3 +86,4 @@ export type SignalResponseMap = {
 };
 
 export type SignalMethod = keyof SignalRequestMap;
+

@@ -11,6 +11,9 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
 
   ipcMain.handle('caisheng:signal:accounts:list', () => manager.accounts.list());
   ipcMain.handle('caisheng:signal:accounts:create', (_event, label: string) => manager.accounts.create(label));
+  ipcMain.handle('caisheng:signal:accounts:ensure', (_event, accountId: string, label?: string) =>
+    manager.accounts.ensure(accountId, label),
+  );
   ipcMain.handle('caisheng:signal:accounts:remove', async (_event, accountId: string) => {
     await manager.stop(accountId);
     await manager.accounts.remove(accountId);

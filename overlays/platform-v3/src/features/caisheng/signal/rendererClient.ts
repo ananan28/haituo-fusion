@@ -13,3 +13,4 @@ export const signalClient = {
     return () => ipcRenderer.removeListener('caisheng:signal:event', handler);
   },
 };
+
