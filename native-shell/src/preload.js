@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 const listeners = new Map();
 contextBridge.exposeInMainWorld('caisheng', {
@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('caisheng', {
     return () => ipcRenderer.removeListener('signal:refresh', listener);
   },
   signal: {
+    filePath: file => webUtils.getPathForFile(file),
     state: id => invoke('signal:state', id), link: id => invoke('signal:link', id), start: id => invoke('signal:start', id),
     conversations: id => invoke('signal:conversations', id), history: (id, conversationId, limit) => invoke('signal:history', id, conversationId, limit),
     send: (id,to,text,files,quote) => invoke('signal:send', id,to,text,files,quote),
