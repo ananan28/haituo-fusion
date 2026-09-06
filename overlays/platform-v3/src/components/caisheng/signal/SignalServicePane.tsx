@@ -42,14 +42,15 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([adapter.getAccount(accountId), adapter.listConversations(accountId)])
-      .then(([nextAccount, nextConversations]) => {
-        if (!mounted) return;
-        setAccount(nextAccount);
-        setConversations(nextConversations);
-        setSelectedId(nextConversations[0]?.id);
+
+    // 未登录账号只能读取账号状态。signal-cli 进入 ready 后才能查询联系人和会话。
+    adapter.getAccount(accountId)
+      .then(nextAccount => {
+        if (mounted) setAccount(nextAccount);
       })
-      .catch(() => setError('Signal 服务暂时不可用，请稍后重试'));
+      .catch(() => {
+        if (mounted) setError('Signal 服务暂时不可用，请稍后重试');
+      });
 
     const unsubscribe = adapter.subscribe(accountId, event => {
       if (event.type === 'account') setAccount(event.account);
@@ -59,15 +60,31 @@ export default function SignalServicePane({ accountId, adapter, translate }: Pro
           ...items.filter(item => item.id !== event.conversation.id),
         ]);
       }
-      if (event.type === 'message' && event.message.conversationId === selectedId) {
-        setMessages(items => [...items.filter(item => item.id !== event.message.id), event.message]);
+      if (event.type === 'message') {
+        setMessages(items => {
+          if (!items.some(item => item.conversationId === event.message.conversationId)) {
+            return items;
+          }
+          return [...items.filter(item => item.id !== event.message.id), event.message];
+        });
       }
     });
     return () => {
       mounted = false;
       unsubscribe();
     };
-  }, [accountId, adapter, selectedId]);
+  }, [accountId, adapter]);
+
+  useEffect(() => {
+    if (account?.connectionState !== 'ready') {
+      setConversations([]);
+      setSelectedId(undefined);
+      setMessages([]);
+      return;
+    }
+
+    void loadConversations().catch(() => setError('会话列表加载失败'));
+  }, [account?.connectionState, loadConversations]);
 
   useEffect(() => {
     if (!selectedId || account?.connectionState !== 'ready') return;
