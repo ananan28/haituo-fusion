@@ -32,7 +32,7 @@ export class SignalNativeProcess extends EventEmitter {
     const child = spawn(this.executable, ['--stdio-json-rpc', '--data-dir', this.dataDir], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { PATH: process.env.PATH },
+      env: process.env,
     });
     this.child = child;
     readline.createInterface({ input: child.stdout }).on('line', line => this.onLine(line));

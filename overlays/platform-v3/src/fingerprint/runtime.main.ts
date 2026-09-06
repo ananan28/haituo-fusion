@@ -40,11 +40,9 @@ export async function attachAccountFingerprint(
   contents.setUserAgent(
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       'Chrome/128.0.0.0 Safari/537.36',
-    profile.language,
   );
   // Call this on did-frame-finish-load for every frame. Production service
   // containers should also install the same bootstrap through their preload so
   // it executes before page JavaScript.
   await contents.executeJavaScript(fingerprintBootstrap(profile), true);
 }
-

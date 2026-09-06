@@ -4,7 +4,7 @@ import type { TranslationProvider } from './types';
 describe('TranslationService', () => {
   const google: TranslationProvider = {
     id: 'google',
-    translate: jest.fn(async request => ({ text: `ZH:${request.text}`, error: false, provider: 'google' })),
+    translate: jest.fn(async request => ({ text: `ZH:${request.text}`, error: false, provider: 'google' as const })),
   };
 
   beforeEach(() => jest.clearAllMocks());
