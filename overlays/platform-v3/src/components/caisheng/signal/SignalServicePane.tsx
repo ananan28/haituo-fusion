@@ -7,7 +7,6 @@ import type {
   SignalServiceAdapter,
 } from '../../../services/signal/types';
 
-import './signal-service-pane.scss';
 
 type Props = {
   accountId: string;
