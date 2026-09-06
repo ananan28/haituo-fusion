@@ -57,7 +57,7 @@ jobs:
           builder = builder.replace('schemes: [ferdium]', 'schemes: [caisheng]')
           builder = builder.replace('${productName}-${os}-Installer-${version}-${arch}.${ext}', '财盛聚合聊天-安装版-${version}-${arch}.${ext}')
           builder = builder.replace('${productName}-${os}-Portable-${version}-${arch}.${ext}', '财盛聚合聊天-便携版-${version}-${arch}.${ext}')
-          builder = builder.replace('unpackDirName: "Ferdium-Unpacked"', 'unpackDirName: "财盛聚合聊天")
+          builder = builder.replace('unpackDirName: "Ferdium-Unpacked"', 'unpackDirName: "财盛聚合聊天"')
           builder = builder.replace('publisherName: ["Ferdium Contributors", "Ambroise Grau"]', 'publisherName: []')
           builder_path.write_text(builder, encoding="utf-8")
 
