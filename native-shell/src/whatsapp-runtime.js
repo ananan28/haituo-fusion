@@ -258,3 +258,11 @@ class WhatsAppRuntime {
     } else if (mode === 'hard') account.view.webContents.reloadIgnoringCache();
     else account.view.webContents.reload();
     return true;
+  }
+
+  async stopAll() {
+    await Promise.all([...this.accounts.keys()].map(id => this.destroy(id, false)));
+  }
+}
+
+module.exports = { WhatsAppRuntime, WHATSAPP_URL, chineseNetworkError, publicProfile };
