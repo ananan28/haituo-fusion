@@ -56,8 +56,8 @@ jobs:
       - name: 检查与测试
         shell: pwsh
         run: |
-          npm run typecheck --if-present
-          npm run test --if-present
+          npm run check
+          npm test
 
       - name: 构建 Windows 安装包
         shell: pwsh
