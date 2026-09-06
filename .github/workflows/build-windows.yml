@@ -195,7 +195,7 @@ jobs:
         with:
           name: Caisheng-Independent-Platform-Windows-x64
           path: |
-            platform/out/Caisheng-MultiChat-Setup-*-x64.exe
+            platform/out/*AutoSetup-*-x64.exe
             platform/out/Caisheng-MultiChat-Portable-*-x64.exe
             platform/out/*.blockmap
           if-no-files-found: error
