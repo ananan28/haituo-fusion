@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis portable --x64 --publish never",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/service-preload.js && node --check src/translation.js && node --check src/renderer/app.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/service-preload.js && node --check src/translation.js && node --check src/whatsapp-preload.js && node --check src/whatsapp-runtime.js && node --check src/signal-runtime.js && node --check src/service-store.js && node --check src/renderer/app.js",
     "test": "npm run check && node --test test/*.test.js"
   },
   "devDependencies": {
