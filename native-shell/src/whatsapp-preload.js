@@ -63,3 +63,6 @@ function bootstrap() {
 }
 
 bootstrap();
+
+// 同一预加载上下文中启用财盛翻译、空格翻译与发送前中文检查。
+require('./service-preload');
