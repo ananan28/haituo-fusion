@@ -1,4 +1,4 @@
-name: Build Caisheng Independent Platform Windows
+name: 构建财盛聚合聊天 Windows
 
 on:
   workflow_dispatch:
@@ -21,14 +21,14 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
-      - name: Checkout Caisheng build files
+      - name: 获取财盛构建文件
         uses: actions/checkout@v4
 
-      - name: Checkout independent platform core
+      - name: 获取聚合平台核心
         shell: bash
         run: git clone --depth 1 https://github.com/OneChat-Dev/onechat.git platform
 
-      - name: Apply Caisheng platform identity
+      - name: 应用财盛聚合聊天身份
         shell: python
         run: |
           import json
@@ -116,14 +116,14 @@ jobs:
           with builder_path.open("a", encoding="utf-8") as output:
               output.write("\nextraResources:\n  - from: vendor/signal-runtime\n    to: signal-runtime\n    filter:\n      - signal-cli/lib/**\n      - jre/bin/**\n      - jre/conf/**\n      - jre/legal/**\n      - jre/lib/**\n")
 
-      - name: Overlay Caisheng platform modules
+      - name: 合并财盛平台模块
         shell: bash
         run: |
           if [ -d overlays/platform-v3 ]; then
             cp -R overlays/platform-v3/. platform/
           fi
 
-      - name: Verify independent-platform boundary
+      - name: 验证财盛平台边界
         shell: python
         run: |
           from pathlib import Path
@@ -134,19 +134,19 @@ jobs:
           assert workflow.count(forbidden) == 0
           assert "OneChat-Dev/onechat" in workflow
 
-      - name: Setup Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.18.0
 
-      - name: Enable pnpm
+      - name: 配置 pnpm
         shell: bash
         working-directory: platform
         run: |
           corepack enable
           corepack prepare pnpm@10.14.0 --activate
 
-      - name: Install dependencies
+      - name: 安装依赖
         shell: bash
         working-directory: platform
         run: |
@@ -154,12 +154,12 @@ jobs:
           pnpm add qrcode-generator@1.4.4
           pnpm add -D @types/qrcode-generator@1.0.6
 
-      - name: Typecheck independent platform
+      - name: 检查平台源码
         shell: bash
         working-directory: platform
         run: pnpm typecheck
 
-      - name: Bundle Signal protocol runtime
+      - name: 打包 Signal 协议运行时
         shell: pwsh
         working-directory: platform
         run: |
@@ -180,7 +180,7 @@ jobs:
           & (Join-Path $vendor 'jre/bin/java.exe') '-Djava.awt.headless=true' '-cp' (Join-Path $vendor 'signal-cli/lib/*') 'org.asamk.signal.Main' '--version'
           if ($LASTEXITCODE -ne 0) { throw 'Signal runtime verification failed' }
 
-      - name: Build installer and portable app
+      - name: 生成安装版和便携版
         shell: bash
         working-directory: platform
         env:
@@ -190,17 +190,17 @@ jobs:
           node esbuild.mjs
           pnpm exec electron-builder --win nsis portable --x64 --publish never
 
-      - name: Verify Windows deliverables
+      - name: 验证 Windows 安装包
         shell: pwsh
         run: |
           $setup = Get-ChildItem platform/out/*AutoSetup-*-x64.exe
           $portable = Get-ChildItem platform/out/Caisheng-MultiChat-Portable-*-x64.exe
           if (-not $setup -or -not $portable) { throw "Missing setup or portable EXE" }
 
-      - name: Upload Windows deliverables
+      - name: 上传 Windows 安装包
         uses: actions/upload-artifact@v4
         with:
-          name: Caisheng-Independent-Platform-Windows-x64
+          name: 财盛聚合聊天-Windows-x64
           path: |
             platform/out/*AutoSetup-*-x64.exe
             platform/out/Caisheng-MultiChat-Portable-*-x64.exe
