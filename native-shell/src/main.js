@@ -6,15 +6,14 @@ const fs = require('fs');
 const { ServiceStore } = require('./service-store');
 const { SignalRuntime } = require('./signal-runtime');
 const { WhatsAppRuntime } = require('./whatsapp-runtime');
+const { WebServiceRuntime } = require('./web-service-runtime');
+const { AdapterRegistry } = require('./adapter-registry');
+const { findRecipe, publicCatalog } = require('./service-catalog');
 const translation = require('./translation');
 
 app.setName('财盛聚合聊天');
 app.setPath('userData', path.join(app.getPath('appData'), '财盛聚合聊天'));
 
-const CATALOG = Object.freeze([
-  { id: 'signal', name: 'Signal', kind: 'native', color: '#3a76f0' },
-  { id: 'whatsapp', name: 'WhatsApp', kind: 'web', url: 'https://web.whatsapp.com/', color: '#13a45a' }
-]);
 const smoke = process.argv.includes('--smoke-test') || process.env.CAISHENG_SMOKE_TEST === '1';
 const smokeFile = process.env.CAISHENG_SMOKE_FILE || '';
 function smokeLog(message) {
@@ -28,6 +27,8 @@ let currentId = '';
 let quitting = false;
 let signal;
 let whatsapp;
+let web;
+let adapters;
 let stopping = false;
 
 function windowStateFile() { return path.join(app.getPath('userData'), 'window-state.json'); }
@@ -47,7 +48,7 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 function hideViews() {
-  whatsapp?.hide();
+  adapters?.hide();
 }
 function registerIpc() {
   ipcMain.handle('translation:settings:get', () => translation.publicSettings());
@@ -77,20 +78,30 @@ function registerIpc() {
   ipcMain.handle('signal:delete', (_e,id,to,timestamp) => signal.remove(id,to,timestamp));
   ipcMain.handle('signal:reconnect', (_e,id) => signal.reconnect(id));
   ipcMain.handle('signal:stop', (_e,id) => signal.stop(id));
-  ipcMain.handle('catalog:list', () => CATALOG);
+  ipcMain.handle('catalog:list', () => publicCatalog());
   ipcMain.handle('services:list', () => store.list());
+  ipcMain.on('web-service:unread', (event, id, value) => {
+    const account = adapters.accountForWebContents(event.sender);
+    if (!account || account.id !== id) return;
+    const unread = Math.max(0, Math.min(9999, Math.floor(Number(value) || 0)));
+    const service = store.update(id, { unread });
+    send('service:state', { id, kind: service.recipeId, unread });
+  });
   ipcMain.handle('services:add', (_event, recipeId) => {
-    const recipe = CATALOG.find(x => x.id === recipeId);
+    const recipe = findRecipe(recipeId);
     if (!recipe) throw new Error('未知服务');
     return store.add(recipe);
   });
-  ipcMain.handle('services:update', (_event, id, patch) => store.update(id, patch));
+  ipcMain.handle('services:update', async (_event, id, patch) => {
+    const service = store.update(id, patch);
+    await adapters.update(service);
+    return service;
+  });
   ipcMain.handle('services:move', (_event, id, direction) => store.move(id, direction));
   ipcMain.handle('services:remove', async (_event, id) => {
     const service = store.get(id);
     if (!service) return false;
-    if (service.recipeId === 'whatsapp') await whatsapp.destroy(id, true);
-    if (service.recipeId === 'signal') await signal?.removeAccount(id);
+    await adapters.remove(service, true);
     if (currentId === id) currentId = '';
     return store.remove(id);
   });
@@ -98,27 +109,21 @@ function registerIpc() {
     const id = typeof target === 'string' ? target : target?.id;
     const service = store.get(id);
     if (!service) throw new Error('服务账号不存在');
-    if (service.recipeId === 'whatsapp') {
-      currentId = id;
-      return whatsapp.open(id);
-    }
-    hideViews(); currentId = id; return true;
+    const result = await adapters.open(service);
+    currentId = id;
+    return result;
   });
   ipcMain.handle('services:refresh', async (_event, id, mode = 'normal') => {
     const service = store.get(id); if (!service) throw new Error('服务账号不存在');
-    if (service.recipeId === 'signal') {
-      const result = await signal.reconnect(id);
-      send('signal:refresh', { id, mode });
-      return result;
-    }
-    return whatsapp.refresh(id, mode);
+    return adapters.refresh(service, mode);
   });
   ipcMain.handle('services:test-proxy', async (_event, id) => {
     const service = store.get(id); if (!service) throw new Error('服务账号不存在');
     const ses = await store.configureSession(service);
     if (!ses) throw new Error('此服务不使用网页代理');
     try {
-      const response = await ses.fetch('https://web.whatsapp.com/', { method: 'HEAD' });
+      const recipe = findRecipe(service.recipeId);
+      const response = await ses.fetch(recipe?.startUrl || service.url, { method: 'HEAD' });
       return { ok: response.ok || response.status < 500, status: response.status };
     } catch (error) { return { ok: false, error: '代理连接失败：' + error.message }; }
   });
@@ -152,6 +157,7 @@ app.whenReady().then(() => {
   smokeLog('APP_READY');
   store = new ServiceStore(app.getPath('userData'));
   whatsapp = new WhatsAppRuntime(store, payload => send('service:state', payload));
+  web = new WebServiceRuntime(store, payload => send('service:state', payload));
   if (!smoke) {
     signal = new SignalRuntime(app.getPath('userData'), process.resourcesPath);
     signal.on('state', payload => send('signal:state', payload));
@@ -159,6 +165,10 @@ app.whenReady().then(() => {
     signal.on('log', payload => console.warn('[Signal]', payload.id, payload.message));
     signal.restoreAll().catch(error => console.error('恢复 Signal 账号失败：', error));
   }
+  adapters = new AdapterRegistry({
+    signal, whatsapp, web,
+    sendSignalRefresh: payload => send('signal:refresh', payload)
+  });
   registerIpc();
   const state = readWindowState();
   win = new BrowserWindow({
@@ -167,7 +177,7 @@ app.whenReady().then(() => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false }
   });
   win.setMenu(null);
-  whatsapp.setWindow(win);
+  adapters.setWindow(win);
   const rendererFile = path.join(__dirname, 'renderer', 'index.html');
   if (smoke) {
     const hardTimeout = setTimeout(() => { smokeLog('MAIN_TIMEOUT'); process.exit(2); }, 30000);
@@ -201,7 +211,7 @@ app.whenReady().then(() => {
     win.loadFile(rendererFile);
   }
   win.once('ready-to-show', () => { if (!smoke) win.show(); });
-  win.on('resize', () => whatsapp.resizeAll());
+  win.on('resize', () => adapters.resizeAll());
   win.on('move', saveWindowState); win.on('resize', saveWindowState);
   win.on('close', event => {
     saveWindowState();
@@ -216,16 +226,13 @@ app.on('before-quit', event => {
   if (stopping) return;
   event.preventDefault();
   stopping = true;
-  Promise.all([
-    signal ? signal.stopAll() : Promise.resolve(),
-    whatsapp ? whatsapp.stopAll() : Promise.resolve()
-  ]).finally(() => app.quit());
+  (adapters ? adapters.stopAll() : Promise.resolve()).finally(() => app.quit());
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && quitting) app.quit(); });
 app.on('activate', () => win?.show());
 app.on('login', (event, webContents, _details, authInfo, callback) => {
   if (!authInfo?.isProxy) return;
-  const account = whatsapp?.accountForWebContents(webContents);
+  const account = adapters?.accountForWebContents(webContents);
   const proxy = account?.service?.fingerprint?.proxy;
   if (proxy?.username) {
     event.preventDefault();

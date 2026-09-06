@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { session } = require('electron');
+const { findRecipe, isAllowedNavigation } = require('./service-catalog');
 
 const DEFAULT_FINGERPRINT = Object.freeze({
   language: 'zh-CN',
@@ -83,13 +84,14 @@ class ServiceStore {
   }
   normalize(s, index = 0) {
     if (!s || !safeId(s.id)) return null;
-    const recipeId = ['signal', 'whatsapp'].includes(s.recipeId) ? s.recipeId : '';
-    if (!recipeId) return null;
+    const recipe = findRecipe(s.recipeId);
+    if (!recipe) return null;
     return {
-      id: s.id, recipeId, kind: recipeId === 'signal' ? 'native' : 'web',
-      url: recipeId === 'whatsapp' ? 'https://web.whatsapp.com/' : '',
-      name: safeText(s.name, 60) || (recipeId === 'signal' ? 'Signal' : 'WhatsApp'),
-      note: safeText(s.note, 240), color: /^#[0-9a-f]{6}$/i.test(s.color || '') ? s.color : (recipeId === 'signal' ? '#3a76f0' : '#13a45a'),
+      id: s.id, recipeId: recipe.id, kind: recipe.kind, adapter: recipe.adapter,
+      url: recipe.kind === 'web' && isAllowedNavigation(recipe, s.url) ? s.url : recipe.startUrl,
+      icon: safeText(s.icon, 8) || recipe.icon,
+      name: safeText(s.name, 60) || recipe.name,
+      note: safeText(s.note, 240), color: /^#[0-9a-f]{6}$/i.test(s.color || '') ? s.color : recipe.color,
       enabled: s.enabled !== false, muted: Boolean(s.muted), notifications: s.notifications !== false,
       unread: Math.max(0, Math.floor(Number(s.unread) || 0)), order: Number.isFinite(s.order) ? s.order : index,
       crashed: false, lastOpenedAt: Number(s.lastOpenedAt) || 0, fingerprint: validateFingerprint(s.fingerprint)
@@ -163,11 +165,13 @@ class ServiceStore {
       await ses.setProxy({ mode: 'fixed_servers', proxyRules: rule });
     }
 
-    ses.setPermissionCheckHandler((_wc, permission) => (
-      ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
-    ));
+    ses.setPermissionCheckHandler((_wc, permission) => {
+      if (permission === 'notifications') return service.notifications !== false;
+      return ['media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission);
+    });
     ses.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission));
+      if (permission === 'notifications') callback(service.notifications !== false);
+      else callback(['media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission));
     });
     return ses;
   }
@@ -183,14 +187,16 @@ class ServiceStore {
     ses.flushStorageData();
   }
 
-  // 4xx 后由用户明确选择时，仅清理当前账号 partition 的 WhatsApp 站点数据并干净重试。
+  // 用户明确选择时，只清理当前账号起始站点的数据并干净重试。
   async resetAccountSiteData(id) {
     const s = this.get(id); if (!s || s.kind !== 'web') return;
+    const recipe = findRecipe(s.recipeId);
+    const origin = recipe ? new URL(recipe.startUrl).origin : undefined;
     const ses = session.fromPartition(servicePartition(id));
     if (typeof ses.closeAllConnections === 'function') await ses.closeAllConnections();
     await ses.clearCache();
     await ses.clearStorageData({
-      origin: 'https://web.whatsapp.com',
+      ...(origin ? { origin } : {}),
       storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
     });
     if (typeof ses.clearHostResolverCache === 'function') await ses.clearHostResolverCache();

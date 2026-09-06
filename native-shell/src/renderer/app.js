@@ -40,7 +40,7 @@ function makeLoading(text = '正在加载服务…') {
 }
 function makeIcon(service) {
   const icon = document.createElement('i');
-  icon.style.background = service.color; icon.textContent = (service.name || '?').trim().charAt(0).toUpperCase();
+  icon.style.background = service.color; icon.textContent = service.icon || (service.name || '?').trim().charAt(0).toUpperCase();
   return icon;
 }
 function home() {
@@ -105,7 +105,7 @@ async function picker() {
   const catalog = $('#catalog'); catalog.replaceChildren();
   for (const recipe of await caisheng.catalog()) {
     const button = document.createElement('button'), icon = document.createElement('i');
-    icon.style.background = recipe.color; icon.textContent = recipe.name.charAt(0);
+    icon.style.background = recipe.color; icon.textContent = recipe.icon || recipe.name.charAt(0);
     button.append(icon, document.createTextNode(recipe.name));
     button.onclick = async () => {
       button.disabled = true;

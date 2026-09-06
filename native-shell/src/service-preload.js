@@ -3,6 +3,7 @@ const { ipcRenderer } = require('electron');
 
 const accountPrefix = '--caisheng-account=';
 const accountId = process.argv.find(x => x.startsWith(accountPrefix))?.slice(accountPrefix.length) || '';
+let lastUnread = -1;
 const HAN = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u;
 const originals = new WeakMap();
 let composing = false;
@@ -40,6 +41,13 @@ function notice(message, bad = false) {
   }
   node.textContent = message; node.style.background = bad ? '#c93838' : '#4f46d8'; node.style.opacity = '1';
   clearTimeout(notice.timer); notice.timer = setTimeout(() => { node.style.opacity = '0'; }, 2800);
+}
+function reportUnread() {
+  const match = String(document.title || '').match(/^\s*\((\d+)\)/);
+  const unread = match ? Math.min(9999, Number(match[1]) || 0) : 0;
+  if (unread === lastUnread) return;
+  lastUnread = unread;
+  ipcRenderer.send('web-service:unread', accountId, unread);
 }
 async function currentScope() {
   const conversation = conversationId(), key = accountId + '\n' + conversation;
@@ -101,6 +109,10 @@ function decorateMessages(root = document) {
   });
 }
 function install() {
+  reportUnread();
+  new MutationObserver(reportUnread).observe(document.querySelector('title') || document.documentElement, {
+    childList: true, subtree: true, characterData: true
+  });
   document.addEventListener('compositionstart', () => { composing = true; }, true);
   document.addEventListener('compositionend', () => { composing = false; }, true);
   document.addEventListener('focusin', () => { scope = null; currentScope().catch(() => {}); }, true);
