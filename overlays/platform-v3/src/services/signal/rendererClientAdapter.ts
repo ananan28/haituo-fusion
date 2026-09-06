@@ -75,8 +75,9 @@ class RendererClientSignalAdapter implements SignalServiceAdapter {
 }
 let adapter: SignalServiceAdapter | undefined;
 export function getRendererSignalAdapter(): SignalServiceAdapter { adapter ??= new RendererClientSignalAdapter(); return adapter; }
-export async function translateWithRendererClient(text: string): Promise<string> {
-  const result = await ipcRenderer.invoke('translate', { text, translateToLanguage: 'zh-CN', translatorEngine: 'Google' });
+export async function translateWithRendererClient(text: string, targetLanguage = 'zh-CN'): Promise<string> {
+  if (!text.trim()) return '';
+  const result = await ipcRenderer.invoke('translate', { text, translateToLanguage: targetLanguage, translatorEngine: 'Google' });
   if (result?.error) throw new Error(result.text || '翻译失败');
   return result?.text ?? '';
 }
