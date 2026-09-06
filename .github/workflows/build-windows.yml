@@ -84,6 +84,22 @@ jobs:
           value = value.replace("FERDIUM ERROR: An error occurred. Please select less text to translate or try again later.", "翻译失败，请缩短内容或稍后重试。")
           translation.write_text(value, encoding="utf-8")
 
+          webview = root / "src/components/services/content/ServiceWebview.tsx"
+          value = webview.read_text(encoding="utf-8")
+          value = value.replace(
+              "sandboxServices ? checkForSandbox() : 'persist:general-session'",
+              "sandboxServices ? checkForSandbox() : service.partition",
+          )
+          webview.write_text(value, encoding="utf-8")
+
+          recipe = root / "src/webview/recipe.ts"
+          value = recipe.read_text(encoding="utf-8")
+          value = value.replace(
+              "import type Service from '../models/Service';",
+              "import type Service from '../models/Service';\nimport './fingerprint';",
+          )
+          recipe.write_text(value, encoding="utf-8")
+
       - name: Overlay Caisheng platform modules
         shell: bash
         run: |
