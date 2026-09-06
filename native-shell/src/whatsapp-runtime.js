@@ -207,7 +207,7 @@ class WhatsAppRuntime {
     const view = new BrowserView({ webPreferences: {
       partition: servicePartition(id),
       preload: path.join(__dirname, 'whatsapp-preload.js'),
-      additionalArguments: ['--caisheng-whatsapp-profile=' + profile],
+      additionalArguments: ['--caisheng-whatsapp-profile=' + profile, '--caisheng-account=' + id],
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
