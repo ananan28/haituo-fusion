@@ -39,7 +39,8 @@ jobs:
           $forbidden = $files | Select-String -Pattern 'OneChat-Dev/onechat|org\.ferdium|Ferdium|signalapp/Signal-Desktop' -CaseSensitive:$false
           if ($forbidden) { $forbidden | Format-Table Path,LineNumber,Line; throw '检测到第三方平台/Signal Desktop 外壳残留' }
           $workflow = Get-Content '.github/workflows/build-windows.yml' -Raw
-          if ($workflow -match 'git clone') { throw 'Windows 构建禁止动态克隆上游外壳' }
+          $cloneCommand = 'git' + ' clone'
+          if ($workflow.Contains($cloneCommand)) { throw 'Windows 构建禁止动态克隆上游外壳' }
 
       - name: 配置 Node.js
         uses: actions/setup-node@v4
