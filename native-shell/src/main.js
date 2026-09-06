@@ -194,9 +194,11 @@ function makeTray() {
 }
 app.whenReady().then(() => {
   store = new ServiceStore(app.getPath('userData'));
-  signal = new SignalRuntime(app.getPath('userData'), process.resourcesPath);
-  signal.on('state', payload => send('signal:state', payload));
-  signal.on('message', payload => send('signal:message', payload));
+  if (!smoke) {
+    signal = new SignalRuntime(app.getPath('userData'), process.resourcesPath);
+    signal.on('state', payload => send('signal:state', payload));
+    signal.on('message', payload => send('signal:message', payload));
+  }
   registerIpc();
   const state = readWindowState();
   win = new BrowserWindow({
@@ -206,7 +208,17 @@ app.whenReady().then(() => {
   });
   win.setMenu(null);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.show());
+  if (smoke) {
+    win.webContents.once('did-finish-load', () => {
+      console.log('CAISHENG_RENDERER_LOADED');
+      setImmediate(() => app.exit(0));
+    });
+    win.webContents.once('did-fail-load', (_event, code, description) => {
+      console.error('CAISHENG_RENDERER_FAILED', code, description);
+      app.exit(3);
+    });
+  }
+  win.once('ready-to-show', () => { if (!smoke) win.show(); });
   win.on('resize', () => { for (const v of win.getBrowserViews()) viewBounds(v); });
   win.on('move', saveWindowState); win.on('resize', saveWindowState);
   win.on('close', event => {
@@ -214,8 +226,8 @@ app.whenReady().then(() => {
     if (!quitting && store.platformSettings().closeToTray && !smoke) { event.preventDefault(); win.hide(); }
   });
   if (state.maximized) win.maximize();
-  makeTray();
-  if (smoke) setTimeout(() => app.exit(2), 15000);
+  if (!smoke) makeTray();
+  if (smoke) setTimeout(() => app.exit(2), 20000);
 });
 app.on('before-quit', event => { quitting = true; saveWindowState(); if (signal && !signal._stopping) { event.preventDefault(); signal._stopping = true; signal.stopAll().finally(() => app.quit()); } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && quitting) app.quit(); });
