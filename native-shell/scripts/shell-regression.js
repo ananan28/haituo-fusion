@@ -11,7 +11,7 @@ const css = read('src/renderer/app.css');
 const main = read('src/main.js');
 const combined = [html, app, css, main].join('\n');
 
-for (const forbidden of ['OneChat', 'Ferdium', 'Workspaces', 'Todos', 'Get started']) {
+for (const forbidden of ['One' + 'Chat', 'Fer' + 'dium', 'Work' + 'spaces', 'To' + 'dos', 'Get ' + 'started']) {
   if (combined.includes(forbidden)) throw new Error(`独立外壳中发现禁用内容：${forbidden}`);
 }
 for (const id of ['quickAccounts', 'services', 'content', 'picker', 'accountPane', 'settingsPane', 'minimize', 'maximize', 'windowClose']) {
