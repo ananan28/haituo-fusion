@@ -300,15 +300,26 @@ class SignalRuntime extends EventEmitter {
     ];
     return candidates.find(candidate => candidate.startsWith(path.resolve(p.root) + path.sep) && fs.existsSync(candidate)) || '';
   }
+  fileDataUrl(file, contentType, maxBytes = 8 * 1024 * 1024) {
+    if (!file) return '';
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > maxBytes) return '';
+      return `data:${contentType || 'application/octet-stream'};base64,${fs.readFileSync(file).toString('base64')}`;
+    } catch { return ''; }
+  }
   normalizeAttachments(id, attachments) {
-    return (attachments || []).map(item => ({
-      id: item.id || item.attachmentId || '',
-      filename: cleanName(item.filename || item.fileName || item.name || '附件'),
-      contentType: item.contentType || item.type || 'application/octet-stream',
-      size: Number(item.size || 0),
-      localPath: this.attachmentPath(id, item),
-      voiceNote: Boolean(item.voiceNote),
-    }));
+    return (attachments || []).map(item => {
+      const contentType = item.contentType || item.type || 'application/octet-stream';
+      const localPath = this.attachmentPath(id, item);
+      return {
+        id: item.id || item.attachmentId || '',
+        filename: cleanName(item.filename || item.fileName || item.name || '附件'),
+        contentType, size: Number(item.size || 0), localPath,
+        dataUrl: /^(image|video|audio)\//.test(contentType) ? this.fileDataUrl(localPath, contentType) : '',
+        voiceNote: Boolean(item.voiceNote),
+      };
+    });
   }
   conversation(envelope, data, sent) {
     const groupId = data.groupInfo?.groupId || data.groupInfo?.groupIdV2 || data.groupId;
@@ -382,7 +393,9 @@ class SignalRuntime extends EventEmitter {
       const conversationId = 'direct:' + recipient, recent = last.get(conversationId);
       out.push({
         id: conversationId, name: contact.name || contact.profileName || recipient, group: false,
-        avatar: contact.profile?.avatar || contact.profileAvatar || contact.avatar || '',
+        avatar: this.fileDataUrl(
+          this.attachmentPath(id, { path: contact.profile?.avatar || contact.profileAvatar || contact.avatar || '' }),
+          'image/png', 2 * 1024 * 1024),
         last: recent?.deleted ? '[消息已撤回]' : recent?.text || (recent?.attachments?.length ? '[附件]' : ''),
         timestamp: recent?.timestamp || 0,
       });
@@ -393,7 +406,7 @@ class SignalRuntime extends EventEmitter {
       const conversationId = 'group:' + groupId, recent = last.get(conversationId);
       out.push({
         id: conversationId, name: group.name || '未命名群组', group: true,
-        avatar: group.avatar || '', members: group.members || [],
+        avatar: this.fileDataUrl(this.attachmentPath(id, { path: group.avatar || '' }), 'image/png', 2 * 1024 * 1024),
         last: recent?.deleted ? '[消息已撤回]' : recent?.text || (recent?.attachments?.length ? '[附件]' : ''),
         timestamp: recent?.timestamp || 0,
       });
