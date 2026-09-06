@@ -1,0 +1,1 @@
+const{contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('caisheng',{catalog:()=>ipcRenderer.invoke('catalog:list'),services:()=>ipcRenderer.invoke('services:list'),add:id=>ipcRenderer.invoke('services:add',id),open:s=>ipcRenderer.invoke('services:open',s),hide:()=>ipcRenderer.invoke('view:hide'),ready:()=>ipcRenderer.send('renderer:ready')});
