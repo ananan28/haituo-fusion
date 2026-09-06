@@ -140,8 +140,8 @@ class WhatsAppRuntime {
       } catch {}
       return { action: 'deny' };
     });
-    wc.on('will-navigate', event => {
-      try { if (!ALLOWED_HOSTS.test(new URL(event.url).hostname)) event.preventDefault(); } catch { event.preventDefault(); }
+    wc.on('will-navigate', (event, url) => {
+      try { if (!ALLOWED_HOSTS.test(new URL(url).hostname)) event.preventDefault(); } catch { event.preventDefault(); }
     });
     wc.on('did-start-loading', () => {
       clearTimeout(account.loadTimer);
