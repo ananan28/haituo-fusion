@@ -19,6 +19,16 @@ contextBridge.exposeInMainWorld('caisheng', {
   maximize: () => invoke('window:maximize'),
   closeWindow: () => invoke('window:close'),
   showDataFolder: () => invoke('window:show-data'),
+  translation: {
+    getSettings: () => invoke('translation:settings:get'),
+    updateSettings: patch => invoke('translation:settings:update', patch),
+    updateAccount: (accountId, patch) => invoke('translation:account:update', accountId, patch),
+    getScope: (accountId, conversationId) => invoke('translation:scope:get', accountId, conversationId),
+    updateScope: (accountId, conversationId, patch) => invoke('translation:scope:update', accountId, conversationId, patch),
+    translate: request => invoke('translation:translate', request),
+    validate: payload => invoke('translation:validate', payload),
+    clearCache: () => invoke('translation:cache:clear')
+  },
   onServiceState: callback => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('service:state', listener); listeners.set(callback, listener);
