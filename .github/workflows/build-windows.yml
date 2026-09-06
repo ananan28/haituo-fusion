@@ -5,12 +5,12 @@ on:
   push:
     branches: [main]
     paths:
-      - overlays/platform-v3/**
+      - native-shell/**
       - assets/windows/**
       - .github/workflows/build-windows.yml
 
 concurrency:
-  group: caisheng-platform-v3-windows
+  group: caisheng-native-windows
   cancel-in-progress: true
 
 permissions:
@@ -19,192 +19,83 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: native-shell
     steps:
-      - name: 获取财盛构建文件
+      - name: 获取财盛源码
         uses: actions/checkout@v4
 
-      - name: 获取聚合平台核心
-        shell: bash
-        run: git clone --depth 1 https://github.com/OneChat-Dev/onechat.git platform
-
-      - name: 应用财盛聚合聊天身份
-        shell: python
+      - name: 验证独立平台边界
+        shell: pwsh
+        working-directory: .
         run: |
-          import json
-          import shutil
-          from pathlib import Path
-
-          root = Path("platform")
-          package_path = root / "package.json"
-          package = json.loads(package_path.read_text(encoding="utf-8"))
-          package.update({
-              "name": "caisheng-multichat",
-              "productName": "财盛聚合聊天",
-              "desktopName": "caisheng-multichat.desktop",
-              "appId": "com.caisheng.multichat",
-              "description": "财盛独立聚合聊天平台",
-              "author": "Caisheng Group",
-              "homepage": "https://github.com/ananan28/WS-",
-              "repository": "https://github.com/ananan28/WS-",
-          })
-          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-          builder_path = root / "electron-builder.yml"
-          builder = builder_path.read_text(encoding="utf-8")
-          builder = builder.replace('appId: "org.ferdium.ferdium-app"', 'appId: "com.caisheng.multichat"')
-          builder = builder.replace('name: Ferdium', 'name: 财盛聚合聊天')
-          builder = builder.replace('schemes: [ferdium]', 'schemes: [caisheng]')
-          builder = builder.replace('${productName}-${os}-Installer-${version}-${arch}.${ext}', '财盛聚合聊天-安装版-${version}-${arch}.${ext}')
-          builder = builder.replace('${productName}-${os}-AutoSetup-${version}-${arch}.${ext}', '财盛聚合聊天-安装版-${version}-${arch}.${ext}')
-          builder = builder.replace('${productName}-${os}-Portable-${version}-${arch}.${ext}', '财盛聚合聊天-便携版-${version}-${arch}.${ext}')
-          builder = builder.replace('unpackDirName: "Ferdium-Unpacked"', 'unpackDirName: "财盛聚合聊天"')
-          builder = builder.replace('publisherName: ["Ferdium Contributors", "Ambroise Grau"]', 'publisherName: []')
-          builder_path.write_text(builder, encoding="utf-8")
-
-          icon = Path("assets/windows/caisheng.ico")
-          if not icon.exists():
-              raise FileNotFoundError("Missing Caisheng Windows icon")
-          shutil.copyfile(icon, root / "build-helpers/images/icon.ico")
-
-          for name in ("zh-HANS.json", "zh.json"):
-              path = root / "src/i18n/locales" / name
-              if path.exists():
-                  value = path.read_text(encoding="utf-8").replace("Ferdium", "财盛聚合聊天")
-                  path.write_text(value, encoding="utf-8")
-
-          welcome = root / "src/components/auth/Welcome.tsx"
-          value = welcome.read_text(encoding="utf-8")
-          marker = "class Welcome extends Component<IProps> {"
-          value = value.replace(marker, marker + "\n  componentDidMount(): void {\n    serverlessLogin(this.props.actions);\n  }")
-          value = value.replace("<H1>Ferdium</H1>", "<H1>财盛聚合聊天</H1>")
-          welcome.write_text(value, encoding="utf-8")
-
-          translation = root / "src/helpers/translation-helpers.ts"
-          value = translation.read_text(encoding="utf-8")
-          value = value.replace("FERDIUM ERROR: An error occurred. Please select less text to translate or try again later.", "翻译失败，请缩短内容或稍后重试。")
-          translation.write_text(value, encoding="utf-8")
-
-          webview = root / "src/components/services/content/ServiceWebview.tsx"
-          value = webview.read_text(encoding="utf-8")
-          value = value.replace(
-              "sandboxServices ? checkForSandbox() : 'persist:general-session'",
-              "sandboxServices ? checkForSandbox() : service.partition",
-          )
-          webview.write_text(value, encoding="utf-8")
-
-          recipe = root / "src/webview/recipe.ts"
-          value = recipe.read_text(encoding="utf-8")
-          value = value.replace(
-              "import type Service from '../models/Service';",
-              "import type Service from '../models/Service';\nimport './fingerprint';",
-          )
-          recipe.write_text(value, encoding="utf-8")
-
-          main_style = root / "src/styles/main.scss"
-          value = main_style.read_text(encoding="utf-8")
-          signal_style_import = "@import './signal-service-pane.scss';"
-          if signal_style_import not in value:
-              value += "\n" + signal_style_import + "\n"
-          main_style.write_text(value, encoding="utf-8")
-
-          ipc_index = root / "src/electron/ipc-api/index.ts"
-          value = ipc_index.read_text(encoding="utf-8")
-          value = value.replace("import settings from './settings';", "import settings from './settings';\nimport signal from './signal';")
-          value = value.replace("  focusState(params);", "  focusState(params);\n  signal(params);")
-          ipc_index.write_text(value, encoding="utf-8")
-
-          with builder_path.open("a", encoding="utf-8") as output:
-              output.write("\nextraResources:\n  - from: vendor/signal-runtime\n    to: signal-runtime\n    filter:\n      - signal-cli/lib/**\n      - jre/bin/**\n      - jre/conf/**\n      - jre/legal/**\n      - jre/lib/**\n")
-
-      - name: 合并财盛平台模块
-        shell: bash
-        run: |
-          if [ -d overlays/platform-v3 ]; then
-            cp -R overlays/platform-v3/. platform/
-          fi
-
-      - name: 验证财盛平台边界
-        shell: python
-        run: |
-          from pathlib import Path
-          package = Path("platform/package.json").read_text(encoding="utf-8")
-          workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
-          assert "财盛聚合聊天" in package
-          forbidden = "signalapp/" + "Signal-Desktop"
-          assert workflow.count(forbidden) == 0
-          assert "OneChat-Dev/onechat" in workflow
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path 'native-shell/package.json')) { throw '缺少财盛独立项目源码' }
+          $files = Get-ChildItem native-shell -Recurse -File | Where-Object {
+            $_.Extension -in '.js','.cjs','.mjs','.ts','.tsx','.json','.html','.css','.scss','.yml','.yaml'
+          }
+          $forbidden = $files | Select-String -Pattern 'OneChat-Dev/onechat|org\.ferdium|Ferdium|signalapp/Signal-Desktop' -CaseSensitive:$false
+          if ($forbidden) { $forbidden | Format-Table Path,LineNumber,Line; throw '检测到第三方平台/Signal Desktop 外壳残留' }
+          $workflow = Get-Content '.github/workflows/build-windows.yml' -Raw
+          if ($workflow -match 'git clone') { throw 'Windows 构建禁止动态克隆上游外壳' }
 
       - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.18.0
 
-      - name: 配置 pnpm
-        shell: bash
-        working-directory: platform
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.14.0 --activate
-
-      - name: 安装依赖
-        shell: bash
-        working-directory: platform
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm add qrcode-generator@1.4.4
-          pnpm add -D @types/qrcode-generator@1.0.6
-
-      - name: 检查平台源码
-        shell: bash
-        working-directory: platform
-        run: pnpm typecheck
-
-      - name: 打包 Signal 协议运行时
+      - name: 安装固定依赖
         shell: pwsh
-        working-directory: platform
+        run: npm install --no-audit --no-fund
+
+      - name: 检查与测试
+        shell: pwsh
+        run: |
+          npm run typecheck --if-present
+          npm run test --if-present
+
+      - name: 构建 Windows 安装包
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          Copy-Item ../assets/windows/caisheng.ico build/icon.ico -Force
+          npm run dist
+
+      - name: 启动冒烟测试
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $vendor = Join-Path $PWD 'vendor/signal-runtime'
-          New-Item -ItemType Directory -Force -Path $vendor | Out-Null
-          $signalArchive = Join-Path $env:RUNNER_TEMP 'signal-cli-0.14.7.tar.gz'
-          Invoke-WebRequest -Uri 'https://github.com/AsamK/signal-cli/releases/download/v0.14.7/signal-cli-0.14.7.tar.gz' -OutFile $signalArchive
-          New-Item -ItemType Directory -Force -Path (Join-Path $vendor 'signal-cli') | Out-Null
-          tar -xzf $signalArchive -C (Join-Path $vendor 'signal-cli') --strip-components=1
-          $javaArchive = Join-Path $env:RUNNER_TEMP 'temurin-jre25.zip'
-          Invoke-WebRequest -Uri 'https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jre/hotspot/normal/eclipse' -OutFile $javaArchive
-          $expanded = Join-Path $env:RUNNER_TEMP 'temurin-jre25'
-          Expand-Archive -Path $javaArchive -DestinationPath $expanded -Force
-          $javaHome = Get-ChildItem $expanded -Directory | Select-Object -First 1
-          Copy-Item -Recurse -Force $javaHome.FullName (Join-Path $vendor 'jre')
-          & (Join-Path $vendor 'jre/bin/java.exe') --version
-          & (Join-Path $vendor 'jre/bin/java.exe') '-Djava.awt.headless=true' '-cp' (Join-Path $vendor 'signal-cli/lib/*') 'org.asamk.signal.Main' '--version'
-          if ($LASTEXITCODE -ne 0) { throw 'Signal runtime verification failed' }
+          $exe = Get-ChildItem 'out/win-unpacked/*.exe' | Where-Object Name -eq '财盛聚合聊天.exe' | Select-Object -First 1
+          if (-not $exe) { throw '找不到财盛聚合聊天未打包程序' }
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -PassThru
+          if (-not $process.WaitForExit(45000)) { Stop-Process -Id $process.Id -Force; throw '启动冒烟测试超时' }
+          if ($process.ExitCode -ne 0) { throw "启动冒烟测试失败：$($process.ExitCode)" }
 
-      - name: 生成安装版和便携版
-        shell: bash
-        working-directory: platform
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          pnpm exec preval-build-info-cli
-          node esbuild.mjs
-          pnpm exec electron-builder --win nsis portable --x64 --publish never
-
-      - name: 验证 Windows 安装包
+      - name: 验证安装版与便携版
         shell: pwsh
         run: |
-          $setup = Get-ChildItem platform/out/*安装版*-x64.exe
-          $portable = Get-ChildItem platform/out/*便携版*-x64.exe
-          if (-not $setup -or -not $portable) { throw "Missing setup or portable EXE" }
+          $setup = @(Get-ChildItem 'out/财盛聚合聊天-安装版-*-x64.exe')
+          $portable = @(Get-ChildItem 'out/财盛聚合聊天-便携版-*-x64.exe')
+          if ($setup.Count -ne 1) { throw "安装版数量不正确：$($setup.Count)" }
+          if ($portable.Count -ne 1) { throw "便携版数量不正确：$($portable.Count)" }
+          if ($setup[0].Length -lt 10MB -or $portable[0].Length -lt 10MB) { throw 'EXE 文件异常小' }
 
-      - name: 上传 Windows 安装包
+      - name: 上传安装版
         uses: actions/upload-artifact@v4
         with:
-          name: 财盛聚合聊天-Windows-x64
-          path: |
-            platform/out/*安装版*-x64.exe
-            platform/out/*便携版*-x64.exe
-            platform/out/*.blockmap
+          name: 财盛聚合聊天-安装版-Windows-x64
+          path: native-shell/out/财盛聚合聊天-安装版-*-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 上传便携版
+        uses: actions/upload-artifact@v4
+        with:
+          name: 财盛聚合聊天-便携版-Windows-x64
+          path: native-shell/out/财盛聚合聊天-便携版-*-x64.exe
           if-no-files-found: error
           retention-days: 14
