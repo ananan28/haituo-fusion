@@ -8,7 +8,7 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis portable --x64 --publish never",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/service-preload.js && node --check src/translation.js && node --check src/renderer/app.js",
-    "test": "npm run check && node scripts/shell-regression.js && node scripts/translation-regression.js"
+    "test": "npm run check && node --test test/*.test.js"
   },
   "devDependencies": {
     "electron": "38.1.2",
