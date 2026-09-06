@@ -145,7 +145,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm add qrcode-generator@1.4.4
-          pnpm add -D @types/qrcode-generator@1.4.5
+          pnpm add -D @types/qrcode-generator@1.0.6
 
       - name: Typecheck independent platform
         shell: bash
