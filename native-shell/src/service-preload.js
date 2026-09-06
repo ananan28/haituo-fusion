@@ -1,7 +1,8 @@
 'use strict';
 const { ipcRenderer } = require('electron');
 
-const accountId = process.argv.find(x => x.startsWith('--caisheng-account='))?.slice(20) || '';
+const accountPrefix = '--caisheng-account=';
+const accountId = process.argv.find(x => x.startsWith(accountPrefix))?.slice(accountPrefix.length) || '';
 const HAN = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u;
 const originals = new WeakMap();
 let composing = false;
