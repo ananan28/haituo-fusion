@@ -46,10 +46,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.18.0
+          cache: npm
+          cache-dependency-path: native-shell/package-lock.json
 
       - name: 安装固定依赖
         shell: pwsh
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: 检查与测试
         shell: pwsh
