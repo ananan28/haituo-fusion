@@ -186,7 +186,7 @@ jobs:
       - name: Verify Windows deliverables
         shell: pwsh
         run: |
-          $setup = Get-ChildItem platform/out/Caisheng-MultiChat-Setup-*-x64.exe
+          $setup = Get-ChildItem platform/out/*AutoSetup-*-x64.exe
           $portable = Get-ChildItem platform/out/Caisheng-MultiChat-Portable-*-x64.exe
           if (-not $setup -or -not $portable) { throw "Missing setup or portable EXE" }
 
