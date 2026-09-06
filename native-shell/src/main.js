@@ -4,6 +4,7 @@ const { app, BrowserWindow, BrowserView, ipcMain, Tray, Menu, nativeImage, shell
 const path = require('path');
 const fs = require('fs');
 const { ServiceStore, servicePartition } = require('./service-store');
+const { SignalRuntime } = require('./signal-runtime');
 
 app.setName('财盛聚合聊天');
 app.setPath('userData', path.join(app.getPath('appData'), '财盛聚合聊天'));
@@ -19,6 +20,7 @@ let tray;
 let store;
 let currentId = '';
 let quitting = false;
+let signal;
 
 function windowStateFile() { return path.join(app.getPath('userData'), 'window-state.json'); }
 function readWindowState() {
@@ -120,6 +122,17 @@ async function destroyView(id) {
   views.delete(id);
 }
 function registerIpc() {
+  ipcMain.handle('signal:state', (_e,id) => signal.state(id));
+  ipcMain.handle('signal:link', (_e,id) => signal.link(id));
+  ipcMain.handle('signal:start', (_e,id) => signal.start(id));
+  ipcMain.handle('signal:conversations', (_e,id) => signal.conversations(id));
+  ipcMain.handle('signal:history', (_e,id,conversationId,limit) => signal.history(id,conversationId,limit));
+  ipcMain.handle('signal:send', (_e,id,to,text,files,quote) => signal.send(id,to,text,files,quote));
+  ipcMain.handle('signal:reaction', (_e,id,to,emoji,target,remove) => signal.react(id,to,emoji,target,remove));
+  ipcMain.handle('signal:edit', (_e,id,to,timestamp,text) => signal.edit(id,to,timestamp,text));
+  ipcMain.handle('signal:delete', (_e,id,to,timestamp) => signal.remove(id,to,timestamp));
+  ipcMain.handle('signal:reconnect', (_e,id) => signal.reconnect(id));
+  ipcMain.handle('signal:stop', (_e,id) => signal.stop(id));
   ipcMain.handle('catalog:list', () => CATALOG);
   ipcMain.handle('services:list', () => store.list());
   ipcMain.handle('services:add', (_event, recipeId) => {
@@ -181,6 +194,9 @@ function makeTray() {
 }
 app.whenReady().then(() => {
   store = new ServiceStore(app.getPath('userData'));
+  signal = new SignalRuntime(app.getPath('userData'), process.resourcesPath);
+  signal.on('state', payload => send('signal:state', payload));
+  signal.on('message', payload => send('signal:message', payload));
   registerIpc();
   const state = readWindowState();
   win = new BrowserWindow({
@@ -201,7 +217,7 @@ app.whenReady().then(() => {
   makeTray();
   if (smoke) setTimeout(() => app.exit(2), 15000);
 });
-app.on('before-quit', () => { quitting = true; saveWindowState(); });
+app.on('before-quit', event => { quitting = true; saveWindowState(); if (signal && !signal._stopping) { event.preventDefault(); signal._stopping = true; signal.stopAll().finally(() => app.quit()); } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && quitting) app.quit(); });
 app.on('activate', () => win?.show());
 app.on('login', (event, webContents, _details, _authInfo, callback) => {
