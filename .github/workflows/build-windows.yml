@@ -100,6 +100,13 @@ jobs:
           )
           recipe.write_text(value, encoding="utf-8")
 
+          main_style = root / "src/styles/main.scss"
+          value = main_style.read_text(encoding="utf-8")
+          signal_style_import = "@import './signal-service-pane.scss';"
+          if signal_style_import not in value:
+              value += "\n" + signal_style_import + "\n"
+          main_style.write_text(value, encoding="utf-8")
+
           ipc_index = root / "src/electron/ipc-api/index.ts"
           value = ipc_index.read_text(encoding="utf-8")
           value = value.replace("import settings from './settings';", "import settings from './settings';\nimport signal from './signal';")
