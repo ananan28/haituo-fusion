@@ -154,6 +154,7 @@ class WhatsAppRuntime {
     });
     wc.on('did-start-loading', () => {
       clearTimeout(account.loadTimer);
+      account.httpError = 0;
       this.emit(service.id, { loading: true, error: '' });
       account.loadTimer = setTimeout(() => {
         this.emit(service.id, {
@@ -167,7 +168,7 @@ class WhatsAppRuntime {
     wc.on('did-finish-load', () => {
       clearTimeout(account.loadTimer);
       account.retries = 0;
-      this.emit(service.id, { loading: false, error: '', online: true });
+      if (!account.httpError) this.emit(service.id, { loading: false, error: '', online: true });
     });
     wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       if (!isMainFrame || code === -3) return;
@@ -175,14 +176,15 @@ class WhatsAppRuntime {
       const message = chineseNetworkError(code, description);
       this.emit(service.id, { loading: false, online: false, error: message, url });
     });
-    wc.on('did-get-response-details', (_event, status, newURL, _originalURL, httpStatus, _method, _referrer, _headers, resourceType) => {
-      if (status && resourceType === 'mainFrame' && httpStatus >= 400 && httpStatus < 500) {
+    wc.session.webRequest.onCompleted(details => {
+      if (details.webContentsId === wc.id && details.resourceType === 'mainFrame' && details.statusCode >= 400 && details.statusCode < 500) {
+        account.httpError = details.statusCode;
         this.emit(service.id, {
           loading: false,
           online: false,
-          error: `WhatsApp 返回 ${httpStatus}，请求未被接受。请检查系统时间、代理/IP 后重试。`,
-          url: newURL,
-          httpStatus
+          error: `WhatsApp 返回 ${details.statusCode}，请求未被接受。请检查系统时间、代理/IP 后重试。`,
+          url: details.url,
+          httpStatus: details.statusCode
         });
       }
     });
@@ -207,14 +209,14 @@ class WhatsAppRuntime {
     const view = new BrowserView({ webPreferences: {
       partition: servicePartition(id),
       preload: path.join(__dirname, 'whatsapp-preload.js'),
-      additionalArguments: ['--caisheng-whatsapp-profile=' + profile, '--caisheng-account=' + id],
+      additionalArguments: ['--caisheng-whatsapp-profile=' + profile],
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
       spellcheck: false
     } });
-    const account = { view, retries: 0, recoveryTimer: null, loadTimer: null, closing: false };
+    const account = { view, retries: 0, recoveryTimer: null, loadTimer: null, httpError: 0, closing: false };
     this.accounts.set(id, account);
     this.wire(account, service);
     await this.applyDevToolsProfile(account, service);
