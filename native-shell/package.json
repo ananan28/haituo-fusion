@@ -6,7 +6,9 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis portable --x64 --publish never"
+    "dist": "electron-builder --win nsis portable --x64 --publish never",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/app.js",
+    "test": "npm run check"
   },
   "devDependencies": {
     "electron": "38.1.2",
