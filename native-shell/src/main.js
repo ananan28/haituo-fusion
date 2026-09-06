@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { ServiceStore, servicePartition } = require('./service-store');
 const { SignalRuntime } = require('./signal-runtime');
+const translation = require('./translation');
 
 app.setName('财盛聚合聊天');
 app.setPath('userData', path.join(app.getPath('appData'), '财盛聚合聊天'));
@@ -104,7 +105,9 @@ async function openWeb(id) {
     await store.configureSession(service);
     view = new BrowserView({ webPreferences: {
       partition: servicePartition(id), contextIsolation: true, sandbox: true,
-      nodeIntegration: false, webSecurity: true, spellcheck: false
+      nodeIntegration: false, webSecurity: true, spellcheck: false,
+      preload: path.join(__dirname, 'service-preload.js'),
+      additionalArguments: ['--caisheng-account=' + id]
     } });
     views.set(id, view);
     attachViewEvents(view, service);
@@ -122,14 +125,30 @@ async function destroyView(id) {
   views.delete(id);
 }
 function registerIpc() {
+  ipcMain.handle('translation:settings:get', () => translation.publicSettings());
+  ipcMain.handle('translation:settings:update', (_e, patch) => translation.updateSettings(patch || {}));
+  ipcMain.handle('translation:account:update', (_e, accountId, patch) => translation.updateAccount(String(accountId || ''), patch || {}));
+  ipcMain.handle('translation:scope:get', (_e, accountId, conversationId) => translation.getScope(String(accountId || ''), String(conversationId || '')));
+  ipcMain.handle('translation:scope:update', (_e, accountId, conversationId, patch) => translation.updateScope(String(accountId || ''), String(conversationId || ''), patch || {}));
+  ipcMain.handle('translation:translate', (_e, request) => translation.translate(request || {}));
+  ipcMain.handle('translation:validate', (_e, payload) => translation.validateOutgoing(payload || {}));
+  ipcMain.handle('translation:cache:clear', () => translation.clearCache());
   ipcMain.handle('signal:state', (_e,id) => signal.state(id));
   ipcMain.handle('signal:link', (_e,id) => signal.link(id));
   ipcMain.handle('signal:start', (_e,id) => signal.start(id));
   ipcMain.handle('signal:conversations', (_e,id) => signal.conversations(id));
   ipcMain.handle('signal:history', (_e,id,conversationId,limit) => signal.history(id,conversationId,limit));
-  ipcMain.handle('signal:send', (_e,id,to,text,files,quote) => signal.send(id,to,text,files,quote));
+  ipcMain.handle('signal:send', async (_e,id,to,text,files,quote) => {
+    const check = translation.validateOutgoing({ accountId:id, conversationId:to, text, quote });
+    if (!check.allowed) throw new Error(check.message);
+    return signal.send(id,to,text,files,quote);
+  });
   ipcMain.handle('signal:reaction', (_e,id,to,emoji,target,remove) => signal.react(id,to,emoji,target,remove));
-  ipcMain.handle('signal:edit', (_e,id,to,timestamp,text) => signal.edit(id,to,timestamp,text));
+  ipcMain.handle('signal:edit', (_e,id,to,timestamp,text) => {
+    const check = translation.validateOutgoing({ accountId:id, conversationId:to, editedText:text });
+    if (!check.allowed) throw new Error(check.message);
+    return signal.edit(id,to,timestamp,text);
+  });
   ipcMain.handle('signal:delete', (_e,id,to,timestamp) => signal.remove(id,to,timestamp));
   ipcMain.handle('signal:reconnect', (_e,id) => signal.reconnect(id));
   ipcMain.handle('signal:stop', (_e,id) => signal.stop(id));
