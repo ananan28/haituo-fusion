@@ -4,6 +4,7 @@ const $$ = selector => [...document.querySelectorAll(selector)];
 let services = [];
 let currentId = '';
 let accountEditingId = '';
+const signalUi = new Map();
 const state = new Map();
 
 function toast(message, bad = false) {
@@ -44,21 +45,41 @@ function renderServices() {
     const q = document.createElement('button'); q.className = currentId === service.id ? 'active' : ''; q.title = service.name + (service.note ? ' · ' + service.note : ''); q.append(makeIcon(service)); q.onclick = () => open(service); quick.append(q);
   }
 }
+function signalStateFor(id){ if(!signalUi.has(id)) signalUi.set(id,{conversation:'',conversations:[],messages:[],status:'未连接'}); return signalUi.get(id); }
+function signalMessageNode(m,service){
+  const row=document.createElement('article'); row.className='signalMessage'; row.dataset.id=m.id;
+  const who=document.createElement('b'); who.textContent=m.sender||'消息';
+  const text=document.createElement('p'); text.textContent=m.text||((m.attachments||[]).length?'[附件]':'');
+  row.append(who,text);
+  for(const a of m.attachments||[]){const el=document.createElement(a.contentType?.startsWith('image/')?'img':a.contentType?.startsWith('video/')?'video':a.contentType?.startsWith('audio/')?'audio':'a');if(el.tagName==='A'){el.textContent=a.filename||'下载附件';el.href='#'}else{el.controls=true;el.src=a.localPath||a.path||''}row.append(el)}
+  const tools=document.createElement('div'); tools.className='messageTools';
+  for(const [label,fn] of [['回复',()=>{signalStateFor(service.id).quote={timestamp:m.timestamp,author:m.sender,text:m.text};toast('已引用该消息')}],['回应',async()=>{await caisheng.signal.reaction(service.id,signalStateFor(service.id).conversation,'👍',{timestamp:m.timestamp,author:m.sender},false)}],['编辑',async()=>{const x=prompt('编辑消息',m.text||'');if(x!=null)await caisheng.signal.edit(service.id,signalStateFor(service.id).conversation,m.timestamp,x)}],['撤回',async()=>{if(confirm('确定撤回这条消息吗？'))await caisheng.signal.delete(service.id,signalStateFor(service.id).conversation,m.timestamp)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>fn().catch(e=>toast(e.message,true));tools.append(b)}
+  row.append(tools);return row;
+}
+async function renderSignal(service){
+  const model=signalStateFor(service.id), section=document.createElement('section');section.className='signalWorkspace';
+  const side=document.createElement('div');side.className='signalConversations';
+  const head=document.createElement('div');head.className='signalAccountHead';head.innerHTML='<b></b><span></span>';head.children[0].textContent=service.name;head.children[1].textContent=model.status;
+  const actions=document.createElement('div');
+  const link=document.createElement('button');link.textContent='扫码连接';link.onclick=async()=>{try{const x=await caisheng.signal.link(service.id);const box=document.createElement('div');box.className='signalLink';const title=document.createElement('b');title.textContent='请用 Signal 手机端扫描';const uri=document.createElement('textarea');uri.readOnly=true;uri.value=x.uri;const copy=document.createElement('button');copy.textContent='复制连接码';copy.onclick=()=>navigator.clipboard.writeText(x.uri);box.append(title,uri,copy);$('#content').replaceChildren(box);toast('二维码连接信息已生成')}catch(e){toast(e.message,true)}};
+  const reconnect=document.createElement('button');reconnect.textContent='重新连接';reconnect.onclick=()=>caisheng.signal.reconnect(service.id).then(()=>renderSignal(service)).catch(e=>toast(e.message,true));actions.append(link,reconnect);side.append(head,actions);
+  const list=document.createElement('div');list.className='conversationList';side.append(list);
+  const chat=document.createElement('div');chat.className='signalChat';const messages=document.createElement('div');messages.className='signalMessages';chat.append(messages);
+  const composer=document.createElement('form');composer.className='signalComposer';const input=document.createElement('textarea');input.placeholder='输入消息';const file=document.createElement('input');file.type='file';file.multiple=true;file.accept='image/*,video/*,audio/*,*/*';const send=document.createElement('button');send.textContent='发送';composer.append(input,file,send);chat.append(composer);section.append(side,chat);$('#content').replaceChildren(section);
+  try{const st=await caisheng.signal.state(service.id);model.status=st.status||'未连接';head.children[1].textContent=model.status;if(st.status!=='未连接'&&st.status!=='等待扫码'){await caisheng.signal.start(service.id);model.conversations=await caisheng.signal.conversations(service.id)}}
+  catch(e){model.status='连接错误';head.children[1].textContent='连接错误：'+e.message}
+  const choose=async conv=>{model.conversation=conv.id;model.messages=await caisheng.signal.history(service.id,conv.id,500);messages.replaceChildren(...model.messages.map(m=>signalMessageNode(m,service)));messages.scrollTop=messages.scrollHeight};
+  for(const conv of model.conversations){const b=document.createElement('button');const av=document.createElement('i');av.textContent=(conv.name||'?')[0];const n=document.createElement('span');n.textContent=conv.name||conv.id;b.append(av,n);b.onclick=()=>choose(conv).catch(e=>toast(e.message,true));list.append(b)}
+  composer.onsubmit=async e=>{e.preventDefault();if(!model.conversation)return toast('请先选择会话',true);const text=input.value,files=[...file.files].map(x=>x.path).filter(Boolean);if(!text.trim()&&!files.length)return;try{await caisheng.signal.send(service.id,model.conversation,text,files,model.quote);input.value='';file.value='';model.quote=null;toast('消息已发送')}catch(err){toast('发送失败：'+err.message,true)}};
+}
+
 async function open(service) {
   if (!service.enabled) { toast('该账号已停用，请先在设置中启用', true); return; }
   currentId = service.id; renderServices();
   if (service.kind === 'native') {
     await caisheng.hide();
-    const section = document.createElement('section'); section.className = 'signal';
-    const head = document.createElement('div'); head.className = 'signalHead';
-    const title = document.createElement('b'); title.textContent = service.name;
-    const note = document.createElement('span'); note.textContent = service.note || '独立 Signal 账号';
-    head.append(title, note);
-    const empty = document.createElement('div'); empty.className = 'empty';
-    const strong = document.createElement('strong'); strong.textContent = '连接 Signal 账号';
-    const p = document.createElement('p'); p.textContent = '正在加载独立 Signal 服务与二维码……';
-    empty.append(strong, p); section.append(head, empty); $('#content').replaceChildren(section);
     await caisheng.open(service);
+    await renderSignal(service);
   } else {
     $('#content').replaceChildren();
     try { await caisheng.open(service); } catch (error) { showError(error.message); }
@@ -179,3 +200,6 @@ caisheng.onServiceState(update => {
   if (update.id === currentId && update.error) showError(update.error);
 });
 loadServices().then(() => caisheng.ready()).catch(error => { showError('平台初始化失败：' + error.message); caisheng.ready(); });
+
+caisheng.signal.onState(update=>{const m=signalStateFor(update.id);m.status=update.status;if(update.id===currentId){const s=active();if(s)renderSignal(s)}});
+caisheng.signal.onMessage(message=>{const m=signalStateFor(message.accountId);m.messages.push(message);if(message.accountId===currentId&&message.conversationId===m.conversation){const s=active();if(s)renderSignal(s)}});
