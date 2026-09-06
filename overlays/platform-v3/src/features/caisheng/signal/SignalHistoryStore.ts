@@ -1,42 +1,16 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { SignalMessage } from './types';
-
-/** Durable UI history. signal-cli is a transport and does not expose an old-message query. */
+type Record = {type:'message';message:SignalMessage}|{type:'delete';sentAt:number;deletedAt:number}|{type:'edit';sentAt:number;message:SignalMessage};
 export class SignalHistoryStore {
-  private readonly file: string;
-
-  constructor(dataDir: string) {
-    this.file = path.join(dataDir, 'caisheng-history.jsonl');
-  }
-
-  async append(message: SignalMessage): Promise<void> {
-    await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    await appendFile(this.file, `${JSON.stringify(message)}\n`, { encoding: 'utf8', mode: 0o600 });
-  }
-
-  async list(conversationId: string, before = Number.MAX_SAFE_INTEGER, limit = 50): Promise<SignalMessage[]> {
-    let content: string;
-    try { content = await readFile(this.file, 'utf8'); } catch (error: any) {
-      if (error?.code === 'ENOENT') return [];
-      throw error;
-    }
-    return content.split('\n').filter(Boolean).map(line => JSON.parse(line) as SignalMessage)
-      .filter(item => item.conversationId === conversationId && item.sentAt < before)
-      .sort((a, b) => b.sentAt - a.sentAt).slice(0, Math.min(Math.max(limit, 1), 200)).reverse();
-  }
-
-  async latestByConversation(): Promise<Map<string, SignalMessage>> {
-    let content = '';
-    try { content = await readFile(this.file, 'utf8'); } catch (error: any) {
-      if (error?.code !== 'ENOENT') throw error;
-    }
-    const latest = new Map<string, SignalMessage>();
-    for (const line of content.split('\n')) {
-      if (!line) continue;
-      const item = JSON.parse(line) as SignalMessage;
-      if ((latest.get(item.conversationId)?.sentAt ?? 0) < item.sentAt) latest.set(item.conversationId, item);
-    }
-    return latest;
-  }
+ private readonly file:string; readonly attachmentsDir:string;
+ constructor(dataDir:string){this.file=path.join(dataDir,'caisheng-history.jsonl');this.attachmentsDir=path.join(dataDir,'caisheng-attachments');}
+ private async write(record:Record){await mkdir(path.dirname(this.file),{recursive:true,mode:0o700});await appendFile(this.file,`${JSON.stringify(record)}\n`,{encoding:'utf8',mode:0o600});}
+ async append(message:SignalMessage){await this.write({type:'message',message});} async edit(sentAt:number,message:SignalMessage){await this.write({type:'edit',sentAt,message});} async remove(sentAt:number){await this.write({type:'delete',sentAt,deletedAt:Date.now()});}
+ private async all():Promise<SignalMessage[]>{let content='';try{content=await readFile(this.file,'utf8');}catch(e:any){if(e?.code!=='ENOENT')throw e;}const byKey=new Map<string,SignalMessage>();
+  for(const line of content.split('\n')){if(!line)continue;const raw=JSON.parse(line);const r:Record=raw.type?raw:{type:'message',message:raw};if(r.type==='message')byKey.set(`${r.message.conversationId}:${r.message.sentAt}`,r.message);else{const found=[...byKey.entries()].find(([,m])=>m.sentAt===r.sentAt);if(found){if(r.type==='delete')found[1].deletedAt=r.deletedAt;else byKey.set(found[0],{...found[1],...r.message,editedAt:Date.now()});}}}return[...byKey.values()];}
+ async list(conversationId:string,before=Number.MAX_SAFE_INTEGER,limit=50){return(await this.all()).filter(x=>x.conversationId===conversationId&&x.sentAt<before).sort((a,b)=>b.sentAt-a.sentAt).slice(0,Math.min(Math.max(limit,1),200)).reverse();}
+ async latestByConversation(){const map=new Map<string,SignalMessage>();for(const x of await this.all())if((map.get(x.conversationId)?.sentAt??0)<x.sentAt)map.set(x.conversationId,x);return map;}
+ async find(conversationId:string,sentAt:number){return(await this.all()).find(x=>x.conversationId===conversationId&&x.sentAt===sentAt);}
+ async cleanup(olderThan=Date.now()-30*86400_000,maxBytes=512*1024*1024){let files:any[]=[];try{files=await readdir(this.attachmentsDir,{withFileTypes:true});}catch(e:any){if(e?.code==='ENOENT')return{deleted:0,freedBytes:0};throw e;}const rows=[];for(const f of files)if(f.isFile()){const p=path.join(this.attachmentsDir,f.name),s=await stat(p);rows.push({p,size:s.size,mtime:s.mtimeMs});}rows.sort((a,b)=>a.mtime-b.mtime);let total=rows.reduce((n,x)=>n+x.size,0),deleted=0,freedBytes=0;for(const x of rows)if(x.mtime<olderThan||total>maxBytes){await rm(x.p,{force:true});total-=x.size;deleted++;freedBytes+=x.size;}return{deleted,freedBytes};}
 }
