@@ -85,7 +85,7 @@ function registerIpc() {
     const service = store.get(id);
     if (!service) return false;
     if (service.recipeId === 'whatsapp') await whatsapp.destroy(id, true);
-    if (service.recipeId === 'signal') await signal?.stop(id);
+    if (service.recipeId === 'signal') await signal?.removeAccount(id);
     if (currentId === id) currentId = '';
     return store.remove(id);
   });
@@ -101,7 +101,11 @@ function registerIpc() {
   });
   ipcMain.handle('services:refresh', async (_event, id, mode = 'normal') => {
     const service = store.get(id); if (!service) throw new Error('服务账号不存在');
-    if (service.recipeId === 'signal') { send('signal:refresh', { id, mode }); return true; }
+    if (service.recipeId === 'signal') {
+      const result = await signal.reconnect(id);
+      send('signal:refresh', { id, mode });
+      return result;
+    }
     return whatsapp.refresh(id, mode);
   });
   ipcMain.handle('services:test-proxy', async (_event, id) => {
@@ -146,6 +150,8 @@ app.whenReady().then(() => {
     signal = new SignalRuntime(app.getPath('userData'), process.resourcesPath);
     signal.on('state', payload => send('signal:state', payload));
     signal.on('message', payload => send('signal:message', payload));
+    signal.on('log', payload => console.warn('[Signal]', payload.id, payload.message));
+    signal.restoreAll().catch(error => console.error('恢复 Signal 账号失败：', error));
   }
   registerIpc();
   const state = readWindowState();
