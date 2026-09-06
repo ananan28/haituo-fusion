@@ -76,8 +76,13 @@ jobs:
           $java = Get-ChildItem $javaExtract -Recurse -Filter 'java.exe' | Where-Object { $_.FullName -match '\\bin\\java\.exe$' } | Select-Object -First 1
           if (-not $java) { throw '下载的 Adoptium JRE 中缺少 java.exe' }
           Copy-Item (Join-Path $java.Directory.Parent.FullName '*') (Join-Path $vendor 'jre') -Recurse -Force
-          & (Join-Path $vendor 'jre/bin/java.exe') -version
-          & (Join-Path $vendor "signal-cli/lib/signal-cli-$signalVersion.jar") --version
+          $javaExe = Join-Path $vendor 'jre/bin/java.exe'
+          $signalLib = Join-Path $vendor 'signal-cli/lib'
+          $argparse = Get-ChildItem $signalLib -Filter 'argparse4j-*.jar' | Select-Object -First 1
+          if (-not $argparse) { throw '下载的 signal-cli 缺少 argparse4j 依赖' }
+          & $javaExe -version
+          & $javaExe '-Dfile.encoding=UTF-8' '-Dsun.stdout.encoding=UTF-8' '-Dsun.stderr.encoding=UTF-8' '-classpath' (Join-Path $signalLib '*') 'org.asamk.signal.Main' '--version'
+          if ($LASTEXITCODE -ne 0) { throw 'signal-cli 完整 classpath 启动验证失败' }
 
       - name: 检查与测试
         shell: pwsh
@@ -95,6 +100,8 @@ jobs:
           npm run dist
           if (-not (Test-Path 'out/win-unpacked/resources/signal-runtime/jre/bin/java.exe')) { throw '安装包未包含 Java 运行时' }
           if (-not (Test-Path 'out/win-unpacked/resources/signal-runtime/signal-cli/lib/signal-cli-0.14.7.jar')) { throw '安装包未包含 signal-cli' }
+          $packedArgparse = Get-ChildItem 'out/win-unpacked/resources/signal-runtime/signal-cli/lib' -Filter 'argparse4j-*.jar' | Select-Object -First 1
+          if (-not $packedArgparse) { throw '安装包未包含 signal-cli 的 argparse4j 依赖' }
 
       - name: 启动冒烟测试
         shell: pwsh

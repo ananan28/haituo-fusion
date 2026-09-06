@@ -23,6 +23,31 @@ const atomicWrite = (file, value) => {
 const cleanName = value => path.basename(String(value || '附件'))
   .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 180) || '附件';
 
+const decodeUtf8 = value => (Buffer.isBuffer(value) ? value.toString('utf8') : String(value || ''))
+  .replace(/\uFFFD+/g, '').trim();
+
+function signalErrorMessage(value, fallback = 'Signal 操作失败，请稍后重试。') {
+  const raw = decodeUtf8(value);
+  if (!raw) return fallback;
+  if (/[\u3400-\u9fff]/u.test(raw) && !/(Error|Exception| at )/i.test(raw)) return raw.slice(-500);
+  if (/NoClassDefFoundError|ClassNotFoundException|Could not find or load main class/i.test(raw)) {
+    return '内置 Signal 运行组件缺少依赖，请安装最新版本后重试。';
+  }
+  if (/UnsupportedClassVersionError|has been compiled by a more recent version/i.test(raw)) {
+    return '内置 Java 运行环境版本不兼容，请安装最新版本后重试。';
+  }
+  if (/Unable to access jarfile|No such file|cannot find/i.test(raw)) {
+    return '内置 Signal 运行文件不完整，请重新安装最新版。';
+  }
+  if (/timeout|timed out/i.test(raw)) return '连接 Signal 服务器超时，请检查网络或代理后重试。';
+  if (/network|connection|connect|socket|dns|unknown host/i.test(raw)) {
+    return '无法连接 Signal 服务器，请检查网络、DNS 或代理设置。';
+  }
+  if (/already linked|already exists/i.test(raw)) return '该 Signal 设备已经连接，无需重复扫码。';
+  if (/invalid|illegal argument|usage:/i.test(raw)) return 'Signal 请求参数无效，请刷新账号后重试。';
+  return fallback;
+}
+
 class SignalRuntime extends EventEmitter {
   constructor(userData, resourcesPath) {
     super();
@@ -64,9 +89,39 @@ class SignalRuntime extends EventEmitter {
   }
   binary() {
     const java = path.join(this.resources, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-    const jar = path.join(this.resources, 'signal-cli', 'lib', 'signal-cli-0.14.7.jar');
-    if (!fs.existsSync(java) || !fs.existsSync(jar)) throw new Error('内置 Signal 运行环境不完整');
-    return { java, jar };
+    const lib = path.join(this.resources, 'signal-cli', 'lib');
+    const jar = path.join(lib, 'signal-cli-0.14.7.jar');
+    let jars = [];
+    try { jars = fs.readdirSync(lib).filter(name => name.endsWith('.jar')); } catch {}
+    const hasArgparse = jars.some(name => /^argparse4j[-.]/i.test(name));
+    if (!fs.existsSync(java) || !fs.existsSync(jar) || jars.length < 2 || !hasArgparse) {
+      throw new Error('内置 Signal 运行环境不完整，请重新安装最新版。');
+    }
+    return {
+      java, jar, lib, classpath: path.join(lib, '*'), mainClass: 'org.asamk.signal.Main',
+    };
+  }
+  javaArguments(binary, command, withMemoryLimit = false) {
+    return [
+      '-Dfile.encoding=UTF-8',
+      '-Dsun.stdout.encoding=UTF-8',
+      '-Dsun.stderr.encoding=UTF-8',
+      ...(withMemoryLimit ? ['-Xms32m', '-Xmx256m'] : []),
+      '-classpath', binary.classpath, binary.mainClass, ...command,
+    ];
+  }
+  spawnJava(binary, command, options = {}, withMemoryLimit = false) {
+    return spawn(binary.java, this.javaArguments(binary, command, withMemoryLimit), {
+      windowsHide: true,
+      ...options,
+      env: {
+        ...process.env,
+        JAVA_HOME: path.dirname(path.dirname(binary.java)),
+        LANG: 'zh_CN.UTF-8',
+        LC_ALL: 'zh_CN.UTF-8',
+        ...(options.env || {}),
+      },
+    });
   }
   killTree(child) {
     return new Promise(resolve => {
@@ -89,14 +144,16 @@ class SignalRuntime extends EventEmitter {
     this.saveState(id, { status: '正在生成二维码', error: '' });
     let settleReady;
     const ready = new Promise((resolve, reject) => { settleReady = { resolve, reject }; });
-    const child = spawn(b.java, ['-jar', b.jar, '--config', p.config, 'link', '-n', '财盛聚合聊天'], {
-      windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = this.spawnJava(
+      b,
+      ['--config', p.config, 'link', '-n', '财盛聚合聊天'],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    );
     const task = { child, ready, result: null, timer: null, settled: false };
     this.linking.set(id, task);
     let output = '';
     const inspect = chunk => {
-      output = (output + String(chunk)).slice(-16_000);
+      output = (output + decodeUtf8(chunk)).slice(-16_000);
       const uri = output.match(/sgnl:\/\/linkdevice\?[^\s"'<>]+/i)?.[0];
       if (!uri || task.settled) return;
       task.settled = true;
@@ -110,7 +167,10 @@ class SignalRuntime extends EventEmitter {
     child.stdout.on('data', inspect);
     child.stderr.on('data', inspect);
     child.once('error', error => {
-      if (!task.settled) { task.settled = true; settleReady.reject(new Error('启动 Signal 扫码失败：' + error.message)); }
+      if (!task.settled) {
+        task.settled = true;
+        settleReady.reject(new Error(signalErrorMessage(error, '启动 Signal 扫码失败，请稍后重试。')));
+      }
     });
     child.once('exit', code => {
       clearTimeout(task.timer);
@@ -120,11 +180,17 @@ class SignalRuntime extends EventEmitter {
         this.saveState(id, { status: '已连接', linked: true, linkUri: '', error: '' });
         this.start(id).catch(() => {});
       } else {
-        this.saveState(id, { status: '连接失败', linked: false, error: output.slice(-500) });
+        this.saveState(id, {
+          status: '连接失败', linked: false,
+          error: signalErrorMessage(output, '生成 Signal 二维码失败，请检查网络后重试。'),
+        });
       }
       if (!task.settled) {
         task.settled = true;
-        settleReady.reject(new Error(code === 0 ? '没有读取到二维码' : '生成二维码失败：' + output.slice(-300)));
+        settleReady.reject(new Error(
+          code === 0 ? '没有读取到 Signal 二维码，请重新生成。'
+            : signalErrorMessage(output, '生成 Signal 二维码失败，请检查网络后重试。')
+        ));
       }
     });
     task.timer = setTimeout(() => {
@@ -150,19 +216,23 @@ class SignalRuntime extends EventEmitter {
     const p = this.paths(id), b = this.binary();
     fs.mkdirSync(p.config, { recursive: true });
     fs.mkdirSync(p.attachments, { recursive: true });
-    const child = spawn(b.java, [
-      '-Xms32m', '-Xmx256m', '-jar', b.jar, '--config', p.config,
-      'jsonRpc', '--receive-mode', 'on-start',
-    ], {
-      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, JAVA_HOME: path.dirname(path.dirname(b.java)) },
-    });
+    const child = this.spawnJava(
+      b,
+      ['--config', p.config, 'jsonRpc', '--receive-mode', 'on-start'],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+      true
+    );
     const rt = { child, buffer: '', intentional: false };
     this.processes.set(id, rt);
     this.saveState(id, { status: '正在连接', error: '' });
     child.stdout.on('data', data => this.consume(id, String(data)));
-    child.stderr.on('data', data => this.emit('log', { id, message: String(data).slice(-4000) }));
-    child.once('error', error => this.emit('log', { id, message: error.message }));
+    child.stderr.on('data', data => {
+      const raw = decodeUtf8(data);
+      if (raw) this.emit('log', { id, message: signalErrorMessage(raw, 'Signal 后台返回异常，请导出日志排查。') });
+    });
+    child.once('error', error => this.emit('log', {
+      id, message: signalErrorMessage(error, 'Signal 后台启动失败，请稍后重试。'),
+    }));
     child.once('exit', code => this.processExit(id, rt, code));
     try {
       await this.rpc(id, 'listAccounts', {}, 60_000);
@@ -172,8 +242,9 @@ class SignalRuntime extends EventEmitter {
       rt.intentional = true;
       await this.killTree(child);
       if (this.processes.get(id) === rt) this.processes.delete(id);
-      this.saveState(id, { status: '连接错误', error: error.message });
-      throw error;
+      const message = signalErrorMessage(error, error?.message || 'Signal 连接失败，请稍后重试。');
+      this.saveState(id, { status: '连接错误', error: message });
+      throw new Error(message);
     }
   }
   processExit(id, rt, code) {
@@ -509,4 +580,4 @@ class SignalRuntime extends EventEmitter {
     ]);
   }
 }
-module.exports = { SignalRuntime };
+module.exports = { SignalRuntime, signalErrorMessage };

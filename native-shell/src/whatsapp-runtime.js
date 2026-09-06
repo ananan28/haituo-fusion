@@ -66,9 +66,38 @@ class WhatsAppRuntime {
     this.window = null;
     this.currentId = '';
     this.accounts = new Map();
+    this.accountLocks = new Map();
   }
 
   setWindow(window) { this.window = window; }
+
+  withAccountLock(id, action) {
+    const previous = this.accountLocks.get(id) || Promise.resolve();
+    const current = previous.catch(() => {}).then(action);
+    const tracked = current.finally(() => {
+      if (this.accountLocks.get(id) === tracked) this.accountLocks.delete(id);
+    });
+    this.accountLocks.set(id, tracked);
+    return tracked;
+  }
+
+  isAlive(account) {
+    try {
+      return Boolean(account?.view?.webContents && !account.view.webContents.isDestroyed());
+    } catch {
+      return false;
+    }
+  }
+
+  takeAlive(id) {
+    const account = this.accounts.get(id);
+    if (this.isAlive(account)) return account;
+    if (account) {
+      this.accounts.delete(id);
+      try { this.window?.removeBrowserView(account.view); } catch {}
+    }
+    return null;
+  }
 
   bounds(view) {
     if (!this.window || this.window.isDestroyed() || !view || view.webContents.isDestroyed()) return;
@@ -111,13 +140,7 @@ class WhatsAppRuntime {
       await wc.debugger.sendCommand('Emulation.setGeolocationOverride', {
         latitude: fp.latitude, longitude: fp.longitude, accuracy: 25
       });
-      if (fp.userAgent) {
-        await wc.debugger.sendCommand('Network.setUserAgentOverride', {
-          userAgent: fp.userAgent,
-          acceptLanguage: fp.language,
-          platform: process.platform === 'win32' ? 'Windows' : process.platform
-        });
-      }
+      // 不覆盖 UA/Client Hints，避免网络层与网页脚本暴露值不一致。
     } catch (error) {
       this.emit(service.id, { warning: '部分指纹参数应用失败：' + error.message });
     }
@@ -188,6 +211,11 @@ class WhatsAppRuntime {
         });
       }
     });
+    wc.once('destroyed', () => {
+      if (this.accounts.get(service.id) === account) this.accounts.delete(service.id);
+      clearTimeout(account.recoveryTimer);
+      clearTimeout(account.loadTimer);
+    });
     wc.on('render-process-gone', (_event, details) => {
       this.scheduleRecovery(service.id, `WhatsApp 账号进程异常（${details.reason || '未知原因'}）`);
     });
@@ -224,47 +252,83 @@ class WhatsAppRuntime {
   }
 
   async open(id) {
+    return this.withAccountLock(id, () => this.openUnlocked(id));
+  }
+
+  async openUnlocked(id) {
     const service = this.store.get(id);
     if (!service || service.recipeId !== 'whatsapp') throw new Error('WhatsApp 账号不存在');
     if (!service.enabled) throw new Error('该 WhatsApp 账号已停用，请先启用');
     this.hide();
     this.currentId = id;
-    let account = this.accounts.get(id);
-    if (!account || account.view.webContents.isDestroyed()) account = await this.create(id);
+    let account = this.takeAlive(id);
+    if (!account) account = await this.create(id);
     if (!this.window || this.window.isDestroyed()) throw new Error('平台主窗口尚未就绪');
-    this.window.addBrowserView(account.view);
+    if (!this.isAlive(account)) {
+      if (this.accounts.get(id) === account) this.accounts.delete(id);
+      account = await this.create(id);
+    }
+    try {
+      this.window.addBrowserView(account.view);
+    } catch (error) {
+      if (!this.isAlive(account) || /destroyed child view/i.test(String(error?.message || error))) {
+        if (this.accounts.get(id) === account) this.accounts.delete(id);
+        account = await this.create(id);
+        this.window.addBrowserView(account.view);
+      } else {
+        throw new Error('无法打开 WhatsApp 内容区，请重启当前账号后重试。');
+      }
+    }
     this.bounds(account.view);
-    if (!account.view.webContents.getURL()) await account.view.webContents.loadURL(service.url || WHATSAPP_URL);
+    if (!account.view.webContents.getURL()) {
+      try {
+        await account.view.webContents.loadURL(service.url || WHATSAPP_URL);
+      } catch (error) {
+        throw new Error(chineseNetworkError(error?.errno || error?.code || -2, error?.message));
+      }
+    }
     this.store.update(id, { unread: 0, lastOpenedAt: Date.now() });
     return true;
   }
 
   async destroy(id, purge = false) {
+    return this.withAccountLock(id, () => this.destroyUnlocked(id, purge));
+  }
+
+  async destroyUnlocked(id, purge = false) {
     const account = this.accounts.get(id);
     if (account) {
       account.closing = true;
       clearTimeout(account.recoveryTimer);
       clearTimeout(account.loadTimer);
+      if (this.accounts.get(id) === account) this.accounts.delete(id);
       try { this.window?.removeBrowserView(account.view); } catch {}
-      if (!account.view.webContents.isDestroyed()) account.view.webContents.destroy();
-      this.accounts.delete(id);
+      try {
+        if (!account.view.webContents.isDestroyed()) account.view.webContents.destroy();
+      } catch {}
     }
     if (this.currentId === id) this.currentId = '';
     if (purge) await this.store.purgeAccount(id);
   }
 
   async refresh(id, mode = 'normal') {
+    return this.withAccountLock(id, () => this.refreshUnlocked(id, mode));
+  }
+
+  async refreshUnlocked(id, mode = 'normal') {
     const service = this.store.get(id);
     if (!service || service.recipeId !== 'whatsapp') throw new Error('WhatsApp 账号不存在');
-    let account = this.accounts.get(id);
-    if (mode === 'restart') {
-      await this.destroy(id, false);
-      return this.open(id);
+    let account = this.takeAlive(id);
+    if (mode === 'restart' || mode === 'clean') {
+      await this.destroyUnlocked(id, false);
+      if (mode === 'clean') await this.store.resetAccountSiteData(id);
+      return this.openUnlocked(id);
     }
-    if (!account || account.view.webContents.isDestroyed()) return this.open(id);
+    if (!account) return this.openUnlocked(id);
     account.retries = 0;
     if (mode === 'clear') {
       await this.store.clearAccountCache(id);
+      if (!this.isAlive(account)) return this.openUnlocked(id);
       account.view.webContents.reloadIgnoringCache();
     } else if (mode === 'hard') account.view.webContents.reloadIgnoringCache();
     else account.view.webContents.reload();

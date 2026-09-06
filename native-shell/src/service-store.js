@@ -151,7 +151,10 @@ class ServiceStore {
     const ses = session.fromPartition(servicePartition(service.id), { cache: true });
 
     // partition、Cookie、IndexedDB、Service Worker、缓存及代理均按账号 ID 隔离。
-    if (fp.userAgent) ses.setUserAgent(fp.userAgent, fp.language);
+    // 保持 Chromium 原生 UA 与 Client Hints 一致；自定义 UA 只保存，不污染网页请求。
+    const nativeUserAgent = ses.getUserAgent();
+    const language = fp.language + ',' + fp.language.split('-')[0] + ';q=0.9';
+    ses.setUserAgent(nativeUserAgent, language);
     const proxy = fp.proxy || {};
     if (proxy.mode === 'direct' || !proxy.server) await ses.setProxy({ mode: 'direct' });
     else {
@@ -160,10 +163,6 @@ class ServiceStore {
       await ses.setProxy({ mode: 'fixed_servers', proxyRules: rule });
     }
 
-    ses.webRequest.onBeforeSendHeaders((details, callback) => {
-      details.requestHeaders['Accept-Language'] = fp.language + ',' + fp.language.split('-')[0] + ';q=0.9';
-      callback({ requestHeaders: details.requestHeaders });
-    });
     ses.setPermissionCheckHandler((_wc, permission) => (
       ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
     ));
@@ -181,6 +180,20 @@ class ServiceStore {
     if (typeof ses.clearCodeCaches === 'function') await ses.clearCodeCaches({});
     if (typeof ses.clearHostResolverCache === 'function') await ses.clearHostResolverCache();
     await ses.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+    ses.flushStorageData();
+  }
+
+  // 4xx 后由用户明确选择时，仅清理当前账号 partition 的 WhatsApp 站点数据并干净重试。
+  async resetAccountSiteData(id) {
+    const s = this.get(id); if (!s || s.kind !== 'web') return;
+    const ses = session.fromPartition(servicePartition(id));
+    if (typeof ses.closeAllConnections === 'function') await ses.closeAllConnections();
+    await ses.clearCache();
+    await ses.clearStorageData({
+      origin: 'https://web.whatsapp.com',
+      storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+    });
+    if (typeof ses.clearHostResolverCache === 'function') await ses.clearHostResolverCache();
     ses.flushStorageData();
   }
 

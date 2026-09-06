@@ -91,12 +91,14 @@ async function open(service) {
     try { await caisheng.open(service); } catch (error) { showError(friendlyError(error)); }
   }
 }
-function showError(message) {
+function showError(message, cleanRetry = false) {
   caisheng.hide();
   const section = document.createElement('section'); section.className = 'error-page';
   const h = document.createElement('h2'); h.textContent = '服务暂时无法打开';
   const p = document.createElement('p'); p.textContent = message || '请检查网络或代理设置后重试。';
-  const b = document.createElement('button'); b.textContent = '重新加载'; b.onclick = () => refresh('restart');
+  const b = document.createElement('button');
+  b.textContent = cleanRetry ? '清理当前账号数据并重试' : '重新加载';
+  b.onclick = () => refresh(cleanRetry ? 'clean' : 'restart');
   section.append(h, p, b); $('#content').replaceChildren(section);
 }
 async function picker() {
@@ -117,7 +119,12 @@ async function picker() {
 }
 async function refresh(mode = 'normal') {
   const service = active(); if (!service) return toast('请先选择一个账号', true);
-  try { await caisheng.refresh(service.id, mode); toast(mode === 'clear' ? '已清理缓存并刷新' : mode === 'restart' ? '服务已重新启动' : '正在刷新'); }
+  try {
+    await caisheng.refresh(service.id, mode);
+    toast(mode === 'clean' ? '已清理当前账号站点数据并重新打开'
+      : mode === 'clear' ? '已清理缓存并刷新'
+        : mode === 'restart' ? '服务已重新启动' : '正在刷新');
+  }
   catch (error) { toast(error.message, true); }
 }
 async function fillAccount(service) {
@@ -238,7 +245,7 @@ window.addEventListener('keydown', event => {
 });
 caisheng.onServiceState(update => {
   state.set(update.id, update); renderServices();
-  if (update.id === currentId && update.error) showError(update.error);
+  if (update.id === currentId && update.error) showError(update.error, Boolean(update.httpStatus));
 });
 window.addEventListener('unhandledrejection', event => { event.preventDefault(); toast(friendlyError(event.reason), true); });
 window.addEventListener('error', event => { toast('界面运行异常，请尝试刷新当前服务', true); console.error(event.error || event.message); });

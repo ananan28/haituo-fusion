@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { SignalRuntime } = require('../src/signal-runtime');
+const { SignalRuntime, signalErrorMessage } = require('../src/signal-runtime');
 
 function runtime() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'caisheng-signal-test-'));
@@ -64,4 +64,39 @@ test('同账号重复启动合并，群聊与私聊路由不会混用', async t 
   assert.equal(starts, 1);
   assert.deepEqual(value.target('group:abc'), { groupId: 'abc' });
   assert.deepEqual(value.target('direct:+123'), { recipient: ['+123'] });
+});
+
+
+test('Signal 分发包使用完整 lib classpath 并强制 UTF-8', t => {
+  const { value, root } = runtime();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const runtimeRoot = path.join(root, 'signal-runtime');
+  const java = path.join(runtimeRoot, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+  const lib = path.join(runtimeRoot, 'signal-cli', 'lib');
+  fs.mkdirSync(path.dirname(java), { recursive: true });
+  fs.mkdirSync(lib, { recursive: true });
+  fs.writeFileSync(java, '');
+  fs.writeFileSync(path.join(lib, 'signal-cli-0.14.7.jar'), '');
+  fs.writeFileSync(path.join(lib, 'argparse4j-0.9.0.jar'), '');
+  const binary = value.binary();
+  const args = value.javaArguments(binary, ['--version']);
+  assert.equal(binary.mainClass, 'org.asamk.signal.Main');
+  assert.equal(binary.classpath, path.join(lib, '*'));
+  assert.ok(args.includes('-Dfile.encoding=UTF-8'));
+  assert.ok(args.includes('-classpath'));
+  assert.ok(args.includes('org.asamk.signal.Main'));
+  assert.equal(args.includes('-jar'), false);
+});
+
+test('Signal 缺少依赖时给出中文错误', t => {
+  const { value, root } = runtime();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const java = path.join(root, 'signal-runtime', 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+  const lib = path.join(root, 'signal-runtime', 'signal-cli', 'lib');
+  fs.mkdirSync(path.dirname(java), { recursive: true });
+  fs.mkdirSync(lib, { recursive: true });
+  fs.writeFileSync(java, '');
+  fs.writeFileSync(path.join(lib, 'signal-cli-0.14.7.jar'), '');
+  assert.throws(() => value.binary(), /运行环境不完整/);
+  assert.match(signalErrorMessage('java.lang.NoClassDefFoundError: net/sourceforge/argparse4j/inf/ArgumentParserException'), /缺少依赖/);
 });
