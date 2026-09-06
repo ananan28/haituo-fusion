@@ -1,17 +1,16 @@
-name: Build Caisheng MultiChat Windows
+name: Build Caisheng Independent Platform Windows
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - patches/**
-      - overlays/**
+      - overlays/platform-v3/**
       - assets/windows/**
       - .github/workflows/build-windows.yml
 
 concurrency:
-  group: caisheng-windows-main
+  group: caisheng-platform-v3-windows
   cancel-in-progress: true
 
 permissions:
@@ -20,196 +19,135 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - name: Checkout Caisheng build files
         uses: actions/checkout@v4
 
-      - name: Checkout official Signal Desktop
+      - name: Checkout independent platform core
         shell: bash
-        run: git clone --depth 1 https://github.com/signalapp/Signal-Desktop.git signal
+        run: git clone --depth 1 https://github.com/OneChat-Dev/onechat.git platform
 
-      - name: Apply Caisheng product patches
-        shell: bash
-        run: |
-          cd signal
-          git apply --check ../patches/caisheng-signal.patch
-          git apply ../patches/caisheng-signal.patch
-          git apply --check ../patches/caisheng-shell-ui.patch
-          git apply ../patches/caisheng-shell-ui.patch
-          git apply --check ../patches/caisheng-release-fix.patch
-          git apply ../patches/caisheng-release-fix.patch
-          cp -R ../overlays/platform-v2/. .
-
-      - name: Apply Caisheng Windows identity
+      - name: Apply Caisheng platform identity
         shell: python
         run: |
           import json
           import shutil
           from pathlib import Path
 
-          root = Path('signal')
-          package_path = root / 'package.json'
-          package = json.loads(package_path.read_text(encoding='utf-8'))
+          root = Path("platform")
+          package_path = root / "package.json"
+          package = json.loads(package_path.read_text(encoding="utf-8"))
           package.update({
-              'name': 'caisheng-multichat',
-              'productName': '财盛聚合聊天',
-              'description': '财盛出海聚合聊天翻译平台',
-              'desktopName': 'caisheng-multichat.desktop',
-              'repository': 'https://github.com/ananan28/WS-',
-              'author': {'name': 'Caisheng Group'},
+              "name": "caisheng-multichat",
+              "productName": "财盛聚合聊天",
+              "desktopName": "caisheng-multichat.desktop",
+              "appId": "com.caisheng.multichat",
+              "description": "财盛独立聚合聊天平台",
+              "author": "Caisheng Group",
+              "homepage": "https://github.com/ananan28/WS-",
+              "repository": "https://github.com/ananan28/WS-",
           })
-          build = package['build']
-          build['appId'] = 'com.caisheng.multichat'
-          win = build['win']
-          win.pop('signtoolOptions', None)
-          win.update({
-              'executableName': 'CaishengMultiChat',
-              'icon': 'build/icons/win/icon.ico',
-              'publish': [],
-              'target': ['nsis', 'portable'],
-          })
-          nsis = build['nsis']
-          nsis.pop('languageSelector', None)
-          nsis.update({
-              'artifactName': 'Caisheng-MultiChat-Setup-${version}-${arch}.${ext}',
-              'oneClick': False,
-              'perMachine': False,
-              'allowElevation': True,
-              'allowToChangeInstallationDirectory': True,
-              'createDesktopShortcut': True,
-              'createStartMenuShortcut': True,
-              'shortcutName': '财盛聚合聊天',
-              'uninstallDisplayName': '财盛聚合聊天',
-              'deleteAppDataOnUninstall': False,
-              'runAfterFinish': True,
-              'installerIcon': 'build/installerIcon.ico',
-              'uninstallerIcon': 'build/installerIcon.ico',
-              'installerHeaderIcon': 'build/installerHeaderIcon.ico',
-              'installerLanguages': ['zh_CN', 'en_US'],
-              'displayLanguageSelector': False,
-          })
-          build['portable'] = {
-              'artifactName': 'Caisheng-MultiChat-Portable-${version}-${arch}.${ext}',
-              'requestExecutionLevel': 'user',
-          }
-          build['protocols'] = {
-              'name': 'caisheng-url-scheme',
-              'schemes': ['caisheng'],
-          }
-          package_path.write_text(
-              json.dumps(package, ensure_ascii=False, indent=2) + '\n',
-              encoding='utf-8',
-          )
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-          icon = Path('assets/windows/caisheng.ico')
+          builder_path = root / "electron-builder.yml"
+          builder = builder_path.read_text(encoding="utf-8")
+          builder = builder.replace('appId: "org.ferdium.ferdium-app"', 'appId: "com.caisheng.multichat"')
+          builder = builder.replace('name: Ferdium', 'name: Caisheng MultiChat')
+          builder = builder.replace('schemes: [ferdium]', 'schemes: [caisheng]')
+          builder = builder.replace('${productName}-${os}-Installer-${version}-${arch}.${ext}', 'Caisheng-MultiChat-Setup-${version}-${arch}.${ext}')
+          builder = builder.replace('${productName}-${os}-Portable-${version}-${arch}.${ext}', 'Caisheng-MultiChat-Portable-${version}-${arch}.${ext}')
+          builder = builder.replace('unpackDirName: "Ferdium-Unpacked"', 'unpackDirName: "Caisheng-MultiChat-Unpacked"')
+          builder = builder.replace('publisherName: ["Ferdium Contributors", "Ambroise Grau"]', 'publisherName: []')
+          builder_path.write_text(builder, encoding="utf-8")
+
+          icon = Path("assets/windows/caisheng.ico")
           if not icon.exists():
-              raise FileNotFoundError('Missing assets/windows/caisheng.ico')
-          for target in (
-              root / 'build/icons/win/icon.ico',
-              root / 'build/installerIcon.ico',
-              root / 'build/installerHeaderIcon.ico',
-          ):
-              shutil.copyfile(icon, target)
+              raise FileNotFoundError("Missing Caisheng Windows icon")
+          shutil.copyfile(icon, root / "build-helpers/images/icon.ico")
 
-          installer = root / 'build/installer.nsh'
-          installer_text = installer.read_text(encoding='utf-8')
-          installer_text = installer_text.replace(
-              '!include SignalStrings.nsh', '!include CaishengStrings.nsh'
-          ).replace('OLD_SIGNAL_VERSION', 'OLD_CAISHENG_VERSION').replace(
-              'signalMinWinVersionErr', 'caishengMinWinVersionErr'
-          ).replace(
-              'signalMinAppVersionErr', 'caishengMinAppVersionErr'
-          ).replace(
-              "# Signal modification: '--start-in-tray' added",
-              '# Start the updated Caisheng platform in the tray.',
-          )
-          installer.write_text(installer_text, encoding='utf-8')
-          strings = [
-              '# Copyright 2026 Caisheng Group',
-              '# SPDX-License-Identifier: AGPL-3.0-only',
-              'LangString caishengMinWinVersionErr 1033 "Caisheng MultiChat cannot run on this computer. Please update Windows and try again."',
-              'LangString caishengMinAppVersionErr 1033 "A newer version of Caisheng MultiChat is already installed. Do you want to continue?"',
-              'LangString caishengMinWinVersionErr 2052 "财盛聚合聊天无法在此电脑上运行，请先更新 Windows 后重试。"',
-              'LangString caishengMinAppVersionErr 2052 "电脑中已经安装了更新版本的财盛聚合聊天，是否继续安装？"',
-          ]
-          (root / 'build/CaishengStrings.nsh').write_text(
-              '\n'.join(strings) + '\n', encoding='utf-8'
-          )
+          for path in (root / "src").rglob("*"):
+              if path.is_file() and path.suffix in {".ts", ".tsx", ".js", ".json", ".html"}:
+                  value = path.read_text(encoding="utf-8")
+                  value = value.replace("Ferdium", "财盛聚合聊天").replace("FERDIUM", "财盛")
+                  path.write_text(value, encoding="utf-8")
+
+          welcome = root / "src/components/auth/Welcome.tsx"
+          value = welcome.read_text(encoding="utf-8")
+          marker = "class Welcome extends Component<IProps> {"
+          value = value.replace(marker, marker + "\n  componentDidMount(): void {\n    serverlessLogin(this.props.actions);\n  }")
+          welcome.write_text(value, encoding="utf-8")
+
+          translation = root / "src/helpers/translation-helpers.ts"
+          value = translation.read_text(encoding="utf-8")
+          value = value.replace("财盛 ERROR: An error occurred. Please select less text to translate or try again later.", "翻译失败，请缩短内容或稍后重试。")
+          translation.write_text(value, encoding="utf-8")
+
+      - name: Overlay Caisheng platform modules
+        shell: bash
+        run: |
+          if [ -d overlays/platform-v3 ]; then
+            cp -R overlays/platform-v3/. platform/
+          fi
+
+      - name: Verify independent-platform boundary
+        shell: python
+        run: |
+          from pathlib import Path
+          package = Path("platform/package.json").read_text(encoding="utf-8")
+          workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+          assert "财盛聚合聊天" in package
+          assert "signalapp/Signal-Desktop" not in workflow
+          assert "OneChat-Dev/onechat" in workflow
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version-file: signal/.nvmrc
+          node-version: 22.18.0
+          cache: pnpm
+          cache-dependency-path: platform/pnpm-lock.yaml
 
-      - name: Enable pinned pnpm
+      - name: Enable pnpm
         shell: bash
-        working-directory: signal
+        working-directory: platform
         run: |
           corepack enable
-          corepack install
-          pnpm --version
+          corepack prepare pnpm@10.14.0 --activate
 
       - name: Install dependencies
         shell: bash
-        working-directory: signal
+        working-directory: platform
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck independent platform
+        shell: bash
+        working-directory: platform
+        run: pnpm typecheck
+
+      - name: Build installer and portable app
+        shell: bash
+        working-directory: platform
         env:
-          NPM_CONFIG_LOGLEVEL: verbose
-          NPM_CONFIG_NODE_GYP: ${{ github.workspace }}\\signal\\noop.js
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          touch noop.js
-          pnpm install --frozen-lockfile
-          rm noop.js
-
-      - name: Prepare build
-        shell: bash
-        working-directory: signal
-        run: |
-          pnpm run prepare-beta-build
-          pnpm run generate
-          pnpm run build:preload-cache
-
-      - name: Run Caisheng tests
-        shell: bash
-        working-directory: signal
-        run: |
-          node --no-warnings scripts/chatlite/shell-test.mts
-          node --no-warnings scripts/chatlite/platform-isolation-test.mts
-          set +e
-          pnpm run check:types 2>&1 | tee typecheck.log
-          type_status=${PIPESTATUS[0]}
-          set -e
-          if [ "$type_status" -ne 0 ]; then
-            error_count=$(grep -c "error TS" typecheck.log || true)
-            if [ "$error_count" -ne 1 ] || ! grep -q "Cannot find module 'fs-xattr'" typecheck.log; then
-              exit "$type_status"
-            fi
-            echo "Ignoring the upstream Windows-only optional fs-xattr declaration error."
-          fi
-
-      - name: Build branded installer and portable app
-        shell: bash
-        working-directory: signal
-        env:
-          DISABLE_INSPECT_FUSE: on
-        run: pnpm run build:release --publish=never --x64
+          pnpm exec preval-build-info-cli
+          node esbuild.mjs
+          pnpm exec electron-builder --win nsis portable --x64 --publish never
 
       - name: Verify Windows deliverables
         shell: pwsh
         run: |
-          $setup = Get-ChildItem signal/release/Caisheng-MultiChat-Setup-*-x64.exe
-          $portable = Get-ChildItem signal/release/Caisheng-MultiChat-Portable-*-x64.exe
-          if (-not $setup -or -not $portable) { throw 'Missing setup or portable EXE' }
-          Write-Host "Setup: $($setup.FullName)"
-          Write-Host "Portable: $($portable.FullName)"
+          $setup = Get-ChildItem platform/out/Caisheng-MultiChat-Setup-*-x64.exe
+          $portable = Get-ChildItem platform/out/Caisheng-MultiChat-Portable-*-x64.exe
+          if (-not $setup -or -not $portable) { throw "Missing setup or portable EXE" }
 
       - name: Upload Windows deliverables
         uses: actions/upload-artifact@v4
         with:
-          name: Caisheng-MultiChat-Windows-x64
+          name: Caisheng-Independent-Platform-Windows-x64
           path: |
-            signal/release/Caisheng-MultiChat-Setup-*-x64.exe
-            signal/release/Caisheng-MultiChat-Portable-*-x64.exe
-            signal/release/*.blockmap
+            platform/out/Caisheng-MultiChat-Setup-*-x64.exe
+            platform/out/Caisheng-MultiChat-Portable-*-x64.exe
+            platform/out/*.blockmap
           if-no-files-found: error
           retention-days: 14
