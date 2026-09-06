@@ -197,6 +197,5 @@ class ServiceStore {
 
   async clearAccount(id) { return this.clearAccountCache(id); }
 }
-}
 
 module.exports = { ServiceStore, DEFAULT_FINGERPRINT, servicePartition, validateFingerprint };
