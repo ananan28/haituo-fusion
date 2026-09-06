@@ -29,5 +29,15 @@ contextBridge.exposeInMainWorld('caisheng', {
     ipcRenderer.on('signal:refresh', listener);
     return () => ipcRenderer.removeListener('signal:refresh', listener);
   },
+  signal: {
+    state: id => invoke('signal:state', id), link: id => invoke('signal:link', id), start: id => invoke('signal:start', id),
+    conversations: id => invoke('signal:conversations', id), history: (id, conversationId, limit) => invoke('signal:history', id, conversationId, limit),
+    send: (id,to,text,files,quote) => invoke('signal:send', id,to,text,files,quote),
+    reaction: (id,to,emoji,target,remove) => invoke('signal:reaction', id,to,emoji,target,remove),
+    edit: (id,to,timestamp,text) => invoke('signal:edit', id,to,timestamp,text), delete: (id,to,timestamp) => invoke('signal:delete', id,to,timestamp),
+    reconnect: id => invoke('signal:reconnect', id), stop: id => invoke('signal:stop', id),
+    onState: callback => { const listener=(_e,x)=>callback(x); ipcRenderer.on('signal:state',listener); return()=>ipcRenderer.removeListener('signal:state',listener); },
+    onMessage: callback => { const listener=(_e,x)=>callback(x); ipcRenderer.on('signal:message',listener); return()=>ipcRenderer.removeListener('signal:message',listener); }
+  },
   ready: () => ipcRenderer.send('renderer:ready')
 });
