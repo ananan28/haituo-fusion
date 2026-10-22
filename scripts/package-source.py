@@ -6,13 +6,16 @@ parser=argparse.ArgumentParser();parser.add_argument('--target',choices=['window
 version=json.loads((root/'project.json').read_text(encoding='utf-8'))['versions'][args.target]
 commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
 paths=subprocess.check_output(['git','ls-files','-z'],cwd=root).decode().split('\0')
+# These two are regenerated into the archive below; skip the tracked copies
+# or the zip ends up with duplicate entries and the round-trip check fails.
+generated={'BUILD-THIS-PLATFORM.txt','SOURCE-SNAPSHOT.json'}
 label='Windows' if args.target=='windows' else 'macOS'
 name=f'Haituo-{version}-{label}-Source'
 out=root/'source-packages';out.mkdir(exist_ok=True)
 manifest={}
 with zipfile.ZipFile(out/(name+'.zip'),'w',zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
     for rel in paths:
-        if not rel:continue
+        if not rel or rel in generated:continue
         path=root/rel
         if not path.is_file():raise RuntimeError('Missing tracked file: '+rel)
         data=path.read_bytes();manifest[rel]=hashlib.sha256(data).hexdigest();archive.write(path,name+'/'+rel)
