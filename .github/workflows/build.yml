@@ -1,0 +1,41 @@
+name: Build desktop installers
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main', 'build/**']
+env:
+  PYTHONUTF8: 1
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: windows
+          - os: macos-15
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: node --test scripts/translation-validation.test.cjs scripts/network.test.cjs scripts/screenshot.test.cjs
+      - run: python scripts/build.py --target ${{ matrix.target }} --test
+      - run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haituo-${{ matrix.target }}
+          path: |
+            windows/out/*Setup.exe
+            windows/verification/**
+            macos/out/*.dmg
+            macos/verification/**
+            source-packages/*.zip

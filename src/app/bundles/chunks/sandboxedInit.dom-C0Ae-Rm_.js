@@ -1,0 +1,3 @@
+
+async function e(){let e=await window.SignalContext.Settings.themeSetting.getValue();document.body.classList.remove(`light-theme`),document.body.classList.remove(`dark-theme`),document.body.classList.add(`${e===`system`?window.SignalContext.nativeThemeListener.getSystemTheme():e}-theme`)}async function t(){for(;;)await window.SignalContext.Settings.waitForChange(),await e()}e(),t(),window.SignalContext.nativeThemeListener.subscribe(()=>{e()}),document.body.classList.add(window.SignalContext.OS.getClassName());
+//# sourceURL=bundles:///chunks/sandboxedInit.dom-C0Ae-Rm_.js

@@ -1,0 +1,26 @@
+{
+  "name": "Haituo portable development project",
+  "versions": {
+    "windows": "1.4.5",
+    "macos": "1.4.5"
+  },
+  "signalProtocolVersion": "8.29.0-alpha.1",
+  "tools": {
+    "electron": "44.1.0",
+    "electron-builder": "26.0.12",
+    "packager": "18.3.6",
+    "tar": "7.5.22"
+  },
+  "native": {
+    "windows": [
+      "@signalapp/libsignal-client",
+      "@signalapp/sqlcipher",
+      "@indutny/simple-windows-notifications"
+    ],
+    "macos": [
+      "@signalapp/libsignal-client",
+      "@signalapp/sqlcipher",
+      "@indutny/mac-screen-share"
+    ]
+  }
+}

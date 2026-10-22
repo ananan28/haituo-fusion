@@ -1,0 +1,3 @@
+
+let e=function(e){return e.Corrupted=`Corrupted`,e.Readonly=`Readonly`,e.Logic=`Logic`,e.Unknown=`Unknown`,e}({});function t(t){let n=t?.message;return n?n.includes(`SQLITE_CORRUPT`)||n.includes(`database disk image is malformed`)||n.includes(`file is not a database`)?e.Corrupted:n.includes(`SQLITE_READONLY`)||n.includes(`attempt to write a readonly database`)?e.Readonly:n.includes(`SQL logic error`)?e.Logic:e.Unknown:e.Unknown}Object.defineProperty(exports,`n`,{enumerable:!0,get:function(){return t}}),Object.defineProperty(exports,`t`,{enumerable:!0,get:function(){return e}});
+//# sourceURL=bundles:///chunks/errors.std-7sZchtic.js

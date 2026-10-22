@@ -1,0 +1,37 @@
+{
+  "$schema": "./package.schema.json",
+  "packageManager": "pnpm@11.24.0",
+  "private": true,
+  "name": "haituo",
+  "productName": "海拓",
+  "description": "海拓多账号翻译工作台",
+  "desktopName": "haituo.desktop",
+  "repository": "https://github.com/ananan28/WS-",
+  "version": "8.29.0-alpha.1",
+  "license": "AGPL-3.0-only",
+  "author": {
+    "name": "Haituo"
+  },
+  "browserslist": "last 1 chrome versions",
+  "main": "bundles/main.js",
+  "optionalDependencies": {
+    "fs-xattr": "0.4.0"
+  },
+  "dependencies": {
+    "@indutny/mac-screen-share": "1.2.5",
+    "@indutny/simple-windows-notifications": "2.0.21",
+    "@signalapp/libsignal-client": "0.100.0",
+    "@signalapp/mute-state-change": "workspace:*",
+    "@signalapp/ringrtc": "2.71.0",
+    "@signalapp/sqlcipher": "4.1.0",
+    "@signalapp/types": "workspace:*",
+    "@signalapp/windows-ucv": "workspace:*",
+    "google-libphonenumber": "3.2.44"
+  },
+  "engines": {
+    "node": "24.19.0"
+  },
+  "volta": {
+    "node": "24.19.0"
+  }
+}

@@ -1,0 +1,11 @@
+/.build/
+/macos/staging/
+/macos/out/
+/macos/image/
+/macos/verification/
+/windows/out/
+/windows/verification/
+__pycache__/
+*.pyc
+
+/source-packages/

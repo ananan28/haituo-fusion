@@ -1,0 +1,3 @@
+
+let e=require(`electron`),t;e.ipcRenderer.on(`art-creator:onUploadProgress`,()=>{t?.()}),e.contextBridge.exposeInMainWorld(`uploadStickerPack`,async(n,r,i)=>(t=i,e.ipcRenderer.invoke(`art-creator:uploadStickerPack`,{manifest:n,stickers:r}))),e.contextBridge.exposeInMainWorld(`installStickerPack`,(t,n)=>e.ipcRenderer.invoke(`install-sticker-pack`,t,n)),e.contextBridge.exposeInMainWorld(`getFilePath`,t=>e.webUtils.getPathForFile(t));
+//# sourceURL=bundles:///preload/sticker-creator.js

@@ -1,0 +1,11 @@
+海拓 1.4.4 macOS 开发工程
+
+先安装 Python 3.12、Node.js 22 和 Git。
+在macOS电脑进入本目录执行：
+python scripts/build.py --target macos --test
+
+包含当前客户端运行代码、资源、依赖、构建及测试，可换电脑或仓库继续开发。
+首次构建需要联网下载 Electron、工具及平台原生依赖。
+原始 TS/TSX、未取得的私有后端不在此包，详见 START-HERE.md。
+不包含聊天数据、账号会话或个人 API 密钥。
+Git commit: cef78b7c4f35191c0dc4f8b4eb922fafefab36bb
