@@ -37,7 +37,7 @@ def install_archive(data, dest, prefix=''):
             target.write_bytes(archive.extractfile(member).read())
             target.chmod(member.mode)
 
-def prepare(target):
+def prepare(target, include_test_hook=False):
     app = ROOT/'macos/staging/app'
     if app.exists():
         shutil.rmtree(app)
@@ -71,7 +71,12 @@ def prepare(target):
     if target == 'macos':
         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
     if target == 'windows':
-        run([sys.executable,'scripts/prepare-windows.py'])
+        env = {**os.environ}
+        # Ship a clean bundle: the runtime test hook is injected only when the
+        # subsequent test phase will actually use it.
+        if include_test_hook:
+            env['HAITUO_INCLUDE_TEST_HOOK'] = '1'
+        run([sys.executable,'scripts/prepare-windows.py'], env=env)
     run(['node','scripts/test-native-ocr.cjs',app])
     pkgpath=app/'package.json'
     pkg=json.loads(pkgpath.read_text(encoding='utf-8'))
@@ -160,7 +165,7 @@ def main():
         raise SystemExit('Use a matching Windows x64 or macOS ARM64 machine.')
     if args.target=='macos' and platform.machine()!='arm64':
         raise SystemExit('Mac 构建需要 Apple Silicon（arm64）机器，避免产出架构不匹配的原生组件。')
-    app,tools=prepare(args.target)
+    app,tools=prepare(args.target, include_test_hook=args.test)
     globals()[args.target](app,tools)
     if args.test:
         run([sys.executable,'scripts/test-project.py','--target',args.target])

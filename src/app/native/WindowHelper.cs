@@ -19,8 +19,10 @@ public static class HaituoWindowFollower {
     try { timeBeginPeriod(1); } catch {}
     try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High; Thread.CurrentThread.Priority = ThreadPriority.Highest; } catch {}
     SetWindowLongPtr(child, -8, parent);
+    int stable = 0;
     while (IsWindow(child) && IsWindow(parent)) {
       RECT clientRect, childRect; POINT origin = new POINT();
+      bool moved = false;
       if (GetClientRect(parent, out clientRect) && ClientToScreen(parent, ref origin) && GetWindowRect(child, out childRect)) {
         int clientWidth = clientRect.Right - clientRect.Left, clientHeight = clientRect.Bottom - clientRect.Top;
         int x = origin.X + left, y = origin.Y + top;
@@ -28,9 +30,13 @@ public static class HaituoWindowFollower {
         if (childRect.Left != x || childRect.Top != y || childRect.Right - childRect.Left != width || childRect.Bottom - childRect.Top != height) {
           SetWindowPos(child, IntPtr.Zero, x, y, width, height, positionFlags);
           DwmFlush();
+          moved = true;
         }
       }
-      Thread.Sleep(1);
+      // Poll at 1ms while the parent keeps moving; drop to 8ms once it is idle
+      // so a parked window costs a fraction of the wakeups.
+      stable = moved ? 0 : Math.Min(stable + 1, 8);
+      Thread.Sleep(stable >= 8 ? 8 : 1);
     }
   }
 

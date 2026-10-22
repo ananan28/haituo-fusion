@@ -8,6 +8,9 @@
   const HAN = /[\u3400-\u9fff]/u, LATIN = /[a-z]/iu;
   let popup, active, snapshot, timer, observer, seq = 0;
   function readRow(row) {
+    // Typing indicators and unsent drafts render in the same slot as message
+    // previews; hovering must never ship those to the translation service.
+    if (row.querySelector('.module-typing-animation, [class*="__draft-prefix"]')) return null;
     const name = clean(row.querySelector(`${ROW}__content__header__name__contact-name, ${ROW}__content__header__name`)?.innerText);
     const text = clean(row.querySelector(`${ROW}__content__message__text`)?.innerText);
     return text ? { name, text, key: name + '\u0000' + text } : null;

@@ -21650,6 +21650,7 @@ http://jedwatson.github.io/classnames
             backTranslationEnabled: e.backTranslationEnabled,
             groupBackTranslationEnabled: e.groupBackTranslationEnabled,
             autoTranslateIncoming: e.autoTranslateIncoming,
+            telegramTranslationEnabled: e.telegramTranslationEnabled,
             translationMode: e.translationMode || `normal`,
             efficiencyMode: e.translationMode === `efficiency`
         });
@@ -21758,7 +21759,8 @@ http://jedwatson.github.io/classnames
             darkTheme: !0,
             hideTranslationBox: !1,
             backTranslationEnabled: !0,
-            groupBackTranslationEnabled: !0
+            groupBackTranslationEnabled: !0,
+            telegramTranslationEnabled: !1
         }, window.SignalContext.caishengIsChildProfile && window.SignalContext.caishengGetTranslationConfig().then(e => {
             if (!e || typeof e !== `object`) return;
             let t = {
@@ -230151,7 +230153,7 @@ function haituoCachedSignalTranslation(text) {
             const visible = r.filter(e => e.platformId === haituoPlatformFilter && bCr(e.platformId, t));
             if (!visible.length || visible.some(e => e.id === o)) return;
             const next = visible[0];
-            next.platformId === `whatsapp` && qSetLoaded(e => e.includes(next.id) ? e : [ next.id, ...e ]), s(next.id), next.platformId === `signal` && next.id !== `signal-main` && window.SignalContext.caishengLaunchSignalProfile(next.id), requestAnimationFrame(() => A(next.id, 0, !0));
+            (next.platformId === `whatsapp` || next.platformId === `telegram`) && qSetLoaded(e => e.includes(next.id) ? e : [ next.id, ...e ]), s(next.id), next.platformId === `signal` && next.id !== `signal-main` && window.SignalContext.caishengLaunchSignalProfile(next.id), requestAnimationFrame(() => A(next.id, 0, !0));
         }, [ haituoPlatformFilter, r, t, o ]), (0, D9.useEffect)(() => {
             const counts = window.__haituoDirectUnreadCounts ||= new Map;
             const render = (id, rawCount) => {
@@ -230215,7 +230217,7 @@ function haituoCachedSignalTranslation(text) {
                 localStorage.setItem(`caisheng.lastWorkspace`, o);
             } catch {}
             let e = r.find(e => e.id === o);
-            e?.platformId === `whatsapp` && qSetLoaded(t => t.includes(o) ? t : [ o, ...t ]);
+            (e?.platformId === `whatsapp` || e?.platformId === `telegram`) && qSetLoaded(t => t.includes(o) ? t : [ o, ...t ]);
         }, [ o, r ]), (0, D9.useEffect)(() => {
             const esc = e => {
                 if (e.key !== `Escape`) return;
@@ -230223,9 +230225,10 @@ function haituoCachedSignalTranslation(text) {
             };
             return document.addEventListener(`keydown`, esc), () => document.removeEventListener(`keydown`, esc);
         }, []), (0, D9.useEffect)(() => {
-            if (window.SignalContext.OS.platform === `darwin`) return;
-            let e = r.filter(e => e.platformId === `whatsapp` && bCr(e.platformId, t)), n = e.find(e => qLoaded.includes(e.id) && !qReady.includes(e.id));
-            if (n) return;
+            // Weak networks: web accounts (WhatsApp + Telegram) load one at a time,
+            // on every platform, instead of hammering the connection in parallel.
+            let e = r.filter(e => (e.platformId === `whatsapp` || e.platformId === `telegram`) && bCr(e.platformId, t)), n = e.find(e => qLoaded.includes(e.id) && !qReady.includes(e.id));
+            if (n) return (i = setTimeout(() => qSetReady(t => t.includes(n.id) ? t : [ ...t, n.id ]), 45000), () => clearTimeout(i));
             let a = e.find(e => !qLoaded.includes(e.id));
             if (!a) return;
             let i = setTimeout(() => qSetLoaded(e => e.includes(a.id) ? e : [ ...e, a.id ]), 3500);
@@ -230396,7 +230399,7 @@ function haituoCachedSignalTranslation(text) {
                 return;
             }
             let t = document.querySelector(`webview[data-caisheng-workspace="${CSS.escape(e.id)}"]`);
-            if (!t && e.platformId === `whatsapp`) {
+            if (!t && (e.platformId === `whatsapp` || e.platformId === `telegram`)) {
                 qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), setTimeout(() => ne(e), 120);
                 return;
             }
@@ -230471,7 +230474,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         onClick: () => {
                             haituoSetHome(!1), window.__haituoHideSignalTranslation?.();
-                            e.platformId === `whatsapp` && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id), 
+                            (e.platformId === `whatsapp` || e.platformId === `telegram`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id), 
                             s(e.id), requestAnimationFrame(() => A(e.id, 0, !0))) : (s(e.id), requestAnimationFrame(() => {
                                 A(e.id), document.querySelector(`webview[data-caisheng-workspace="${CSS.escape(e.id)}"]`)?.focus();
                             }), setTimeout(() => A(e.id), 120));
@@ -230579,6 +230582,11 @@ function haituoCachedSignalTranslation(text) {
                             type: `checkbox`, checked: m.groupBackTranslationEnabled !== !1,
                             onChange: e => N({ groupBackTranslationEnabled: e.target.checked })
                         }), (0, O9.jsx)(`span`, { children: `群组回译` }) ]
+                    }), (0, O9.jsxs)(`label`, {
+                        children: [ (0, O9.jsx)(`input`, {
+                            type: `checkbox`, checked: m.telegramTranslationEnabled === !0,
+                            onChange: e => N({ telegramTranslationEnabled: e.target.checked })
+                        }), (0, O9.jsx)(`span`, { children: `Telegram 翻译（默认关闭）` }) ]
                     }), (0, O9.jsx)(`hr`, {}), (0, O9.jsx)(`strong`, {
                         children: `智能区设置`
                     }), (0, O9.jsxs)(`label`, {
@@ -230896,7 +230904,7 @@ function haituoCachedSignalTranslation(text) {
                         zIndex: !haituoHome && o === `signal-main` ? 2 : 0
                     },
                     children: e
-                }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` || qLoaded.includes(e.id))).map(e => {
+                }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` && e.platformId !== `telegram` || qLoaded.includes(e.id))).map(e => {
                     let t = gCr(e.platformId);
                     return t.startUrl ? (0, D9.createElement)(`webview`, {
                         className: `CaishengPlatformShell__webview`,
@@ -230935,7 +230943,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         onDomReady: t => {
                             let n = t.currentTarget;
-                            n.setAudioMuted?.(!1), e.platformId === `whatsapp` && qSetReady(t => t.includes(e.id) ? t : [ ...t, e.id ]), typeof n.executeJavaScript === `function` && n.executeJavaScript(`window.dispatchEvent(new Event("resize"));document.documentElement.offsetHeight`).catch(() => {});
+                            n.setAudioMuted?.(!1), (e.platformId === `whatsapp` || e.platformId === `telegram`) && qSetReady(t => t.includes(e.id) ? t : [ ...t, e.id ]), typeof n.executeJavaScript === `function` && n.executeJavaScript(`window.dispatchEvent(new Event("resize"));document.documentElement.offsetHeight`).catch(() => {});
                         }
                     }) : null;
                 }) ]
@@ -235547,6 +235555,9 @@ function haituoApplyNativeRendererAppearance(cfg) {
   const HAN = /[\u3400-\u9fff]/u, LATIN = /[a-z]/iu;
   let popup, active, snapshot, timer, observer, seq = 0;
   function readRow(row) {
+    // Typing indicators and unsent drafts render in the same slot as message
+    // previews; hovering must never ship those to the translation service.
+    if (row.querySelector('.module-typing-animation, [class*="__draft-prefix"]')) return null;
     const name = clean(row.querySelector(`${ROW}__content__header__name__contact-name, ${ROW}__content__header__name`)?.innerText);
     const text = clean(row.querySelector(`${ROW}__content__message__text`)?.innerText);
     return text ? { name, text, key: name + '\u0000' + text } : null;

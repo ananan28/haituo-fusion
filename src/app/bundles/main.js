@@ -24811,6 +24811,10 @@ async function Xp(e) {
     } else if (r === `libre`) {
         let r = typeof e.endpoint == `string` ? e.endpoint.replace(/\/$/u, ``) : ``;
         if (!r) throw Error(`LibreTranslate 未配置服务地址`);
+        {
+            const u = new URL(r), loopback = /^(?:localhost|127\.0\.0\.1|\[::1\])$/u.test(u.hostname);
+            if (!(u.protocol === `https:` || u.protocol === `http:` && loopback) || u.username || u.password) throw Error(`LibreTranslate 服务地址仅支持 https（本地回环地址可用 http），避免密钥明文传输`);
+        }
         o = (await Yp(`${r}/translate`, {
             method: `POST`,
             headers: {
@@ -24924,29 +24928,54 @@ const Qp = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-settings
 
 const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-cache.json`);
 
+function haituoProtectedRead(file, fallback) {
+    try {
+        const parsed = JSON.parse((0, m.readFileSync)(file, `utf8`));
+        if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
+            const decrypted = p.safeStorage.decryptString(Buffer.from(parsed.data, `base64`));
+            if (!decrypted) return fallback;
+            const value = JSON.parse(decrypted);
+            return value && typeof value === `object` ? value : fallback;
+        }
+        return parsed && typeof parsed === `object` ? parsed : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function haituoProtectedWrite(file, value) {
+    (0, m.mkdirSync)((0, s.dirname)(file), {
+        recursive: !0
+    });
+    let payload = ``;
+    if (process.platform !== `darwin` && p.safeStorage.isEncryptionAvailable()) {
+        const blob = p.safeStorage.encryptString(JSON.stringify(value));
+        blob?.length && (payload = JSON.stringify({
+            haituoEncrypted: 1,
+            data: blob.toString(`base64`)
+        }));
+    }
+    // macOS builds are ad-hoc signed, so keychain access can silently fail (or
+    // block startup on a prompt) between builds. Keep settings readable there.
+    payload || (payload = JSON.stringify(value));
+    const temporary = `${file}.${process.pid}.tmp`;
+    (0, m.writeFileSync)(temporary, payload, {
+        encoding: `utf8`,
+        mode: 384
+    });
+    (0, m.renameSync)(temporary, file);
+}
+
 let HaituoTranslationCache;
 
 function loadHaituoTranslationCache() {
     if (HaituoTranslationCache) return HaituoTranslationCache;
-    try {
-        const e = JSON.parse((0, m.readFileSync)(HaituoTranslationCachePath, `utf8`));
-        HaituoTranslationCache = e && typeof e === `object` ? e : {};
-    } catch {
-        HaituoTranslationCache = {};
-    }
+    HaituoTranslationCache = haituoProtectedRead(HaituoTranslationCachePath, {});
     return HaituoTranslationCache;
 }
 
 function saveHaituoTranslationCache() {
-    (0, m.mkdirSync)((0, s.dirname)(HaituoTranslationCachePath), {
-        recursive: !0
-    });
-    const e = `${HaituoTranslationCachePath}.tmp`;
-    (0, m.writeFileSync)(e, JSON.stringify(HaituoTranslationCache), {
-        encoding: `utf8`,
-        mode: 384
-    });
-    (0, m.renameSync)(e, HaituoTranslationCachePath);
+    haituoProtectedWrite(HaituoTranslationCachePath, HaituoTranslationCache);
 }
 
 function haituoTranslationCacheKey(e) {
@@ -25158,6 +25187,12 @@ async function cachedHaituoTranslate(e, t = !1) {
         cached: !0
     };
     if (!t && HaituoTranslationInFlight.has(n)) return HaituoTranslationInFlight.get(n);
+    const staleFromWeakNetwork = () => r[n] && typeof r[n].text === `string` ? {
+        ...r[n],
+        text: r[n].text.replace(/^(?:目标语言|Target language)\s*[:：]\s*[A-Za-z-]+\s*(?:\r?\n)+/iu, ``).trim(),
+        cached: !0,
+        stale: !0
+    } : null;
     const pending = haituoRunProvider({ ...e, __haituoForceChunks: t && !!r[n]?.text }).then(a => {
         r[n] = {
             text: a.text,
@@ -25168,6 +25203,11 @@ async function cachedHaituoTranslate(e, t = !1) {
             ...a,
             cached: !1
         };
+    }).catch(error => {
+        // Weak networks: a previously cached translation beats a hard failure.
+        const stale = staleFromWeakNetwork();
+        if (stale) return stale;
+        throw error;
     }).finally(() => HaituoTranslationInFlight.delete(n));
     if (!t) HaituoTranslationInFlight.set(n, pending);
     return pending;
@@ -25175,12 +25215,12 @@ async function cachedHaituoTranslate(e, t = !1) {
 
 function $p() {
     try {
-        let e = JSON.parse((0, m.readFileSync)(Qp, `utf8`));
+        let e = haituoProtectedRead(Qp, {});
         let changed = !1;
         if (e.chatTextGradientIndex || e.outgoingBubbleGradientIndex) e.chatTextGradientIndex = 0, e.outgoingBubbleGradientIndex = 0, changed = !0;
         if (typeof e.incomingBubbleLinked !== `boolean`) e.incomingBubbleLinked = !0, changed = !0;
         if (e.incomingBubbleLinked && e.incomingBubbleColor !== e.outgoingBubbleColor) e.incomingBubbleColor = e.outgoingBubbleColor || ``, changed = !0;
-        e._blockChineseDefaultV81613 || (e.blockChineseOutgoing = !0, e._blockChineseDefaultV81613 = !0, changed = !0), e._singleSpaceV2021 || (e._singleSpaceV2021 = !0, changed = !0), e.translateShortcut === `single-space` && (e.translateShortcut = `triple-space`, changed = !0), e._tripleSpaceV2025 || (e._tripleSpaceV2025 = !0, changed = !0), e._hideTranslationDefaultV2028 || (typeof e.hideTranslationBox===`boolean` || (e.hideTranslationBox=false), e._hideTranslationDefaultV2028 = !0, changed = !0), typeof e.inputTranslationProvider == `string` || (e.inputTranslationProvider = `google-free`, changed = !0), typeof e.chatTranslationProvider == `string` || (e.chatTranslationProvider = `google-free`, changed = !0), typeof e.voiceTranscriptionProvider == `string` || (e.voiceTranscriptionProvider = `groq`, changed = !0), typeof e.backTranslationEnabled == `boolean` || (e.backTranslationEnabled = !0, changed = !0), typeof e.groupBackTranslationEnabled == `boolean` || (e.groupBackTranslationEnabled = !0, changed = !0), [ `normal`, `efficiency`, `precision` ].includes(e.translationMode) || (e.translationMode = `normal`, changed = !0), changed && em(e);
+        e._blockChineseDefaultV81613 || (e.blockChineseOutgoing = !0, e._blockChineseDefaultV81613 = !0, changed = !0), e._singleSpaceV2021 || (e._singleSpaceV2021 = !0, changed = !0), e.translateShortcut === `single-space` && (e.translateShortcut = `triple-space`, changed = !0), e._tripleSpaceV2025 || (e._tripleSpaceV2025 = !0, changed = !0), e._hideTranslationDefaultV2028 || (typeof e.hideTranslationBox===`boolean` || (e.hideTranslationBox=false), e._hideTranslationDefaultV2028 = !0, changed = !0), typeof e.inputTranslationProvider == `string` || (e.inputTranslationProvider = `google-free`, changed = !0), typeof e.chatTranslationProvider == `string` || (e.chatTranslationProvider = `google-free`, changed = !0), typeof e.voiceTranscriptionProvider == `string` || (e.voiceTranscriptionProvider = `groq`, changed = !0), typeof e.backTranslationEnabled == `boolean` || (e.backTranslationEnabled = !0, changed = !0), typeof e.groupBackTranslationEnabled == `boolean` || (e.groupBackTranslationEnabled = !0, changed = !0), typeof e.telegramTranslationEnabled == `boolean` || (e.telegramTranslationEnabled = !1, changed = !0), typeof e.autoTranslateIncoming == `boolean` || (e.autoTranslateIncoming = !0, changed = !0),[ `normal`, `efficiency`, `precision` ].includes(e.translationMode) || (e.translationMode = `normal`, changed = !0), changed && em(e);
         if (!e._nativeAppearanceV1111) {
             e._nativeAppearanceV1111 = true;
             e.nativeTheme = `dark`;
@@ -25194,7 +25234,7 @@ function $p() {
         if(!e.translationPools&&!e._translationPoolsV143){e.translationPools=require('../js/haituo-translation-pools.js').fromLegacy(e);e._translationPoolsV143=true;em(e)}
         return e;
     } catch {
-        return { chatTextColor: ``, outgoingBubbleColor: ``, incomingBubbleColor: ``, nativeTheme: `dark`, darkTheme: true, _nativeAppearanceV1111: true, translationMode: `normal`, translateShortcut: `triple-space`, blockChineseOutgoing: !0, backTranslationEnabled: !0, groupBackTranslationEnabled: !0, inputTranslationProvider: `google-free`, chatTranslationProvider: `google-free`, voiceTranscriptionProvider: `groq`, incomingBubbleLinked: !0, chatTextGradientIndex: 0, outgoingBubbleGradientIndex: 0 };
+        return { chatTextColor: ``, outgoingBubbleColor: ``, incomingBubbleColor: ``, nativeTheme: `dark`, darkTheme: true, _nativeAppearanceV1111: true, translationMode: `normal`, translateShortcut: `triple-space`, blockChineseOutgoing: !0, backTranslationEnabled: !0, groupBackTranslationEnabled: !0, telegramTranslationEnabled: !1, autoTranslateIncoming: !0, inputTranslationProvider: `google-free`, chatTranslationProvider: `google-free`, voiceTranscriptionProvider: `groq`, incomingBubbleLinked: !0, chatTextGradientIndex: 0, outgoingBubbleGradientIndex: 0 };
     }
 }
 
@@ -25210,12 +25250,7 @@ function rmRefresh(e, t) {
 }
 
 function em(e) {
-    (0, m.mkdirSync)((0, s.dirname)(Qp), {
-        recursive: !0
-    });
-    const temporary = `${Qp}.${process.pid}.tmp`;
-    (0, m.writeFileSync)(temporary, JSON.stringify(e), {encoding:`utf8`, mode:384});
-    (0, m.renameSync)(temporary, Qp);
+    haituoProtectedWrite(Qp, e);
 }
 
 function tm() {
@@ -27614,6 +27649,7 @@ function haituoApplyTranslationConfig(t) {
         backTranslationEnabled: t?.backTranslationEnabled !== !1,
         groupBackTranslationEnabled: t?.groupBackTranslationEnabled !== !1,
         autoTranslateIncoming: t?.autoTranslateIncoming !== !1,
+        telegramTranslationEnabled: t?.telegramTranslationEnabled === !0,
         translationMode: [ `normal`, `efficiency`, `precision` ].includes(t?.translationMode) ? t.translationMode : `normal`,
         efficiencyMode: t?.translationMode === `efficiency`
     };
@@ -28741,6 +28777,7 @@ body{display:flex;flex-direction:column}.title{flex:0 0 46px}#form{display:flex;
 <label class="check"><input type="checkbox" name="autoTranslateIncoming">接收回译</label>
 <label class="check"><input type="checkbox" name="backTranslationEnabled">发送回译</label>
 <label class="check"><input type="checkbox" name="groupBackTranslationEnabled">群组回译</label>
+<label class="check"><input type="checkbox" name="telegramTranslationEnabled">Telegram 翻译（默认关闭，勾选后启用）</label>
 <label class="check"><input type="checkbox" name="blockChineseOutgoing">禁止直接发送中文</label>
 <div class="section">界面设置</div>
 <label class="row"><span>顶部徽标文字</span><input class="grow" name="brandBadgeText" maxlength="48" placeholder="SVIP（可自定义或留空隐藏）"></label>
@@ -28818,7 +28855,7 @@ form.incomingBubbleLinked.onchange=()=>{syncBubbleColors();send('preview')};
 form.incomingBubbleColor.oninput=()=>send('preview');
 form.chatTextColor.oninput=()=>send('preview');form.nativeTheme.onchange=()=>send('preview');
 document.getElementById('resetColors').onclick=()=>{haituoEditedColors.clear();for(const key of ['chatTextColor','outgoingBubbleColor','incomingBubbleColor']){cfg[key]='';form.elements[key].value=cfg.nativeTheme==='light'?'#202020':'#eeeeee';initialColors[key]=form.elements[key].value}form.incomingBubbleLinked.checked=true;send('preview')};
-function collect(){const data={...cfg};for(const [key,value] of new FormData(form))data[key]=value;data.openaiApiProfiles=[...multiRows.children].map(row=>({apiKey:row.querySelector('[data-api-field=apiKey]').value.trim(),endpoint:row.querySelector('[data-api-field=endpoint]').value.trim(),model:row.querySelector('[data-api-field=model]').value.trim(),vision:row.querySelector('[data-api-field=vision]').checked})).filter(profile=>profile.apiKey);for(const key of ['screenshotEnabled','hideTranslationBox','autoTranslateIncoming','backTranslationEnabled','groupBackTranslationEnabled','blockChineseOutgoing'])data[key]=form.elements[key].checked;data.darkTheme=form.nativeTheme.value==='dark';data.nativeTheme=form.nativeTheme.value;data.chatFontSize=Number(form.chatFontSize.value)||15;data.incomingBubbleLinked=form.incomingBubbleLinked.checked;data.incomingBubbleColor=form.incomingBubbleLinked.checked?form.outgoingBubbleColor.value:form.incomingBubbleColor.value;for(const key of ['chatTextColor','outgoingBubbleColor','incomingBubbleColor'])if(!haituoEditedColors.has(key)&&form.elements[key].value===initialColors[key])data[key]=cfg[key]||'';data.incomingBubbleColor=data.incomingBubbleLinked?data.outgoingBubbleColor:data.incomingBubbleColor;data.chatTextGradientIndex=0;data.outgoingBubbleGradientIndex=0;data.shortcut=data.refreshShortcut;return data}
+function collect(){const data={...cfg};for(const [key,value] of new FormData(form))data[key]=value;data.openaiApiProfiles=[...multiRows.children].map(row=>({apiKey:row.querySelector('[data-api-field=apiKey]').value.trim(),endpoint:row.querySelector('[data-api-field=endpoint]').value.trim(),model:row.querySelector('[data-api-field=model]').value.trim(),vision:row.querySelector('[data-api-field=vision]').checked})).filter(profile=>profile.apiKey);for(const key of ['screenshotEnabled','hideTranslationBox','autoTranslateIncoming','backTranslationEnabled','groupBackTranslationEnabled','telegramTranslationEnabled','blockChineseOutgoing'])data[key]=form.elements[key].checked;data.darkTheme=form.nativeTheme.value==='dark';data.nativeTheme=form.nativeTheme.value;data.chatFontSize=Number(form.chatFontSize.value)||15;data.incomingBubbleLinked=form.incomingBubbleLinked.checked;data.incomingBubbleColor=form.incomingBubbleLinked.checked?form.outgoingBubbleColor.value:form.incomingBubbleColor.value;for(const key of ['chatTextColor','outgoingBubbleColor','incomingBubbleColor'])if(!haituoEditedColors.has(key)&&form.elements[key].value===initialColors[key])data[key]=cfg[key]||'';data.incomingBubbleColor=data.incomingBubbleLinked?data.outgoingBubbleColor:data.incomingBubbleColor;data.chatTextGradientIndex=0;data.outgoingBubbleGradientIndex=0;data.shortcut=data.refreshShortcut;return data}
 form.onsubmit=e=>{e.preventDefault();send('save')};const close=()=>send('close');document.getElementById('close').onclick=close;document.getElementById('cancel').onclick=close;addEventListener('keydown',e=>{if(e.key==='Escape')close()});</script></body></html>`;
     caishengSettingsWindow.webContents.on(`will-navigate`, (event, url) => {
         if (!url.startsWith(`haituo-settings://`)) return;
@@ -29367,35 +29404,54 @@ function Iv() {
         previousBackend: s
     });
     let u;
-    if ($u !== `signal-main` && typeof o == `string`) try {
-        return u = p.safeStorage.decryptString(Buffer.from(o, `hex`)), fd(`key`, u), fd(`encryptedKey`, void 0), 
-        u;
+    if ($u !== `signal-main` && typeof o == `string` && o) try {
+        const key = p.safeStorage.decryptString(Buffer.from(o, `hex`));
+        if (!key) throw Error(`getSQLKey: safeStorage returned an empty key`);
+        return key;
     } catch (e) {
         if (typeof r == `string`) return r;
         throw e;
     }
-    if (typeof o == `string`) {
+    if (typeof o == `string` && o) {
         if (!l) throw Error(`Can't decrypt database key`);
         X.info(`getSQLKey: decrypting key`);
         let e = Buffer.from(o, `hex`);
         try {
             u = p.safeStorage.decryptString(e);
+            if (!u) throw Error(`getSQLKey: safeStorage returned an empty key`);
         } catch (e) {
             if (typeof r != `string`) throw e;
             X.warn(`getSQLKey: safeStorage decryption failed; using preserved recovery key`), 
             u = r;
         }
-        if (typeof r == `string`) if (u === r) X.info(`getSQLKey: recovery key verified`); else {
+        if (typeof r == `string`) if (u === r) X.info(`getSQLKey: recovery key verified`), 
+        process.platform !== `darwin` && fd(`key`, void 0); else {
             if (X.warn(`getSQLKey: decrypted modern key mismatch with legacy key`), Lv() === `quit`) throw new ug;
             u = r;
         }
         t && s == null && (X.info(`getSQLKey: saving safeStorageBackend: ${c}`), fd(`safeStorageBackend`, c));
     } else typeof r == `string` ? (u = r, e = l, e ? X.info(`getSQLKey: migrating key`) : X.info(`getSQLKey: using legacy key`)) : (X.warn(`getSQLKey: got key from config, but it wasn't a string`), 
     u = Fv(), e = !0);
-    return e && (l ? (X.info(`getSQLKey: updating encrypted key in the config`), fd(`encryptedKey`, p.safeStorage.encryptString(u).toString(`hex`)), 
-    X.info(`getSQLKey: preserving plaintext recovery key for safeStorage failures`), 
-    fd(`key`, u), t && c && (X.info(`getSQLKey: saving safeStorageBackend: ${c}`), fd(`safeStorageBackend`, c))) : (X.info(`getSQLKey: updating plaintext key in the config`), 
-    fd(`key`, u))), u;
+    if (e && l) {
+        X.info(`getSQLKey: updating encrypted key in the config`);
+        const blob = p.safeStorage.encryptString(u);
+        // Only trust safeStorage after a round-trip check, and never drop the
+        // recovery key on unsigned macOS builds: keychain access can break
+        // between builds and would otherwise brick the database forever.
+        if (blob?.length && p.safeStorage.decryptString(blob) === u) {
+            fd(`encryptedKey`, blob.toString(`hex`));
+            if (process.platform === `darwin`) {
+                X.info(`getSQLKey: keeping plaintext recovery key for unsigned macOS builds`), 
+                fd(`key`, u);
+            } else X.info(`getSQLKey: dropping plaintext key once the encrypted key is stored`), 
+            fd(`key`, void 0);
+            t && c && (X.info(`getSQLKey: saving safeStorageBackend: ${c}`), fd(`safeStorageBackend`, c));
+        } else X.warn(`getSQLKey: safeStorage round-trip failed; keeping plaintext recovery key`), 
+        fd(`key`, u);
+    } else e && (X.info(`getSQLKey: updating plaintext key in the config`), 
+    fd(`key`, u));
+    if (!u) throw Error(`getSQLKey: no usable database key`);
+    return u;
 }
 
 function Lv() {

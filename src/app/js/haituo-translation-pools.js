@@ -3,9 +3,20 @@ const providers=new Set(['openai','deepseek','groq','qwen','glm','openrouter','c
 function sanitize(value){if(!value||typeof value!=='object')return undefined;const result={};for(const name of ['primary','backup'])result[name]=(Array.isArray(value[name])?value[name]:[]).filter(p=>p&&providers.has(p.provider)).slice(0,12).map(p=>({provider:p.provider,apiKey:String(p.apiKey||'').trim(),endpoint:String(p.endpoint||'').trim(),model:String(p.model||'').trim(),region:String(p.region||'').trim(),enabled:p.enabled!==false,vision:!!p.vision}));return result}
 function requestFor(entry,request){const compatible=['openai','deepseek','groq','qwen','glm','openrouter','custom'].includes(entry.provider);return {...request,provider:compatible?'openai':entry.provider,apiKey:entry.apiKey,googleCloudApiKey:entry.provider==='google-cloud'?entry.apiKey:'',endpoint:entry.endpoint,model:entry.model,region:entry.region,openaiApiProfiles:[],openaiApiKeys:[],translationPools:undefined,__haituoPool:true}}
 async function run(pools,request,translate,sleep=ms=>new Promise(r=>setTimeout(r,ms))){const errors=[];let primaryProvider;
- for(const group of ['primary','backup'])for(const entry of pools[group]||[]){if(entry.enabled===false)continue;primaryProvider ||= entry.provider;
-  for(let attempt=0;attempt<2;attempt++)try{if(!['google-free','mymemory','libre'].includes(entry.provider)&&!entry.apiKey)throw Error('未填写 API 密钥');const result=await translate(requestFor(entry,request));if(!result?.text?.trim())throw Error('翻译结果为空');return {...result,provider:entry.provider,pool:group,...(group==='backup'?{fallbackFrom:primaryProvider,fallbackReason:errors.at(-1)||'主翻译不可用'}:{})}}
-  catch(error){errors.push(String(error.message||error));if([400,401,402,403,404,422].includes(error.status)||/未填写|HTTP (400|401|402|403|404|422)\b/.test(String(error.message)))break;if(attempt===0)await sleep(500)}
+ const enabled=[];
+ for(const group of ['primary','backup'])for(const entry of pools[group]||[])if(entry.enabled!==false)enabled.push([group,entry]);
+ let seen=0;
+ for(const [group,entry] of enabled){primaryProvider ||= entry.provider;seen++;
+  const moreRemaining=seen<enabled.length;
+  for(let attempt=0;attempt<2;attempt++){
+   const startedAt=Date.now();
+   try{if(!['google-free','mymemory','libre'].includes(entry.provider)&&!entry.apiKey)throw Error('未填写 API 密钥');const result=await translate(requestFor(entry,request));if(!result?.text?.trim())throw Error('翻译结果为空');return {...result,provider:entry.provider,pool:group,...(group==='backup'?{fallbackFrom:primaryProvider,fallbackReason:errors.at(-1)||'主翻译不可用'}:{})}}
+   catch(error){errors.push(String(error.message||error));if([400,401,402,403,404,422].includes(error.status)||/未填写|HTTP (400|401|402|403|404|422)\b/.test(String(error.message)))break;
+    // Timeout-grade failures burn tens of seconds each; when another entry is
+    // still available, fail over immediately instead of retrying in place.
+    if(attempt===0&&moreRemaining&&Date.now()-startedAt>=2000)break;
+    if(attempt===0)await sleep(500)}
+  }
  }
  const failure=Error('主翻译和备用翻译均未成功：'+errors.slice(-3).join('；'));failure.status=422;throw failure;
 }

@@ -123,6 +123,9 @@ let panel, settingsPanel, translatorFooter, backTranslationPreview, backTranslat
     refreshShortcut: "ctrl-r",
     shortcut: "ctrl-r"
     ,backTranslationEnabled: !0
+    ,autoTranslateIncoming: !0
+    ,groupBackTranslationEnabled: !0
+    ,telegramTranslationEnabled: !1
     ,translationProxyEnabled: !1
     ,translationProxyPool: ""
 };
@@ -197,7 +200,8 @@ ipcRenderer.on("caisheng:translation-config-changed", (event, next) => {
         settings.incomingBubbleLinked !== !1 && (settings.incomingBubbleColor = settings.outgoingBubbleColor);
         localPanelPreference = null;
         if(!!localHidden !== !!settings.hideTranslationBox){panel?.remove();panel=null;if(findComposer())showPanel(findComposer());}
-        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls();
+        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview();
+        if (isTelegram() && settings.telegramTranslationEnabled !== !0) { panel?.remove(), panel = null, hidePanels(), hideBackTranslation(); }
     }
 });
 
@@ -222,7 +226,7 @@ async function refreshSettings() {
             ...e, ...haituoPendingValues()
         }), settings.targetLanguage || (settings.targetLanguage = "en"), 
         localPanelPreference = null,
-        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), wasHidden !== !!settings.hideTranslationBox && (panel?.remove(), panel = null, findComposer() && showPanel(findComposer()));
+        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview(), wasHidden !== !!settings.hideTranslationBox && (panel?.remove(), panel = null, findComposer() && showPanel(findComposer()));
     } catch {}
 }
 
@@ -254,18 +258,53 @@ function isTelegram() {
     return /(^|\.)web\.telegram\.org$/i.test(location.hostname);
 }
 
+// Telegram translation ships OFF: every translation surface stays dormant until
+// the user turns on "Telegram 翻译" in HaiTuo settings.
+function webTranslationActive() {
+    return isWhatsApp() || (isTelegram() && settings.telegramTranslationEnabled === !0);
+}
+
+function composerHost(e) {
+    if (!(e instanceof Element)) return null;
+    if (e.closest("footer")) return e.closest("footer");
+    return isTelegram() ? e.closest(".input-container,.input-message-container,.input-field,.chat-input-container,.chat") : null;
+}
+
+function isTelegramGroupChat() {
+    if (!isTelegram()) return !1;
+    if (document.querySelector(".bubbles .peer-title")) return !0;
+    const status = document.querySelector(".topbar .person .status,.topbar .status,.person .status");
+    return /(?:成员|members?|订阅者|subscribers?)/iu.test(String(status?.textContent || ""));
+}
+
+function isGroupConversation() {
+    if (isTelegram()) return isTelegramGroupChat();
+    if (isWhatsApp()) return !!document.querySelector('#main [data-pre-plain-text]');
+    return !1;
+}
+
+// 群组回译 governs group chats; 接收回译 governs one-to-one chats.
+function incomingTranslationOn() {
+    return ((isGroupConversation() ? settings.groupBackTranslationEnabled : settings.autoTranslateIncoming) !== !1) && webTranslationActive();
+}
+
+function recentMessageNodes() {
+    const selector = isTelegram() ? '.bubbles [data-mid],.bubbles .bubble' : '[data-testid="msg-container"],.message-in,.message-out';
+    return [ ...document.querySelectorAll(selector) ];
+}
+
 function editable(e) {
     return e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement || e instanceof HTMLElement && e.isContentEditable;
 }
 
 function usableComposer(e) {
-    if (!editable(e) || !e.isConnected || !e.closest("footer")) return !1;
+    if (!editable(e) || !e.isConnected || !composerHost(e)) return !1;
     const t = e.getBoundingClientRect(), n = getComputedStyle(e);
     return t.width > 80 && t.height > 10 && n.display !== "none" && n.visibility !== "hidden";
 }
 
 function composerFrom(e) {
-    if (!(isWhatsApp() && e instanceof Element)) return null;
+    if (!(webTranslationActive() && e instanceof Element)) return null;
     const t = e.closest('[contenteditable="true"],[contenteditable="plaintext-only"],textarea,input');
     return t && usableComposer(t) ? t : null;
 }
@@ -273,7 +312,10 @@ function composerFrom(e) {
 function findComposer() {
     const e = composerFrom(document.activeElement);
     if (e) return e;
-    const t = [ ...document.querySelectorAll('footer textarea,footer input,footer [contenteditable="true"][role="textbox"],footer [contenteditable="plaintext-only"][role="textbox"],footer [data-lexical-editor="true"][contenteditable="true"],footer [contenteditable="true"]') ].filter(usableComposer);
+    const selector = isTelegram()
+        ? 'footer textarea,footer input,footer [contenteditable="true"],.input-message-input[contenteditable="true"],.input-field [contenteditable="true"],.chat-input-container [contenteditable="true"]'
+        : 'footer textarea,footer input,footer [contenteditable="true"][role="textbox"],footer [contenteditable="plaintext-only"][role="textbox"],footer [data-lexical-editor="true"][contenteditable="true"],footer [contenteditable="true"]';
+    const t = [ ...document.querySelectorAll(selector) ].filter(usableComposer);
     return t.sort((e, t) => t.getBoundingClientRect().bottom - e.getBoundingClientRect().bottom)[0] || null;
 }
 
@@ -290,7 +332,7 @@ async function readClipboardImageFile() {
 }
 
 document.addEventListener("paste", event => {
-    if (!isWhatsApp() || clipboardImagePasteBusy) return;
+    if (!webTranslationActive() || clipboardImagePasteBusy) return;
     const composer = composerFrom(event.target) || findComposer();
     if (!composer || event.clipboardData?.files?.length || [ ...event.clipboardData?.items || [] ].some(e => "file" === e.kind)) return;
     const hasText = !!String(event.clipboardData?.getData("text/plain") || event.clipboardData?.getData("text/html") || "").trim();
@@ -489,7 +531,7 @@ async function translateMessage(e, t = !1) {
     const content = String(e || "").replace(/https?:\/\/\S+|www\.\S+/giu, " ");
     const han = (content.match(/\p{Script=Han}/gu) || []).length;
     const latin = (content.match(/[a-z]+(?:['’][a-z]+)?/giu) || []).length;
-    const n = han > latin ? settings.targetLanguage || "en" : "zh-CN", context = [ ...document.querySelectorAll('[data-testid="msg-container"],.message-in,.message-out') ].slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), o = await ipcRenderer.invoke("caisheng:translate", {
+    const n = han > latin ? settings.targetLanguage || "en" : "zh-CN", context = recentMessageNodes().slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), o = await ipcRenderer.invoke("caisheng:translate", {
         text: e,
         targetLanguage: n,
         provider: t ? "smart-retranslate" : settings.chatTranslationProvider || "google-free",
@@ -571,7 +613,8 @@ function hideBackTranslation() {
 function countMatchingOutgoingMessages(expected) {
     expected = normalized(expected || "");
     if (!expected) return 0;
-    const messages = [ ...document.querySelectorAll('[data-testid="msg-container"].message-out,.message-out[data-id],.message-out') ].slice(-8);
+    const selector = isTelegram() ? ".bubbles .is-out,.bubbles .bubble.is-out" : '[data-testid="msg-container"].message-out,.message-out[data-id],.message-out';
+    const messages = [ ...document.querySelectorAll(selector) ].slice(-8);
     return messages.filter(message => normalized(String(message.innerText || message.textContent || "")).includes(expected)).length;
 }
 
@@ -581,9 +624,9 @@ function backTranslationWasSent() {
 
 function hideBackTranslationForSendControl(event) {
     if (!backTranslationPreview || !(event.target instanceof Element)) return;
-    const composer = backTranslationComposer?.isConnected ? backTranslationComposer : findComposer() || activeComposer, control = event.target.closest('button,[role="button"],[data-testid="compose-btn-send"]');
+    const composer = backTranslationComposer?.isConnected ? backTranslationComposer : findComposer() || activeComposer, control = event.target.closest('button,[role="button"],[data-testid="compose-btn-send"],.btn-send');
     if (!control) return;
-    const exact = !!control.matches('button[aria-label*="Send" i],button[aria-label*="发送"],button[data-testid="compose-btn-send"],[data-testid="compose-btn-send"]') || !!control.querySelector('span[data-icon="send"],[data-icon="send"]');
+    const exact = !!control.matches('button[aria-label*="Send" i],button[aria-label*="发送"],button[data-testid="compose-btn-send"],[data-testid="compose-btn-send"],button.btn-send,.btn-send') || !!control.querySelector('span[data-icon="send"],[data-icon="send"],svg[class*="send" i],.icon-send');
     const candidate = composer && sendButtonFor(composer), composerRect = composer?.getBoundingClientRect(), controlRect = control.getBoundingClientRect(), besideComposer = !!composerRect && controlRect.left >= composerRect.right - 24 && controlRect.top < composerRect.bottom + 30 && controlRect.bottom > composerRect.top - 30;
     if (!exact && candidate !== control && !besideComposer) return;
     hideBackTranslation(), setTimeout(hideBackTranslation, 0), setTimeout(hideBackTranslation, 250), setTimeout(hideBackTranslation, 800);
@@ -643,9 +686,12 @@ function mediaSendButton() {
 function sendButtonFor(e) {
     const m = mediaSendButton();
     if (m) return m;
-    const t = e.closest("footer") || document;
-    for (const e of [ 'button[aria-label*="Send" i]', 'button[aria-label*="发送"]', 'button[data-testid="compose-btn-send"]', '[data-testid="compose-btn-send"]', 'button span[data-icon="send"]', 'span[data-icon="send"]', '[role="button"] [data-icon="send"]' ]) {
-        const n = t.querySelector(e), o = n?.closest('button,[role="button"]') || (n instanceof HTMLElement ? n : null);
+    const t = composerHost(e) || document;
+    const selectors = isTelegram()
+        ? [ 'button.btn-send', '.btn-send', 'button[aria-label*="Send" i]', 'button[aria-label*="发送"]', 'button svg[class*="send" i]', 'button .icon-send' ]
+        : [ 'button[aria-label*="Send" i]', 'button[aria-label*="发送"]', 'button[data-testid="compose-btn-send"]', '[data-testid="compose-btn-send"]', 'button span[data-icon="send"]', 'span[data-icon="send"]', '[role="button"] [data-icon="send"]' ];
+    for (const selector of selectors) {
+        const n = t.querySelector(selector), o = n?.closest('button,[role="button"]') || (n instanceof HTMLElement ? n : null);
         if (o) return o;
     }
     return null;
@@ -658,7 +704,7 @@ async function settleComposer(e, t, allowChinese = !1) {
         if ((allowChinese || !HAN.test(a)) && normalized(a) === normalized(t)) return o;
         8 !== n && 20 !== n || (clearComposer(o), write(o, t));
     }
-    throw new Error("WhatsApp 输入状态同步失败，未发送");
+    throw new Error("输入状态同步失败，未发送");
 }
 
 async function sendOnce(e, t, expectedMode = !!settings.blockChineseOutgoing) {
@@ -671,7 +717,7 @@ async function sendOnce(e, t, expectedMode = !!settings.blockChineseOutgoing) {
     if (button) button.click();
     else {
         e.focus();
-        if (!await ipcRenderer.invoke("caisheng:web-native-send")) throw new Error("无法发送，请使用 WhatsApp 的发送按钮");
+        if (!await ipcRenderer.invoke("caisheng:web-native-send")) throw new Error("无法发送，请使用发送按钮");
     }
     return !0;
 }
@@ -694,9 +740,9 @@ async function run(e, t = null) {
             if (!t.isConnected || findComposer() !== t || read(t).trim() !== n || e && outgoingMode !== !!settings.blockChineseOutgoing) throw new Error("消息框已变化，未覆盖或发送；请重试");
             clearComposer(t), write(t, o), await new Promise(e => setTimeout(e, 40)), t = await settleComposer(t, o, direct);
             if (e && !direct && HAN.test(read(t))) throw new Error("原中文未清除，已停止发送");
-            e || void updateBackTranslation(o, t);
+            e || void (settings.backTranslationEnabled !== !1 && updateBackTranslation(o, t));
             if (e && !await sendOnce(t, o, outgoingMode)) return;
-            if (e && (await new Promise(e => setTimeout(e, 350)), read(t).trim() === o.trim())) throw new Error("WhatsApp 未确认发送，请点击绿色发送按钮");
+            if (e && (await new Promise(e => setTimeout(e, 350)), read(t).trim() === o.trim())) throw new Error("未确认发送，请点击发送按钮");
             toast(e ? direct ? "已发送原文" : "已翻译并发送" : "已翻译并替换"), e && (hidePanels(), hideBackTranslation());
         } catch (e) {
             recentAction = {
@@ -874,7 +920,7 @@ function toggleTranslatorPanel(hidden, composer, event) {
 }
 
 function showPanel(e) {
-    if (!isWhatsApp()) return;
+    if (!webTranslationActive()) return;
     if (activeComposer = e, panel) return positionTranslator(e);
     panel = document.createElement("div"), panel.id = "haituo-whatsapp-translator", 
     Object.assign(panel.style, {
@@ -1013,7 +1059,7 @@ function showPanel(e) {
         quickActionPending = !0; busy.add(composer);
         quickTranslate.disabled = quickRetranslate.disabled = a.disabled = s.disabled = !0, toast(direct ? "正在发送原文…" : forceAi ? "正在结合上下文重新翻译…" : "正在翻译…");
         try {
-            const context = [ ...document.querySelectorAll('[data-testid="msg-container"],.message-in,.message-out') ].slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), result = direct ? { text: source } : forceAi ? await ipcRenderer.invoke("caisheng:translate", { text: source, targetLanguage: settings.targetLanguage || "en", provider: "smart-retranslate", purpose: "input", apiKey: settings.apiKey, groqApiKey: settings.groqApiKey, deepLApiKey: settings.deepLApiKey, context, forceRefresh: !0 }) : { text: await translate(source) }, translated = String(result?.text || "").trim();
+            const context = recentMessageNodes().slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), result = direct ? { text: source } : forceAi ? await ipcRenderer.invoke("caisheng:translate", { text: source, targetLanguage: settings.targetLanguage || "en", provider: "smart-retranslate", purpose: "input", apiKey: settings.apiKey, groqApiKey: settings.groqApiKey, deepLApiKey: settings.deepLApiKey, context, forceRefresh: !0 }) : { text: await translate(source) }, translated = String(result?.text || "").trim();
             if (!translated || !direct && HAN.test(translated)) throw new Error("译文仍含中文，未填入消息框");
             if (!composer.isConnected || findComposer() !== composer || read(composer) !== nativeBefore || sendAfter && outgoingMode !== !!settings.blockChineseOutgoing) throw new Error("消息框已变化，未覆盖或发送；请重试");
             clearComposer(composer), write(composer, translated), await settleComposer(composer, translated, direct);
@@ -1028,13 +1074,13 @@ function showPanel(e) {
                         break;
                     }
                 }
-                if (!sent) throw new Error("WhatsApp 未确认发送，请点击发送按钮重试");
+                if (!sent) throw new Error("未确认发送，请点击发送按钮重试");
                 const currentQuick = document.getElementById("haituo-whatsapp-quick-input");
                 currentQuick && (currentQuick.value = "", currentQuick.dispatchEvent(new Event("input", {
                     bubbles: !0,
                     composed: !0
                 }))), hideBackTranslation(), toast(direct ? "已发送原文" : "已翻译并发送");
-            } else updateBackTranslation(translated, composer), toast("已翻译并自动填入上方输入框");
+            } else (settings.backTranslationEnabled !== !1 ? updateBackTranslation(translated, composer) : void 0), toast("已翻译并自动填入上方输入框");
         } catch (error) {
             toast(error instanceof Error ? error.message : "翻译失败", !0);
         } finally {
@@ -1127,10 +1173,10 @@ document.addEventListener("beforeinput", e => {
     const t = composerFrom(e.target);
     t && (syncPanel(t), backTranslationExpectedText && normalized(read(t)) !== normalized(backTranslationExpectedText) ? hideBackTranslation() : read(t).trim() || hideBackTranslation());
 }, !0), document.addEventListener("click", e => {
-    if (!(isWhatsApp() && e.target instanceof Element)) return;
+    if (!(webTranslationActive() && e.target instanceof Element)) return;
     if (e.target.closest('[data-testid="media-editor"],[role="dialog"]')) return;
     settings.hideTranslationBox || composerFrom(e.target) || panel?.contains(e.target) || settingsPanel?.contains(e.target) || hidePanels();
-    if (e.target.closest('button[aria-label*="Send" i],button[aria-label*="发送"],button[data-testid="compose-btn-send"],[data-testid="compose-btn-send"],span[data-icon="send"]')) {
+    if (e.target.closest('button[aria-label*="Send" i],button[aria-label*="发送"],button[data-testid="compose-btn-send"],[data-testid="compose-btn-send"],span[data-icon="send"],button.btn-send,.btn-send')) {
         const composer = findComposer() || activeComposer;
         hideBackTranslation();
         if (blockChinese(e, composer)) return;
@@ -1165,7 +1211,7 @@ let spaces = 0, spaceAt = 0, lastUnreadCount = null, lastIncomingKey = "", lastU
 
 window.addEventListener("haituo-wa-native-notification", () => {
     lastNativeNotificationAt = Date.now();
-    const count = getWhatsAppUnreadCount(), workspaceId = process.argv.find(e => e.startsWith("--caisheng-web-workspace="))?.slice("--caisheng-web-workspace=".length);
+    const count = isTelegram() ? getTelegramUnreadCount() : getWhatsAppUnreadCount(), workspaceId = process.argv.find(e => e.startsWith("--caisheng-web-workspace="))?.slice("--caisheng-web-workspace=".length);
     ipcRenderer.sendToHost("caisheng:unread-count", { count, increased: !0, incomingChanged: !0, authoritative: count > 0, stableZero: !1, archivedExcluded: !1 });
     workspaceId && ipcRenderer.send("caisheng:web-unread-direct", { id: workspaceId, count, increased: !0, incomingChanged: !0, authoritative: count > 0, stableZero: !1, archivedExcluded: !1 });
     reportWhatsAppUnreadRealtime();
@@ -1242,13 +1288,51 @@ function getWhatsAppUnreadCount() {
     return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
 }
 
+function getTelegramUnreadCount() {
+    if (!isTelegram()) return 0;
+    let count = 0;
+    for (const row of document.querySelectorAll(".chatlist-chat,.chatlist .row,[class*='chatlist-chat']")) {
+        for (const badge of row.querySelectorAll("[class*='badge' i],[class*='unread' i]")) {
+            const value = String(badge.textContent || "").trim();
+            if (!/^\d{1,4}$/u.test(value)) continue;
+            const rect = badge.getBoundingClientRect(), style = getComputedStyle(badge);
+            if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden") continue;
+            count += Number(value);
+            break;
+        }
+    }
+    return count;
+}
+
+function getTelegramIncomingKey() {
+    if (!isTelegram()) return "";
+    const last = [ ...document.querySelectorAll(".bubbles [data-mid]") ].at(-1);
+    if (!last) return "";
+    return `${last.getAttribute("data-mid") || ""}\u0000${String(last.innerText || last.textContent || "").trim().slice(-500)}`;
+}
+
+function getTelegramUnreadKey() {
+    if (!isTelegram()) return "";
+    const parts = [];
+    for (const row of document.querySelectorAll(".chatlist-chat")) {
+        const badge = [ ...row.querySelectorAll("[class*='badge' i],[class*='unread' i]") ].find(node => /^\d{1,4}$/u.test(String(node.textContent || "").trim()));
+        if (!badge) continue;
+        parts.push(`${row.getAttribute("data-mid") || row.innerText?.slice(0, 120) || ""}|${String(badge.textContent || "").trim()}`);
+    }
+    return parts.join("\n");
+}
+
+function webPlatformLabel() {
+    return isTelegram() ? "Telegram" : "WhatsApp";
+}
+
 function reportWhatsAppUnreadRealtime() {
-    if (!isWhatsApp()) return;
+    if (!(isWhatsApp() || isTelegram())) return;
     clearTimeout(unreadObserverTimer), unreadObserverTimer = setTimeout(() => {
-        const count = getWhatsAppUnreadCount(), loaded = !!document.querySelector("#pane-side,[aria-label*='WhatsApp'],[data-testid='chat-list']");
+        const count = isTelegram() ? getTelegramUnreadCount() : getWhatsAppUnreadCount(), loaded = !!document.querySelector("#pane-side,[aria-label*='WhatsApp'],[data-testid='chat-list'],.chatlist,.chatlist-container");
         zeroUnreadScans = count === 0 && loaded ? zeroUnreadScans + 1 : 0;
         const increased = lastUnreadCount !== null && count > lastUnreadCount;
-        if (count > 0) document.title = `(${count}) WhatsApp`;
+        if (count > 0) document.title = `(${count}) ${webPlatformLabel()}`;
         ipcRenderer.sendToHost("caisheng:unread-count", {
             count,
             increased,
@@ -1264,7 +1348,7 @@ function reportWhatsAppUnreadRealtime() {
 }
 
 function installWhatsAppUnreadObserver() {
-    if (!isWhatsApp() || window.__haituoUnreadObserverInstalled || !document.body) return;
+    if ((!isWhatsApp() && !isTelegram()) || window.__haituoUnreadObserverInstalled || !document.body) return;
     window.__haituoUnreadObserverInstalled = !0;
     const observer = new MutationObserver(reportWhatsAppUnreadRealtime);
     observer.observe(document.body, { subtree: !0, childList: !0 });
@@ -1372,12 +1456,12 @@ document.addEventListener("keydown", e => {
         e.preventDefault(), e.stopImmediatePropagation(), run(!1));
     }
 }, !0), refreshSettings(), setInterval(() => {
-    const domCount = getWhatsAppUnreadCount();
+    const domCount = isTelegram() ? getTelegramUnreadCount() : getWhatsAppUnreadCount();
     if (domCount > 0) {
-        const expectedTitle = `(${domCount}) WhatsApp`;
+        const expectedTitle = `(${domCount}) ${webPlatformLabel()}`;
         document.title !== expectedTitle && (document.title = expectedTitle), ipcRenderer.sendToHost("caisheng:unread-count", { count: domCount, increased: lastUnreadCount !== null && domCount > lastUnreadCount, incomingChanged: !1, authoritative: !0, stableZero: !1 });
     }
-    const t = domCount, incomingKey = getWhatsAppIncomingKey(), unreadKey = getWhatsAppUnreadKey();
+    const t = domCount, incomingKey = isTelegram() ? getTelegramIncomingKey() : getWhatsAppIncomingKey(), unreadKey = isTelegram() ? getTelegramUnreadKey() : getWhatsAppUnreadKey();
         const incomingChanged = incomingReady && (incomingKey && incomingKey !== lastIncomingKey || unreadKey && unreadKey !== lastUnreadKey);
         const e = lastUnreadCount !== null && t > lastUnreadCount || incomingChanged && Date.now() - lastNativeNotificationAt > 2500;
         zeroUnreadScans = t === 0 && !e && !incomingChanged && Date.now() - lastNativeNotificationAt > 6000 ? zeroUnreadScans + 1 : 0;
@@ -1429,15 +1513,26 @@ function haituoInstallMessageScanner() {
         regionScanBusy = !0;
         try {
         applyWhatsAppMessageAppearance();
-        const messageCandidates = [...document.querySelectorAll('[data-testid="msg-container"],#main .message-in,#main .message-out,#main [data-id]')]
-            .map(node => node.closest('[data-id],.message-in,.message-out') || node);
+        const messageCandidates = isTelegram()
+            ? [...document.querySelectorAll('.bubbles [data-mid],.bubbles .bubble')].map(node => node.closest('[data-mid]') || node)
+            : [...document.querySelectorAll('[data-testid="msg-container"],#main .message-in,#main .message-out,#main [data-id]')]
+                .map(node => node.closest('[data-id],.message-in,.message-out') || node);
         const visibleMessages = [ ...new Set(messageCandidates) ].filter(e => {
             const t = e.getBoundingClientRect();
             return t.width > 0 && t.height > 0 && t.bottom > 72 && t.top < innerHeight - 86;
         }).slice(-24);
+        // 关闭群组回译/接收回译后，已渲染的译文也要立即撤下，不能只挡住新消息。
+        if (!incomingTranslationOn()) {
+            for (const e of visibleMessages) {
+                if (e.querySelector(".haituo-wa-message-translation,.haituo-wa-translation-error")) {
+                    e.querySelectorAll(".haituo-wa-message-translation,.haituo-wa-translation-error").forEach(node => node.remove());
+                    delete e.dataset.haituoTranslationDone;
+                }
+            }
+        }
         for (const e of visibleMessages) {
-            const voiceTrigger = e.querySelector('audio,button[aria-label*="voice" i],button[aria-label*="audio" i],button[aria-label*="语音"],button[aria-label*="播放"],[data-icon*="audio-play" i],[data-icon*="ptt" i],[data-testid*="audio" i],[data-testid*="voice" i]');
-            if (voiceTrigger && !voiceProcessed.has(voiceTrigger) && !e.querySelector(".haituo-voice-transcribe,.haituo-voice-result")) {
+            const voiceTrigger = e.querySelector('audio,button[aria-label*="voice" i],button[aria-label*="audio" i],button[aria-label*="语音"],button[aria-label*="播放"],[data-icon*="audio-play" i],[data-icon*="ptt" i],[data-testid*="audio" i],[data-testid*="voice" i],[class*="icon-voice" i],.bubble.is-voice');
+            if (voiceTrigger && webTranslationActive() && !voiceProcessed.has(voiceTrigger) && !e.querySelector(".haituo-voice-transcribe,.haituo-voice-result")) {
                 voiceProcessed.add(voiceTrigger);
                 const voiceMount = getVoiceMessageMount(e, voiceTrigger);
                 const voice = document.createElement("button");
@@ -1483,8 +1578,11 @@ function haituoInstallMessageScanner() {
             }
             
         }
-        const quoteSelector = '[data-testid*="quoted" i],[data-testid="quote"],[data-testid="quoted-message"],[aria-label*="Quoted" i],[aria-label*="引用"]';
+        const quoteSelector = isTelegram() ? '.reply,.reply-media,.quiz,.poll' : '[data-testid*="quoted" i],[data-testid="quote"],[data-testid="quoted-message"],[aria-label*="Quoted" i],[aria-label*="引用"]';
         const isQuoted = node => Boolean(node.closest(quoteSelector));
+        const textRootSelector = isTelegram()
+            ? '.translatable-message,.bubble .message[dir="auto"]'
+            : '.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
         const translationTargets = [];
         for (const e of visibleMessages) {
             // One chat bubble is one translation job. Nested selectable spans and
@@ -1496,7 +1594,7 @@ function haituoInstallMessageScanner() {
                 more.click();
                 continue;
             }
-            const candidates = [ ...e.querySelectorAll('.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]') ]
+            const candidates = [ ...e.querySelectorAll(textRootSelector) ]
                 .filter(node => node instanceof HTMLElement && !isQuoted(node) && !node.closest(".haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error"));
             const roots = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node)));
             const n = roots.map(node => {
@@ -1505,6 +1603,7 @@ function haituoInstallMessageScanner() {
                 return copy.textContent?.trim() || "";
             }).filter(Boolean).join("\n\n").trim();
             if (!n || /^\d{1,2}:\d{2}$/.test(n) || /^https?:\/\/\S+$/iu.test(n)) continue;
+            if (!incomingTranslationOn()) continue;
             if (e.dataset.haituoTranslationSource !== n) {
                 e.querySelectorAll(".haituo-wa-message-translation").forEach(node => node.remove());
                 e.dataset.haituoTranslationSource = n;
@@ -1540,6 +1639,7 @@ function haituoInstallMessageScanner() {
         await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
         haituoKeepTranslationPosition(visibleMessages[0], () => {
         for (const item of translated) {
+            if (!incomingTranslationOn()) continue;
             const { e, t, n, r, mount } = item;
             if (e.isConnected && mount?.isConnected && e.dataset.haituoTranslationSource === n) {
                 let status = e.querySelector('.haituo-wa-translation-error');
@@ -1659,7 +1759,9 @@ else document.addEventListener('DOMContentLoaded',haituoObserveTranslatorLayout,
 
 // HAITUO_CHAT_PREVIEW_START
 function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 650 }) {
-    const rows = '#pane-side [role="row"],#pane-side [role="listitem"],#pane-side [data-testid="cell-frame-container"],[data-testid="chat-list"] [role="row"],[aria-label="Chat list"] [role="row"],[aria-label="聊天列表"] [role="row"]';
+    const rows = isTelegram()
+        ? '.chatlist .chatlist-chat,.chatlist-chat,.chatlist a[href],[class*="chatlist-chat"]'
+        : '#pane-side [role="row"],#pane-side [role="listitem"],#pane-side [data-testid="cell-frame-container"],[data-testid="chat-list"] [role="row"],[aria-label="Chat list"] [role="row"],[aria-label="聊天列表"] [role="row"]';
     const cache = new Map(), pending = new Map(), nativeTitles = new Map();
     let active, snapshot, timer, popup, sourceBox, targetBox, sequence = 0, observer;
     const textOf = node => {
@@ -1669,6 +1771,15 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
         return String(title || visible).replace(/\u200e|\u200f/gu, '').trim();
     };
     function read(row) {
+        if (isTelegram()) {
+            const name = String(row.querySelector('.peer-title')?.textContent || '').replace(/\u200e|\u200f/gu, '').trim();
+            const node = row.querySelector('.row-subtitle,.subtitle,.dialog-subtitle,[class*="subtitle" i]');
+            const text = String(node?.textContent || '').replace(/\u200e|\u200f/gu, '').trim();
+            if (!name || !text) return null;
+            // 草稿与"正在输入"属于未发送内容，不进悬停翻译。
+            if (/^(?:草稿|draft|正在输入|输入中|typing|录制语音|recording)/iu.test(text)) return null;
+            return { text, name, node, key: name + '\0' + text };
+        }
         const heading = row.querySelector('[data-testid="cell-frame-title"], [data-testid="cell-frame-primary"] [title], [data-testid="cell-frame-primary"], [role="gridcell"] span[title]') || row.querySelector('span[title]');
         const name = textOf(heading);
         const secondary = row.querySelector('[data-testid="cell-frame-secondary"], [data-testid="chat-list-subtitle"]');
@@ -1764,8 +1875,18 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
 }
 // HAITUO_CHAT_PREVIEW_END
 
-if (location.hostname === 'web.whatsapp.com') {
-    window.__haituoChatPreview = haituoInstallChatHoverPreview({ document, window,
-        translate: text => ipcRenderer.invoke('caisheng:translate', { text, targetLanguage:'zh-CN', provider:settings.chatTranslationProvider || 'google-free', purpose:'chat' })
-    });
+function haituoChatPreviewWanted() {
+    return location.hostname === 'web.whatsapp.com' || (isTelegram() && settings.telegramTranslationEnabled === !0);
 }
+
+function haituoSyncChatPreview() {
+    if (haituoChatPreviewWanted()) {
+        if (!window.__haituoChatPreview) window.__haituoChatPreview = haituoInstallChatHoverPreview({ document, window,
+            translate: text => ipcRenderer.invoke('caisheng:translate', { text, targetLanguage:'zh-CN', provider:settings.chatTranslationProvider || 'google-free', purpose:'chat' })
+        });
+    } else if (window.__haituoChatPreview) {
+        window.__haituoChatPreview.destroy();
+        window.__haituoChatPreview = null;
+    }
+}
+haituoSyncChatPreview();

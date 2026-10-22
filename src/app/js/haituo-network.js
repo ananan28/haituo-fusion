@@ -72,6 +72,9 @@ async function resolveSignalProxy(session, serverUrl, explicit) {
 
 function installWebRecovery(contents, timers = { setTimeout, clearTimeout }) {
   let timer, tries = 0, failed = false;
+  // Weak-network logins can fail repeatedly for minutes; keep retrying with a
+  // capped backoff instead of giving up after three attempts.
+  const delays = [5000, 15000, 30000, 60000, 120000, 180000, 240000, 240000, 240000, 240000];
   const cancel = () => { if (timer) timers.clearTimeout(timer); timer = undefined; };
   contents.on('did-start-loading', () => { cancel(); failed = false; });
   contents.on('did-finish-load', () => { if (!failed) { cancel(); tries = 0; } });
@@ -79,8 +82,8 @@ function installWebRecovery(contents, timers = { setTimeout, clearTimeout }) {
     if (!mainFrame || ![-2, -7, -21, -100, -101, -102, -105, -106, -109, -118, -130].includes(code)) return;
     try { if (!['web.whatsapp.com', 'web.telegram.org'].includes(new URL(url).hostname)) return; } catch { return; }
     failed = true;
-    if (timer || tries >= 3) return;
-    const delay = [5000, 15000, 30000][tries++];
+    if (timer || tries >= delays.length) return;
+    const delay = delays[tries++];
     timer = timers.setTimeout(() => { timer = undefined; if (!contents.isDestroyed()) contents.reload(); }, delay);
   });
   contents.once('destroyed', cancel);
