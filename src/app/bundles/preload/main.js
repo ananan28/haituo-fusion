@@ -235546,7 +235546,11 @@ function haituoApplyNativeRendererAppearance(cfg) {
     document.querySelector(`.CaishengPlatformShell`)?.style.setProperty(`--haituo-account-label-color`,mode===`dark`?`#eeeeee`:`#202020`);
 }
 /* HAITUO_SIGNAL_CHAT_PREVIEW_START */
-;(function(){
+// wrapper.js runs this file via vm.Script and calls the *completion value* as the
+// preload entry function. Top-level expression statements after the big Signal
+// IIFE would clobber that value ("u is not a function"), so everything appended
+// at top level must stay a declaration.
+const haituoSignalChatPreviewInit = (function(){
   if (window.__haituoSignalChatPreview) return;
   window.__haituoSignalChatPreview = true;
   const ROW = '.module-conversation-list__item--contact-or-conversation';
