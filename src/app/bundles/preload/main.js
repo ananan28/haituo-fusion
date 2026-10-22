@@ -230228,11 +230228,14 @@ function haituoCachedSignalTranslation(text) {
             // Weak networks: web accounts (WhatsApp + Telegram) load one at a time,
             // on every platform, instead of hammering the connection in parallel.
             let e = r.filter(e => (e.platformId === `whatsapp` || e.platformId === `telegram`) && bCr(e.platformId, t)), n = e.find(e => qLoaded.includes(e.id) && !qReady.includes(e.id));
-            if (n) return (i = setTimeout(() => qSetReady(t => t.includes(n.id) ? t : [ ...t, n.id ]), 45000), () => clearTimeout(i));
+            if (n) {
+                const ready = setTimeout(() => qSetReady(t => t.includes(n.id) ? t : [ ...t, n.id ]), 45000);
+                return () => clearTimeout(ready);
+            }
             let a = e.find(e => !qLoaded.includes(e.id));
             if (!a) return;
-            let i = setTimeout(() => qSetLoaded(e => e.includes(a.id) ? e : [ ...e, a.id ]), 3500);
-            return () => clearTimeout(i);
+            const load = setTimeout(() => qSetLoaded(e => e.includes(a.id) ? e : [ ...e, a.id ]), 3500);
+            return () => clearTimeout(load);
         }, [ r, t, qLoaded, qReady ]), (0, D9.useEffect)(() => {
             let stopped = !1;
             const scan = async () => {

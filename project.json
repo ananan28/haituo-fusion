@@ -1,8 +1,8 @@
 {
   "name": "Haituo portable development project",
   "versions": {
-    "windows": "1.4.7",
-    "macos": "1.4.7"
+    "windows": "1.4.8",
+    "macos": "1.4.8"
   },
   "signalProtocolVersion": "8.29.0-alpha.1",
   "tools": {
