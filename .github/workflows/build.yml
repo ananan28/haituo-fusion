@@ -39,3 +39,8 @@ jobs:
             macos/out/*.dmg
             macos/verification/**
             source-packages/*.zip
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'windows'
+        with:
+          name: Haituo-windows-unpacked
+          path: windows/out/win-unpacked/**
