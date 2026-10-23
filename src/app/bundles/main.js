@@ -24713,7 +24713,7 @@ function haituoCompatibleEndpoint(value,defaultBase,path){
     if(url.hostname===`api.openai.com`&&(!url.pathname||url.pathname===`/`))return `${url.origin}/v1/${path}`;
     return `${base}/${path}`;
 }
-const HaituoNetwork = require(`../js/haituo-network.js`);
+const HaituoNetwork = require(`../js/haituo-network.js`), HaituoWindowGuards = require(`../js/haituo-window-guards.js`);
 async function haituoTranslationFetch(url, init) {
     // Main renderer intentionally intercepts HTTP(S). Keep that policy intact;
     // trusted service calls use a separate memory-only session with OS proxy support.
@@ -25781,7 +25781,10 @@ function tm() {
     }), p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
         Jp(e.senderFrame?.url ?? ``);
         let n = $p(), r = haituoUnredactConfigPatch(t ?? {}), selectedProvider = r.provider;
-        r.strictProvider = r.purpose === `input` && typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
+        // The configured pool is the single ordered route for chat, input and
+        // retranslate. Only legacy key-only setups keep the strict single
+        // provider choice; with a pool an empty first entry must fall through.
+        r.strictProvider = !n.translationPools && r.purpose === `input` && typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `input` && (selectedProvider = n.inputTranslationProvider || `google-free`);
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `chat` && (selectedProvider = n.chatTranslationProvider || `google-free`);
         let a = {
@@ -25803,15 +25806,16 @@ function tm() {
         return haituoRecordTranslationStatus(result, startedAt), result;
     }), p.ipcMain.removeHandler(`caisheng:webview-translate`), p.ipcMain.handle(`caisheng:webview-translate`, async (e, t, n, i) => {
         Jp(e.senderFrame?.url ?? ``);
+        const stored = $p();
         let r = {
             ...Zp,
-            ...$p(),
+            ...stored,
             text: t,
             targetLanguage: n,
             context: typeof i == `string` ? i.slice(-6000) : typeof i?.context == `string` ? i.context.slice(-6000) : ``,
             purpose: typeof i?.purpose == `string` ? i.purpose : `chat`,
-            provider: typeof i?.provider == `string` ? i.provider : $p().chatTranslationProvider || `google-free`,
-            strictProvider: typeof i?.purpose == `string` && i.purpose === `input` && typeof i?.provider == `string` && !!i.provider.trim() && i.provider !== `auto`
+            provider: typeof i?.provider == `string` ? i.provider : stored.chatTranslationProvider || `google-free`,
+            strictProvider: !stored.translationPools && typeof i?.purpose == `string` && i.purpose === `input` && typeof i?.provider == `string` && !!i.provider.trim() && i.provider !== `auto`
         };
         const startedAt = Date.now();
         const result = r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r));
@@ -28390,6 +28394,12 @@ let caishengSoftRefreshPromise = null;
 
 function caishengSoftRefreshWindow() {
     if (!Z || Z.isDestroyed() || Z.webContents.isDestroyed()) return !1;
+    // Soft refresh reloads the main renderer. Doing that while the window is
+    // hidden resets the UI behind the user's back; resume only when shown.
+    if (!HaituoWindowGuards.keepShellVisibleAllowed({ visible: Z.isVisible(), minimized: Z.isMinimized() })) {
+        X.info(`haituo: soft refresh skipped while window is hidden or minimized`);
+        return !1;
+    }
     if (caishengSoftRefreshPromise) return !0;
     const contents = Z.webContents;
     caishengSoftRefreshPromise = new Promise((resolve, reject) => {
@@ -28514,8 +28524,12 @@ function C_() {
 const haituoSingleInstanceReady = $u !== `signal-main` || p.app.requestSingleInstanceLock();
 
 X.info(`making app single instance`), haituoSingleInstanceReady ? ($u === `signal-main` && (p.app.on(`second-instance`, (e, t) => {
-    n.Lt.isWindows() && (0, I.sendDummyKeystroke)(), Z && (Z.isMinimized() && Z.restore(), 
-    C_(), t_());
+    const showWindow = HaituoWindowGuards.secondInstanceShouldShow(t);
+    X.info(`haituo: second instance`, { showWindow, args: Array.isArray(t) ? t.join(` `) : `` });
+    // The login item starts us with --start-in-tray. If it fires while we are
+    // already running, surfacing the window would pop the app open at sign-in.
+    showWindow && (n.Lt.isWindows() && (0, I.sendDummyKeystroke)(), Z && (Z.isMinimized() && Z.restore(), 
+    C_(), t_()));
     let r = ty(t);
     return r != null && ny(r), !0;
 }), p.app.on(`open-url`, (e, t) => {
@@ -28708,7 +28722,12 @@ async function tv(e, t) {
 }
 
 async function nv() {
-    let {width: e, height: o} = p.screen.getPrimaryDisplay().workAreaSize, c = z_ ? Math.min(z_.width, e) : Y_, l = z_ ? Math.min(z_.height, o) : X_, [u, d, f] = await Promise.all([ F_.get(), a.S(a.y()) ? `#ffffff` : j_(), O_() ]), m = $u !== `signal-main` && (a.S(a.y()) || u === n.ot.MinimizeToAndStartInSystemTray), h = $u === `signal-main`, g = {
+    let {width: e, height: o} = p.screen.getPrimaryDisplay().workAreaSize, c = z_ ? Math.min(z_.width, e) : Y_, l = z_ ? Math.min(z_.height, o) : X_, [u, d, f] = await Promise.all([ F_.get(), a.S(a.y()) ? `#ffffff` : j_(), O_() ]), m = $u !== `signal-main` && (a.S(a.y()) || u === n.ot.MinimizeToAndStartInSystemTray), h = $u === `signal-main`;
+    // The Windows login item always passes --start-in-tray. Starting from the
+    // login item must stay in the tray, otherwise every sign-in pops the app
+    // open on top of whatever the user is doing.
+    const haituoMainStartHidden = h && (process.argv.includes(`--start-in-tray`) || u === n.ot.MinimizeToAndStartInSystemTray);
+    let g = {
         show: !1,
         width: c,
         height: l,
@@ -28762,7 +28781,7 @@ async function nv() {
         Z.webContents.on(`before-mouse-event`,(_event,mouse)=>{if(mouse.type===`mouseDown`)process.send?.({type:`haituo-account-user-activation`})});
     }})(), Z.setMenuBarVisibility(!1), Z.webContents.on(`before-input-event`, rmRefresh), Z.webContents.on(`did-attach-webview`, (e, t) => {
         t.setBackgroundThrottling(!1);
-        HaituoNetwork.installWebRecovery(t);
+        HaituoNetwork.installWebRecovery(t, void 0, message => X.info(`haituo: ${message}`));
         const workspaceId = HaituoWorkspaceBySession.get(t.session);
         workspaceId && (HaituoWebContentsByWorkspace.set(workspaceId, t), t.once(`destroyed`, () => HaituoWebContentsByWorkspace.get(workspaceId) === t && HaituoWebContentsByWorkspace.delete(workspaceId)));
         t.on(`before-input-event`, rmRefresh), t.on(`context-menu`, (e, n) => {
@@ -28868,7 +28887,11 @@ async function nv() {
             });
         }
     }
-    Z.webContents.on(`will-attach-webview`, haituoAttachWebviewHandler), Z.webContents.on(`did-attach-webview`, haituoTrackWebviewGuest), Z.webContents.on(`preload-error`, (e, n, r) => {
+    Z.webContents.on(`will-attach-webview`, haituoAttachWebviewHandler), Z.webContents.on(`did-attach-webview`, haituoTrackWebviewGuest), Z.webContents.on(`did-start-navigation`, (event, url, isInPlace, isMainFrame) => {
+        // A main-frame navigation that the user did not ask for is the
+        // signature of an unexpected refresh; record where and when it happens.
+        isMainFrame && !isInPlace && X.info(`haituo: main renderer navigation`, { url: String(url).slice(0, 200), hidden: !Z.isVisible() || Z.isMinimized() });
+    }), Z.webContents.on(`preload-error`, (e, n, r) => {
         X.error(t.Aa(r)), a.S(a.y()) && p.app.quit();
     }), o_ && o_.setMainWindow(Z), qg = !0, At(Z, H_(), U_(), Q().i18n, X), $u === `signal-main` && !m && (!z_ || z_.maximized) && Z.maximize(), 
     $u === `signal-main` && !m && z_ && z_.fullscreen && Z.setFullScreen(!0), P_ && P_.setMainWindow(Z);
@@ -28964,12 +28987,12 @@ async function nv() {
             if (process.env.HAITUO_MESSAGE_TEST === `1` && h) setTimeout(haituoTestMessageScanning, 1000);
             if (process.env.HAITUO_SETTINGS_TEST === `1` && h) setTimeout(haituoTestSettingsSync, 1000);
             if (process.env.HAITUO_SIGNAL_LIVE_TEST === `1` && h) setTimeout(haituoSignalLiveTest, 1500);
-            h && (X.info(`showing main window`), a.x() && process.env.SIGNAL_MOCK_TESTS_BACKGROUND ? (Z.showInactive(), 
+            h && (X.info(`showing main window`), haituoMainStartHidden ? X.info(`haituo: start-in-tray, main window stays hidden`) : a.x() && process.env.SIGNAL_MOCK_TESTS_BACKGROUND ? (Z.showInactive(), 
             b(), Z.webContents.send(`set-window-focus`, !0)) : Z.show());
         }
     };
     $u === `signal-main` && setTimeout(() => {
-        Z && !Z.isDestroyed() && C_();
+        Z && !Z.isDestroyed() && (haituoMainStartHidden ? X.info(`haituo: start-in-tray, skipping startup show`) : C_());
     }, 2500), n.Lt.isLinux() && n.Lt.isWaylandEnabled() ? Z.webContents.once(`did-finish-load`, async () => {
         X.info(`main window webContents did-finish-load`), x();
     }) : Z.once(`ready-to-show`, async () => {
@@ -29408,9 +29431,18 @@ p.ipcMain.removeHandler(`caisheng:show-settings-window`), p.ipcMain.handle(`cais
     }
 });
 
+let caishengKeepVisibleLogAt = 0;
 function caishengKeepMainShellVisible() {
     if ($u !== `signal-main` || !Z || Z.isDestroyed()) return;
-    Z.isMinimized() && Z.restore(), Z.isVisible() || Z.showInactive();
+    // A refresh, unread scan or child-window sync can run while the app is in
+    // the tray. Layout work is allowed then â€” never restore, show or raise.
+    if (!HaituoWindowGuards.keepShellVisibleAllowed({ visible: Z.isVisible(), minimized: Z.isMinimized() })) {
+        const now = Date.now();
+        if (now - caishengKeepVisibleLogAt > 60000) {
+            caishengKeepVisibleLogAt = now;
+            X.info(`haituo: keepVisible skipped while window is hidden or minimized`);
+        }
+    }
 }
 
 function caishengShowTopMenu(title, items) {
@@ -29525,8 +29557,11 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`æ–°å
     };
 })), p.ipcMain.handle(`caisheng:refresh-signal-profile`, async (e, t) => {
     caishengKeepMainShellVisible();
-    if (t === `signal-main` && process.platform === `darwin`) {
-        p.app.relaunch({args:[...process.argv.slice(1),...(process.env.HAITUO_WINDOW_TEST === `1` ? [`--haituo-verify-main-refresh`] : [])]});
+    // Refreshing the main workspace must never restart Haituo. It used to
+    // relaunch the whole app on macOS, which looked like an unrequested
+    // restart. The CI-only refresh probe still exercises a real relaunch.
+    if (t === `signal-main` && process.platform === `darwin` && process.env.HAITUO_WINDOW_TEST === `1`) {
+        p.app.relaunch({args:[...process.argv.slice(1), `--haituo-verify-main-refresh`]});
         setTimeout(() => p.app.quit(), 100);
         return { ok: true };
     }
@@ -29598,7 +29633,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`æ–°å
 }), p.ipcMain.on(`art-creator:onUploadProgress`, () => {
     sy?.webContents.send(`art-creator:onUploadProgress`);
 }), p.ipcMain.on(`show-window`, () => {
-    C_();
+    Z && !Z.isVisible() && X.info(`haituo: show-window request while the window is hidden`), C_();
 }), p.ipcMain.on(`start-tracking-query-stats`, () => {
     E_.startTrackingQueryStats();
 }), p.ipcMain.on(`stop-tracking-query-stats`, (e, t) => {
@@ -30160,6 +30195,35 @@ async function Wv() {
     };
 }
 
+function haituoDisableLegacyAutoLaunch() {
+    if ($u !== `signal-main` || !n.Lt.isWindows()) return;
+    const marker = (0, s.join)(p.app.getPath(`userData`), `haituo-login-item-cleanup-v154.json`);
+    try {
+        if (z.default.existsSync(marker)) return;
+    } catch {
+        return;
+    }
+    try {
+        // Older builds enabled open-at-login on first run without asking. Remove
+        // every variant we may have registered; the settings toggle can re-add it.
+        for (const args of [ [], [ `--start-in-tray` ], [ `--use-tray-icon` ] ]) p.app.setLoginItemSettings({
+            openAtLogin: !1,
+            args
+        });
+        const stillEnabled = [ [], [ `--start-in-tray` ] ].some(args => p.app.getLoginItemSettings({
+            args
+        }).openAtLogin);
+        if (stillEnabled) return X.warn(`haituo: legacy auto-start entry is still enabled; leaving it for the user to turn off`);
+        z.default.writeFileSync(marker, JSON.stringify({
+            disabledAt: Date.now(),
+            version: p.app.getVersion()
+        }));
+        X.info(`haituo: disabled auto-start inherited from an older version; it stays off until enabled in settings`);
+    } catch (error) {
+        X.warn(`haituo: legacy auto-start cleanup failed: ${error?.message ?? error}`);
+    }
+}
+
 const Gv = `HardwareMediaKeyHandling,${p.app.commandLine.getSwitchValue(`disable-features`)}`;
 
 p.app.commandLine.appendSwitch(`disable-features`, Gv), Uv(), p.app.commandLine.appendSwitch(`lang`, Q().name), 
@@ -30195,13 +30259,11 @@ p.app.on(`ready`, async () => {
     let c = bm.create((0, s.join)(e, `optionalResources`));
     if (await wm.create(c), Om.create(c), km({
         isDevelopment: l_ && !p.app.isPackaged
-    }), n.o(), Uv(), Vv = Rv(e), n.it(n.Lt) && await F_.get() === n.ot.Uninitialized) {
+    }), n.o(), Uv(), Vv = Rv(e), haituoDisableLegacyAutoLaunch(), n.it(n.Lt) && await F_.get() === n.ot.Uninitialized) {
         let e = n.J(n.Lt, p.app.getVersion());
-        X.info(`app.ready: setting system-tray-setting to ${e}`), F_.set(e), Pm(`system-tray-setting`, e), 
-        n.Lt.isWindows() && (X.info(`app.ready: enabling open at login`), p.app.setLoginItemSettings({
-            ...await Wv(),
-            openAtLogin: !0
-        }));
+        // Open-at-login is an explicit user choice. First run must not register
+        // the app to start with Windows; the settings toggle still can.
+        X.info(`app.ready: setting system-tray-setting to ${e}`), F_.set(e), Pm(`system-tray-setting`, e);
     }
     let l = Date.now();
     o_ = new Uh, o_.install(), o_.on(`change:systemTraySetting`, async e => {

@@ -94,10 +94,23 @@ test('P0-03: back-translation (smart-retranslate, purpose chat) stays pool-manag
   assert.equal(strictProviderOf(ctx.__calls[0]), false);
 });
 
-test('P0-03: input translation with an explicit provider keeps strict bypass', async () => {
+test('input translation with a configured pool is unified with chat (strictProvider false)', async () => {
   const ctx = makeCtx(stored);
   await dispatch(ctx, 'caisheng:translate', { provider: 'deepl', purpose: 'input', text: 'hi', targetLanguage: 'zh-CN' });
-  assert.equal(strictProviderOf(ctx.__calls[0]), true, 'explicit input choice must not be overridden by chat pools');
+  assert.equal(strictProviderOf(ctx.__calls[0]), false, 'chat, input and retranslate share the same ordered pool');
+});
+
+test('AI retranslate with a configured pool is pool-managed (main then backup)', async () => {
+  const ctx = makeCtx(stored);
+  await dispatch(ctx, 'caisheng:translate', { provider: 'smart-retranslate', purpose: 'input', text: 'hi', targetLanguage: 'en', forceRefresh: true });
+  assert.equal(strictProviderOf(ctx.__calls[0]), false, 'retranslate must reach the pool instead of the legacy provider list');
+  assert.equal(providerOf(ctx.__calls[0]), 'smart-retranslate');
+});
+
+test('legacy setup without a pool keeps the strict input provider bypass', async () => {
+  const ctx = makeCtx({ inputTranslationProvider: 'google-free', chatTranslationProvider: 'google-free' });
+  await dispatch(ctx, 'caisheng:translate', { provider: 'deepl', purpose: 'input', text: 'hi', targetLanguage: 'zh-CN' });
+  assert.equal(strictProviderOf(ctx.__calls[0]), true, 'no pool means the explicit choice stays authoritative');
 });
 
 test('P0-03: input translation with auto routes to the configured input provider, no strict', async () => {
@@ -127,8 +140,14 @@ test('P0-03: webview-translate defaults to chat semantics (no purpose) → pool-
   assert.equal(strictProviderOf(ctx.__calls[0]), false);
 });
 
-test('P0-03: webview-translate with purpose input + explicit provider keeps strict bypass', async () => {
+test('webview-translate with purpose input + configured pool uses the shared pool', async () => {
   const ctx = makeCtx(stored);
+  await dispatch(ctx, 'caisheng:webview-translate', { purpose: 'input', provider: 'deepl', text: 'hi', targetLanguage: 'zh-CN' });
+  assert.equal(strictProviderOf(ctx.__calls[0]), false);
+});
+
+test('webview-translate without a pool keeps the legacy strict input bypass', async () => {
+  const ctx = makeCtx({ chatTranslationProvider: 'google-free' });
   await dispatch(ctx, 'caisheng:webview-translate', { purpose: 'input', provider: 'deepl', text: 'hi', targetLanguage: 'zh-CN' });
   assert.equal(strictProviderOf(ctx.__calls[0]), true);
 });

@@ -34,16 +34,22 @@ test('Signal respects explicit proxy then the first system/PAC route',async()=>{
   assert.equal(await resolveSignalProxy({resolveProxy:async()=> 'DIRECT; PROXY localhost:7890'},'https://chat.signal.org'),undefined);
 });
 test('web login retries only top-level transient failures, keeps cache, and stops after 10',()=>{
-  const contents=new EventEmitter();let reloads=0,timers=[],cancelled=new Set();contents.reload=()=>reloads++;contents.isDestroyed=()=>false;
-  installWebRecovery(contents,{setTimeout(fn,delay){timers.push({fn,delay});return timers.length},clearTimeout(id){cancelled.add(id)}});
+  const contents=new EventEmitter();let reloads=0,timers=[],cancelled=new Set(),logs=[];contents.reload=()=>reloads++;contents.isDestroyed=()=>false;
+  installWebRecovery(contents,{setTimeout(fn,delay){timers.push({fn,delay});return timers.length},clearTimeout(id){cancelled.add(id)}},message=>logs.push(message));
   contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',false);assert.equal(timers.length,0);
   contents.emit('did-fail-load',{},-202,'certificate','https://web.whatsapp.com',true);assert.equal(timers.length,0);
   for(let i=0;i<12;i++){contents.emit('did-start-loading');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);contents.emit('did-finish-load');if(timers[i])timers[i].fn();}
   assert.equal(reloads,10);assert.deepEqual(timers.map(t=>t.delay),[5000,15000,30000,60000,120000,180000,240000,240000,240000,240000]);
   // Cap holds: further failures without an intervening successful load add nothing.
   contents.emit('did-start-loading');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);contents.emit('did-finish-load');assert.equal(timers.length,10);
-  // A successful load resets the retry budget for the next outage.
+  // Once WhatsApp/Telegram has actually rendered, a later navigation failure
+  // keeps the current page instead of throwing the chat back to its loading screen.
   contents.emit('did-start-loading');contents.emit('did-finish-load');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);
+  assert.equal(timers.length,10,'a rendered page is never auto-reloaded by a later navigation failure');
+  assert.ok(logs.some(message=>/keeping the current page/.test(message)),'the skipped reload is logged');
+  // A renderer crash clears the rendered state, so recovery arms again.
+  contents.emit('render-process-gone');
+  contents.emit('did-start-loading');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);
   assert.equal(timers.length,11);assert.equal(timers[10].delay,5000);contents.emit('destroyed');assert.ok(cancelled.has(11));
 });
 test('web recovery also serves telegram hosts',()=>{

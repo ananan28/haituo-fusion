@@ -72,21 +72,42 @@ async function resolveSignalProxy(session, serverUrl, explicit) {
   } catch { return undefined; }
 }
 
-function installWebRecovery(contents, timers = { setTimeout, clearTimeout }) {
-  let timer, tries = 0, failed = false;
+function installWebRecovery(contents, timers = { setTimeout, clearTimeout }, log = () => {}) {
+  let timer, tries = 0, failed = false, ready = false;
   // Weak-network logins can fail repeatedly for minutes; keep retrying with a
   // capped backoff instead of giving up after three attempts.
   const delays = [5000, 15000, 30000, 60000, 120000, 180000, 240000, 240000, 240000, 240000];
   const cancel = () => { if (timer) timers.clearTimeout(timer); timer = undefined; };
   contents.on('did-start-loading', () => { cancel(); failed = false; });
-  contents.on('did-finish-load', () => { if (!failed) { cancel(); tries = 0; } });
+  contents.on('did-finish-load', () => {
+    if (failed) return;
+    ready = true;
+    cancel();
+    tries = 0;
+  });
+  contents.on('render-process-gone', () => { ready = false; });
   contents.on('did-fail-load', (_event, code, _description, url, mainFrame) => {
     if (!mainFrame || ![-2, -7, -21, -100, -101, -102, -105, -106, -109, -118, -130].includes(code)) return;
-    try { if (!['web.whatsapp.com', 'web.telegram.org'].includes(new URL(url).hostname)) return; } catch { return; }
+    let host;
+    try { host = new URL(url).hostname; } catch { return; }
+    if (!['web.whatsapp.com', 'web.telegram.org'].includes(host)) return;
     failed = true;
+    // A page that already rendered is kept. Reloading it because a later
+    // in-page navigation failed is what made the chat randomly go back to its
+    // loading screen; the web app reconnects on its own.
+    if (ready) {
+      log(`webview navigation failed after the page was ready (${code}); keeping the current page`);
+      return;
+    }
     if (timer || tries >= delays.length) return;
     const delay = delays[tries++];
-    timer = timers.setTimeout(() => { timer = undefined; if (!contents.isDestroyed()) contents.reload(); }, delay);
+    timer = timers.setTimeout(() => {
+      timer = undefined;
+      if (!contents.isDestroyed()) {
+        log(`reloading webview after an initial load failure (${code})`);
+        contents.reload();
+      }
+    }, delay);
   });
   contents.once('destroyed', cancel);
 }
