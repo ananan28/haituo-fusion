@@ -7,16 +7,25 @@ CFG = json.loads((ROOT/'project.json').read_text(encoding='utf-8'))
 
 def run(args, **kwargs):
     args = [str(v) for v in args]
-    if os.name == 'nt' and args[0] == 'npm':
-        args = [shutil.which('npm.cmd') or 'npm.cmd', *args[1:]]
+    if os.name == 'nt' and args[0] in ('npm', 'node'):
+        # CreateProcess does not apply PATHEXT, so a bare 'node'/'npm' only
+        # works when the .exe is on PATH; resolve .cmd shims explicitly.
+        binary = shutil.which(args[0])
+        args = [binary or args[0] + ('.cmd' if args[0] == 'npm' else ''), *args[1:]]
     print('Running:', ' '.join(args), flush=True)
     subprocess.run(args, check=True, **kwargs)
 
 def npm_git_flag():
     # npm ≥12 refuses git dependencies unless explicitly allowed; npm ≤11 has
     # no such switch. Detect the major version so both install paths work.
-    binary = shutil.which('npm.cmd') if os.name == 'nt' else 'npm'
-    version = subprocess.run([binary, '--version'], capture_output=True, text=True, check=True).stdout.strip()
+    if os.name == 'nt':
+        binary = shutil.which('npm.cmd') or shutil.which('npm') or 'npm.cmd'
+    else:
+        binary = shutil.which('npm') or 'npm'
+    try:
+        version = subprocess.run([binary, '--version'], capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return []
     return ['--allow-git=all'] if int(version.split('.')[0]) >= 12 else []
 
 def fetch(url):
@@ -105,7 +114,12 @@ def prepare(target):
         run(['node','--check',app/file])
     return app, tools
 
-WINDOWS_TEST_HOOK_MARKERS = [b'HAITUO_WINDOWS_RUNTIME', b'HAITUO_MESSAGE_TEST']
+# Marker unique to the injected windows/runtime-test-hook.js. The release
+# check must NOT scan for HAITUO_MESSAGE_TEST: that env var is read by
+# product code (message-test protocol handlers live in main.js), so scanning
+# for it would flag every legitimate build and make the sanity check a
+# tautology.
+WINDOWS_TEST_HOOK_MARKERS = [b'HAITUO_WINDOWS_RUNTIME']
 
 def inject_windows_test_hook(app):
     target = app/'bundles/main.js'
@@ -126,6 +140,36 @@ def check_windows_package(marker_present):
     if not marker_present and found:
         raise SystemExit('Release package check failed: runtime test hook present in the final app.asar')
 
+def ensure_electron_dist():
+    # Download the Electron runtime ourselves with verification instead of
+    # letting electron-builder's multipart downloader fetch it: a corrupt
+    # download manifests far later as a missing electron.exe during rename.
+    # electron-builder treats this directory as its download cache, so once
+    # the verified zip exists no network access is needed for this step.
+    import zipfile
+    version = CFG['tools']['electron']
+    dist = ROOT/'.build/electron-dist'
+    dist.mkdir(parents=True, exist_ok=True)
+    zip_name = f'electron-v{version}-win32-x64.zip'
+    target = dist/zip_name
+    if target.exists():
+        try:
+            with zipfile.ZipFile(target) as archive:
+                assert 'electron.exe' in archive.namelist() and archive.testzip() is None
+            return dist
+        except Exception:
+            target.unlink()
+    url = f'https://github.com/electron/electron/releases/download/v{version}/{zip_name}'
+    print(f'Downloading Electron runtime {version} (verified, single stream): {url}', flush=True)
+    data = fetch(url)
+    staging = target.with_name(zip_name + '.part')
+    staging.write_bytes(data)
+    with zipfile.ZipFile(staging) as archive:
+        assert 'electron.exe' in archive.namelist() and archive.testzip() is None, 'electron runtime zip failed verification'
+    staging.rename(target)
+    print(f'Electron runtime verified: {target} ({len(data)} bytes)', flush=True)
+    return dist
+
 def windows(app, tools):
     run([sys.executable,'scripts/prepare-helper.py'])
     run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/test-uninstall.ps1'])
@@ -133,7 +177,7 @@ def windows(app, tools):
         'appId':'com.haituo.desktop','productName':'海拓',
         'protocols':[{'name':'Haituo Signal verification','schemes':['sgnl','signalcaptcha']}],
         'directories':{'app':str(app),'output':'windows/out','buildResources':str(ROOT/'windows/installer')},
-        'electronVersion':CFG['tools']['electron'],'npmRebuild':False,
+        'electronVersion':CFG['tools']['electron'],'electronDist':str(ensure_electron_dist()),'npmRebuild':False,
         'asar':True,'asarUnpack':['**/*.node','**/*.dll','native/*.exe','native/*.ps1'],
         'win':{'target':[{'target':'nsis','arch':['x64']}],
                'icon':str(app/'build/icons/win/icon.ico'),'signAndEditExecutable':False},
@@ -195,14 +239,19 @@ def macos(app, tools):
 def run_windows_tests(app, tools):
     # The release installer is built and verified clean first. Tests then run
     # against a separate hooked build so the shipped artifact never contains
-    # the runtime test hook.
+    # the runtime test hook. Both the installer and win-unpacked of the test
+    # build are discarded afterwards and the release outputs restored, so the
+    # uploaded artifacts always match the verified release package.
     release_dir = ROOT/'windows/out-release'
     shutil.rmtree(release_dir, ignore_errors=True)
     release_dir.mkdir(parents=True)
+    unpacked = ROOT/'windows/out/win-unpacked'
+    release_unpacked = release_dir/'win-unpacked'
     for artifact in (ROOT/'windows/out').glob('*Setup.exe'):
         artifact.rename(release_dir/artifact.name)
+    if unpacked.exists():
+        unpacked.rename(release_unpacked)
     try:
-        shutil.rmtree(ROOT/'windows/out/win-unpacked', ignore_errors=True)
         inject_windows_test_hook(app)
         windows(app, tools)
         check_windows_package(marker_present=True)
@@ -210,17 +259,32 @@ def run_windows_tests(app, tools):
     finally:
         for artifact in (ROOT/'windows/out').glob('*Setup.exe'):
             artifact.unlink()
+        shutil.rmtree(unpacked, ignore_errors=True)
+        if release_unpacked.exists():
+            release_unpacked.rename(unpacked)
         for artifact in release_dir.glob('*Setup.exe'):
             artifact.rename(ROOT/'windows/out'/artifact.name)
         shutil.rmtree(release_dir, ignore_errors=True)
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--target',choices=['windows','macos'],required=True)
-    parser.add_argument('--test',action='store_true');args=parser.parse_args()
+    parser.add_argument('--test',action='store_true')
+    parser.add_argument('--runtime-tests-only',action='store_true',
+        help='skip prepare/build; run the runtime test phase against the staged app from a prior build')
+    args=parser.parse_args()
     if (args.target=='windows' and sys.platform!='win32') or (args.target=='macos' and sys.platform!='darwin'):
         raise SystemExit('Use a matching Windows x64 or macOS ARM64 machine.')
     if args.target=='macos' and platform.machine()!='arm64':
         raise SystemExit('Mac 构建需要 Apple Silicon（arm64）机器，避免产出架构不匹配的原生组件。')
+    if args.runtime_tests_only:
+        app=ROOT/'macos/staging/app';tools=ROOT/'.build/tools'
+        if not app.exists() or not tools.exists():
+            raise SystemExit('--runtime-tests-only requires the staged app from a previous build run.')
+        if args.target=='windows':
+            run_windows_tests(app, tools)
+        else:
+            run([sys.executable,'scripts/test-project.py','--target','macos'])
+        return
     app,tools=prepare(args.target)
     globals()[args.target](app,tools)
     if args.target=='windows':
