@@ -2,11 +2,15 @@
 const providers=new Set(['openai','deepseek','groq','qwen','glm','openrouter','custom','google-free','google-cloud','deepl','mymemory','libre','microsoft']);
 function sanitize(value){if(!value||typeof value!=='object')return undefined;const result={};for(const name of ['primary','backup'])result[name]=(Array.isArray(value[name])?value[name]:[]).filter(p=>p&&providers.has(p.provider)).slice(0,12).map(p=>({provider:p.provider,apiKey:String(p.apiKey||'').trim(),endpoint:String(p.endpoint||'').trim(),model:String(p.model||'').trim(),region:String(p.region||'').trim(),enabled:p.enabled!==false,vision:!!p.vision}));return result}
 function requestFor(entry,request){const compatible=['openai','deepseek','groq','qwen','glm','openrouter','custom'].includes(entry.provider);return {...request,provider:compatible?'openai':entry.provider,apiKey:entry.apiKey,googleCloudApiKey:entry.provider==='google-cloud'?entry.apiKey:'',endpoint:entry.endpoint,model:entry.model,region:entry.region,openaiApiProfiles:[],openaiApiKeys:[],translationPools:undefined,__haituoPool:true}}
-async function run(pools,request,translate,sleep=ms=>new Promise(r=>setTimeout(r,ms))){const errors=[];let primaryProvider;
- const enabled=[];
- for(const group of ['primary','backup'])for(const entry of pools[group]||[])if(entry.enabled!==false)enabled.push([group,entry]);
+async function run(pools,request,translate,sleep=ms=>new Promise(r=>setTimeout(r,ms))){const errors=[];let primaryProvider=(pools.primary||[])[0]?.provider;
+ const all=[];
+ for(const group of ['primary','backup'])for(const entry of pools[group]||[])all.push([group,entry]);
+ let enabled=all.filter(([,entry])=>entry.enabled!==false);
+ // Every entry paused must not brick translation: degrade to the free
+ // channel instead of failing, so a paused pool still yields text.
+ if(!enabled.length&&all.length)enabled=[['free-fallback',{provider:'google-free',apiKey:'',endpoint:'',model:'',region:'',enabled:true}]];
  let seen=0;
- for(const [group,entry] of enabled){primaryProvider ||= entry.provider;seen++;
+ for(const [group,entry] of enabled){seen++;
   const moreRemaining=seen<enabled.length;
   for(let attempt=0;attempt<2;attempt++){
    const startedAt=Date.now();
