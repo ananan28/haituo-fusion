@@ -24991,7 +24991,16 @@ function haituoUnredactConfigPatch(patch) {
             if (!Array.isArray(pools[group])) continue;
             pools[group] = pools[group].map((entry, i) => {
                 if (!entry || typeof entry !== `object` || !isSentinel(entry.apiKey)) return entry;
-                const resolved = resolveSentinel(entry.apiKey, [ `translationPools`, group, String(i), `apiKey` ]);
+                let resolved = resolveSentinel(entry.apiKey, [ `translationPools`, group, String(i), `apiKey` ]);
+                if (resolved === null) {
+                    // Editing inside the masked placeholder turns its path
+                    // into garbage. Fall back to the same position instead of
+                    // wiping the stored key; a valid path always wins, so
+                    // entries can never swap keys. An empty stored value is
+                    // still honoured — no neighbour's key is borrowed.
+                    const fallback = storedAtPath([ `translationPools`, group, String(i), `apiKey` ]);
+                    typeof fallback === `string` && fallback && (resolved = fallback);
+                }
                 if (resolved === null || !resolved) {
                     X.warn(`haituo: clearing a redacted translationPools.${group} entry whose stored original is missing at index ${i}; re-enter the key to recreate it`);
                     return { ...entry, apiKey: `` };

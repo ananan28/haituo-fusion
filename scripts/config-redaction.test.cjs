@@ -168,6 +168,27 @@ test('a pool sentinel whose stored original is missing still clears loudly',()=>
   assert.ok(warns.some(w=>/clearing a redacted translationPools/.test(w)),'the drop must stay loud');
 });
 
+test('a pool key field edited inside the masked placeholder keeps the stored key',()=>{
+  const stored={translationPools:{primary:[{provider:'deepseek',apiKey:SECRET}]}};
+  const {ctx,warns}=makeCtx({stored});
+  const mangled=SENTINEL+':translationPools.primary.0sk-live-appended';
+  const clean=ctx.haituoUnredactConfigPatch({translationPools:{primary:[{provider:'deepseek',apiKey:mangled}]}});
+  assert.equal(clean.translationPools.primary[0].apiKey,SECRET,'an unresolvable path must recover the same position, never wipe it');
+  assert.equal(warns.length,0);
+});
+
+test('a misplaced sentinel never borrows a neighbour key',()=>{
+  const stored={translationPools:{primary:[{provider:'openai',apiKey:'key-first'},{provider:'deepseek',apiKey:''}]}};
+  const {ctx,warns}=makeCtx({stored});
+  const clean=ctx.haituoUnredactConfigPatch({translationPools:{primary:[
+    {provider:'openai',apiKey:SENTINEL+':translationPools.primary.1'},
+    {provider:'deepseek',apiKey:SENTINEL+':translationPools.primary.1'}
+  ]}});
+  assert.equal(clean.translationPools.primary[0].apiKey,'','a valid path to an empty slot stays empty rather than borrowing the neighbour');
+  assert.equal(clean.translationPools.primary[1].apiKey,'');
+  assert.ok(warns.some(w=>/clearing a redacted translationPools/.test(w)));
+});
+
 test('non-object payloads pass through untouched',()=>{
   const {ctx}=makeCtx({});
   assert.equal(ctx.haituoRedactTranslationConfig(null),null);
