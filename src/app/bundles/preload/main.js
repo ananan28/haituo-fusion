@@ -21587,13 +21587,66 @@ http://jedwatson.github.io/classnames
     // freshly typed key lives only in memory and in the main-process store.
     const haituoRedactedSecretV = `__HAITUO_REDACTED__`;
     const haituoSecretFieldNames = [ `apiKey`, `groqApiKey`, `deepLApiKey`, `kepplApiKey`, `deepseekApiKey`, `deepseekApiKeys`, `googleCloudApiKey`, `screenshotApiKey`, `openaiVoiceApiKey` ];
+    // P1-04/P1-05: the sentinel embeds the stable config PATH it replaces
+    // (__HAITUO_REDACTED__:<dotted.path>), mirrored by the main process, so a
+    // bounced sentinel resolves by position against the cached config instead
+    // of a value match — distinct keys are never merged and untouched pool
+    // entries survive an edit.
     function haituoRedactConfigSecrets(e) {
         if (!e || typeof e !== `object`) return e;
         const out = { ...e };
-        for (const field of haituoSecretFieldNames) typeof out[field] === `string` && out[field] && (out[field] = haituoRedactedSecretV);
-        if (Array.isArray(out.openaiApiKeys)) out.openaiApiKeys = out.openaiApiKeys.map(key => typeof key === `string` && key ? haituoRedactedSecretV : key);
-        if (Array.isArray(out.openaiApiProfiles)) out.openaiApiProfiles = out.openaiApiProfiles.map(profile => profile && typeof profile === `object` ? { ...profile, apiKey: typeof profile.apiKey === `string` && profile.apiKey ? haituoRedactedSecretV : profile.apiKey } : profile);
+        for (const field of haituoSecretFieldNames) typeof out[field] === `string` && out[field] && (out[field] = `${haituoRedactedSecretV}:${field}`);
+        const redactPool = (pool, path) => Array.isArray(pool) ? pool.map((entry, i) => entry && typeof entry === `object` ? { ...entry, apiKey: typeof entry.apiKey === `string` && entry.apiKey ? `${haituoRedactedSecretV}:${path}.${i}` : entry.apiKey } : entry) : pool;
+        if (Array.isArray(out.openaiApiKeys)) out.openaiApiKeys = out.openaiApiKeys.map((key, i) => typeof key === `string` && key ? `${haituoRedactedSecretV}:openaiApiKeys.${i}` : key);
+        if (Array.isArray(out.openaiApiProfiles)) out.openaiApiProfiles = redactPool(out.openaiApiProfiles, `openaiApiProfiles`);
+        if (out.translationPools && typeof out.translationPools === `object`) {
+            const pools = { ...out.translationPools };
+            for (const name of [ `primary`, `backup` ]) pools[name] = redactPool(pools[name], `translationPools.${name}`);
+            out.translationPools = pools;
+        }
+        out.screenshotApiPool = redactPool(out.screenshotApiPool, `screenshotApiPool`);
         return out;
+    }
+    function haituoCachedTranslationConfig() {
+        try {
+            return { ...Pve, ...(JSON.parse(localStorage.getItem(Mve) ?? `{}`) || {}) };
+        } catch {
+            return Pve || {};
+        }
+    }
+    function haituoUnredactConfigSecrets(patch, cached) {
+        if (!patch || typeof patch !== `object`) return patch;
+        const DROP = {};
+        const parsePath = value => {
+            if (typeof value !== `string`) return null;
+            if (value === haituoRedactedSecretV) return [];
+            return value.startsWith(`${haituoRedactedSecretV}:`) ? value.slice(haituoRedactedSecretV.length + 1).split(`.`) : null;
+        };
+        const lookup = path => {
+            let node = cached;
+            for (const seg of path) {
+                if (!node || typeof node !== `object`) return void 0;
+                node = node[seg];
+            }
+            return node;
+        };
+        const walk = (value, path) => {
+            if (Array.isArray(value)) return value.map((item, i) => walk(item, path.concat(i))).filter(item => item !== DROP);
+            if (value && typeof value === `object`) {
+                const out = {};
+                for (const key of Object.keys(value)) {
+                    const resolved = walk(value[key], path.concat(key));
+                    if (resolved !== DROP) out[key] = resolved;
+                }
+                return out;
+            }
+            const sentinelPath = parsePath(value);
+            if (sentinelPath === null) return value;
+            let original = lookup(sentinelPath.length ? sentinelPath : path);
+            if (original && typeof original === `object` && !Array.isArray(original) && typeof original.apiKey === `string`) original = original.apiKey;
+            return typeof original === `string` && original && parsePath(original) === null ? original : DROP;
+        };
+        return walk(patch, []);
     }
     function x_() {
         try {
@@ -21673,6 +21726,12 @@ http://jedwatson.github.io/classnames
     // stale save instead of letting an old snapshot clobber newer settings;
     // on rejection we re-read the current config once and resend.
     function haituoSendConfigPatch(patch, baseVersion) {
+        // P1-04/P1-05: resolve every sentinel against the cached config by its
+        // stable path before anything crosses IPC — a sentinel whose original
+        // value is gone is dropped from the patch, never forwarded, so the
+        // sentinel string can never reach a send or storage path. Untouched
+        // fields simply fall out of the patch and main keeps the stored value.
+        patch = haituoUnredactConfigSecrets(patch, haituoCachedTranslationConfig());
         const send = value => window.SignalContext.caishengSetTranslationConfig(value);
         return send(typeof baseVersion == `number` ? { ...patch, __v: baseVersion } : patch).catch(async error => {
             if (!/已被其他窗口更新/u.test(String(error?.message || error))) throw error;

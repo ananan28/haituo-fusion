@@ -90,7 +90,7 @@ test('verified encryption round-trip upgrades a plaintext file (macOS migration)
   assert.equal(again.model,'gpt-4.1-mini');
 });
 
-test('decryption failure keeps the file; the next save backs it up instead of clobbering',()=>{
+test('P0-02: decryption failure keeps the file; the write gate refuses to replace it with defaults',()=>{
   const warns=[];
   const files={[FILE]:ENCRYPTED_SETTINGS};
   const broken=goodStorage();
@@ -99,45 +99,42 @@ test('decryption failure keeps the file; the next save backs it up instead of cl
   assert.deepEqual(first.ctx.haituoProtectedRead(FILE,{}),{},'unreadable config must fall back to defaults for this boot');
   assert.equal(first.mem.files.get(FILE),ENCRYPTED_SETTINGS,'the encrypted file must be preserved byte for byte');
   warns.length=0;
-  // Settings must remain changeable: the original is backed up once, then the
-  // new save lands. (The pre-1.5.0 "refuse forever" behavior bricked every
-  // later settings change until manual cleanup.)
-  assert.equal(first.ctx.haituoProtectedWrite(FILE,{apiKey:'new-key'}),true);
-  const backup=[...first.mem.files.keys()].find(p=>p.startsWith(FILE+'.unreadable-'));
-  assert.ok(backup,'an unreadable original must be backed up before being replaced');
-  assert.equal(first.mem.files.get(backup),ENCRYPTED_SETTINGS,'backup holds the original bytes');
-  assert.equal(JSON.parse(first.mem.files.get(FILE)).apiKey,'new-key','the new save lands');
-  assert.ok(warns.some(w=>/backed up to/.test(w)),'the backup must be announced');
-  for(const w of warns) assert.ok(!w.includes(SECRET)&&!w.includes('new-key'),'logs must never contain secret material: '+w);
-  const backupsBefore=[...first.mem.files.keys()].filter(p=>p.startsWith(FILE+'.unreadable-')).length;
-  first.ctx.haituoProtectedWrite(FILE,{apiKey:'newer-key'});
-  const backupsAfter=[...first.mem.files.keys()].filter(p=>p.startsWith(FILE+'.unreadable-')).length;
-  assert.equal(backupsAfter,backupsBefore,'one backup per session, no backup spam');
-  // Keychain healed after restart: a later boot reads the fresh file fine.
-  const healed=makeCtx({files:Object.fromEntries(first.mem.files),safeStorage:goodStorage(),warns:[]});
-  assert.equal(healed.ctx.haituoProtectedRead(FILE,{}).apiKey,'newer-key');
+  // P0-02: no auto-reset. A save that would replace the unreadable original
+  // with in-memory defaults is refused; recovery (post-ready decrypt or the
+  // .unreadable-* backup restore) is what brings the real settings back.
+  assert.equal(first.ctx.haituoProtectedWrite(FILE,{apiKey:'new-key'}),false,'the write gate must refuse to overwrite an unreadable original');
+  assert.equal(first.mem.files.get(FILE),ENCRYPTED_SETTINGS,'the original bytes survive the refused write');
+  assert.ok(warns.some(w=>/refusing to overwrite/.test(w)),'the refusal must be loud');
+  for(const w of warns) assert.ok(!w.includes(SECRET),'logs must never contain secret material: '+w);
+  const backups=[...first.mem.files.keys()].filter(p=>p.startsWith(FILE+'.unreadable-'));
+  assert.equal(backups.length,0,'no backup is manufactured by a refused write');
 });
 
-test('decrypt refuses during startup are retried until the app is ready (no settings reset)',()=>{
-  const warns=[];
+test('P0-02: pre-ready decrypt refuses defer the read instead of blocking startup',()=>{
+  const warns=[],infos=[];
   const files={[FILE]:ENCRYPTED_SETTINGS};
-  const flaky=goodStorage();
-  let failures=3;
+  let calls=0;
   const storage={
     isEncryptionAvailable:()=>true,
-    encryptString:v=>flaky.encryptString(v),
-    decryptString:b=>{ if(failures>0){failures--;throw Error('not ready yet')} return flaky.decryptString(b) },
+    encryptString:v=>goodStorage().encryptString(v),
+    decryptString:b=>{calls++;throw Error('not ready yet')},
   };
   const ctx={Buffer,console,JSON,Date,
     process:{platform:'win32',pid:4242},
     p:{app:{isReady:()=>false},safeStorage:storage},
     m:memfs(files),
     s:{dirname:p=>p.split('/').slice(0,-1).join('/')||'/',basename:p=>String(p).split('/').pop()},
-    X:{info(){},warn(...a){warns.push(a.join(' '))},error(){}},
+    X:{info(...a){infos.push(a.join(' '))},warn(...a){warns.push(a.join(' '))},error(){}},
+    __FILE:FILE,
   };
   vm.createContext(ctx);
   vm.runInContext(slice,ctx);
-  assert.equal(ctx.haituoProtectedRead(FILE,{}).apiKey,SECRET,'startup decrypt hiccups must not reset settings');
+  const started=Date.now();
+  assert.deepEqual(ctx.haituoProtectedRead(FILE,{}),{},'pre-ready the read defers to defaults');
+  assert.ok(Date.now()-started<250,'pre-ready read must return immediately, never burn 2.75s of blocking retries');
+  assert.equal(calls,0,'pre-ready read must not even attempt decrypt');
+  assert.equal(vm.runInContext('HaituoProtectedDeferred.has(__FILE)',ctx),true,'the file must be registered for post-ready recovery');
+  assert.ok(infos.some(w=>/read deferred until app ready/.test(w)),'the deferral must be logged');
 });
 
 test('after the app is ready a decrypt failure is real: blocked at once, no retry storm',()=>{
@@ -159,18 +156,16 @@ test('after the app is ready a decrypt failure is real: blocked at once, no retr
   assert.equal(calls,1,'ready-state failures must not be retried');
 });
 
-test('corrupt JSON is an unreadable original: kept, backed up on save, never silently replaced',()=>{
+test('P0-02: corrupt JSON is an unreadable original: kept on disk, the write gate refuses to replace it',()=>{
   const warns=[];
   const files={[FILE]:'{"apiKey":"'+SECRET+'", broken'};
   const {ctx,mem}=makeCtx({files,safeStorage:goodStorage(),warns});
   assert.deepEqual(ctx.haituoProtectedRead(FILE,{ok:1}),{ok:1});
   assert.equal(mem.files.get(FILE),files[FILE],'corrupt file stays untouched on read');
   warns.length=0;
-  assert.equal(ctx.haituoProtectedWrite(FILE,{fresh:true}),true,'save still lands');
-  const backup=[...mem.files.keys()].find(p=>p.startsWith(FILE+'.unreadable-'));
-  assert.ok(backup,'corrupt original must be backed up before replacement');
-  assert.equal(mem.files.get(backup),files[FILE]);
-  assert.deepEqual(ctx.haituoProtectedRead(FILE,{}),{fresh:true},'fresh settings land and read back');
+  assert.equal(ctx.haituoProtectedWrite(FILE,{fresh:true}),false,'P0-02: a save over an unreadable original must be refused, not silently replace it');
+  assert.equal(mem.files.get(FILE),files[FILE],'corrupt original survives the refused write for salvage');
+  assert.ok(warns.some(w=>/refusing to overwrite/.test(w)),'the refusal must be loud');
 });
 
 test('empty decryption result is a failure, not an empty config',()=>{
@@ -180,10 +175,11 @@ test('empty decryption result is a failure, not an empty config',()=>{
   const {ctx,mem}=makeCtx({files:{[FILE]:ENCRYPTED_SETTINGS},safeStorage:storage,warns});
   assert.deepEqual(ctx.haituoProtectedRead(FILE,{}),{});
   assert.equal(mem.files.get(FILE),ENCRYPTED_SETTINGS);
-  // A later save backs the empty-decrypt file up and proceeds.
-  assert.equal(ctx.haituoProtectedWrite(FILE,{x:1}),true);
-  const backup=[...mem.files.keys()].find(p=>p.startsWith(FILE+'.unreadable-'));
-  assert.ok(backup);
+  // P0-02: the write gate refuses to replace it; recovery owns the restore.
+  assert.equal(ctx.haituoProtectedWrite(FILE,{x:1}),false);
+  assert.equal(mem.files.get(FILE),ENCRYPTED_SETTINGS);
+  const backups=[...mem.files.keys()].filter(p=>p.startsWith(FILE+'.unreadable-'));
+  assert.equal(backups.length,0);
 });
 
 test('every encryption failure mode still saves a readable plaintext file',()=>{

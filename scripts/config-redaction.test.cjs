@@ -38,15 +38,23 @@ test('redaction replaces every secret field but keeps ordinary settings',()=>{
     screenshotApiKey:'sh-'+SECRET,openaiVoiceApiKey:'v-'+SECRET,
     openaiApiKeys:[SECRET,''],
     openaiApiProfiles:[{apiKey:SECRET,endpoint:'https://api.example.test/v1',model:'m1'},{apiKey:'',endpoint:'',model:''}],
+    translationPools:{primary:[{apiKey:SECRET,endpoint:'https://p.test/v1',model:'pm'}],backup:[{apiKey:'',endpoint:'',model:''}]},
+    screenshotApiPool:[{apiKey:SECRET,endpoint:'https://s.test/v1',model:'sm'}],
     targetLanguage:'en',chatFontSize:17,chatTranslationProvider:'openai'
   });
+  // P1-04/05: sentinels embed a stable dotted path — index identity, so a
+  // save can put the exact stored secret back without ever matching by value.
   for(const field of ['apiKey','groqApiKey','deepLApiKey','kepplApiKey','deepseekApiKey','deepseekApiKeys','googleCloudApiKey','screenshotApiKey','openaiVoiceApiKey'])
-    assert.equal(redacted[field],SENTINEL,field+' must be redacted');
+    assert.equal(redacted[field],SENTINEL+':'+field,field+' must be redacted with its stable path');
   assert.equal(redacted.apiKey.includes(SECRET),false);
-  assert.deepEqual(redacted.openaiApiKeys,[SENTINEL,'']);
-  assert.equal(redacted.openaiApiProfiles[0].apiKey,SENTINEL,'profile key must be redacted');
+  assert.deepEqual(redacted.openaiApiKeys,[SENTINEL+':openaiApiKeys.0','']);
+  assert.equal(redacted.openaiApiProfiles[0].apiKey,SENTINEL+':openaiApiProfiles.0','profile key must be redacted with its stable path');
   assert.equal(redacted.openaiApiProfiles[0].endpoint,'https://api.example.test/v1','profile endpoint is not a secret');
   assert.equal(redacted.openaiApiProfiles[0].model,'m1','profile model is not a secret');
+  assert.equal(redacted.translationPools.primary[0].apiKey,SENTINEL+':translationPools.primary.0','P1-04 pool key must be redacted');
+  assert.equal(redacted.translationPools.primary[0].endpoint,'https://p.test/v1');
+  assert.equal(redacted.translationPools.backup[0].apiKey,'','empty pool key stays empty, no sentinel');
+  assert.equal(redacted.screenshotApiPool[0].apiKey,SENTINEL+':screenshotApiPool.0','P1-04 screenshot pool key must be redacted');
   assert.equal(redacted.targetLanguage,'en','ordinary settings pass through');
   assert.equal(redacted.chatFontSize,17);
   assert.equal(redacted.chatTranslationProvider,'openai');
@@ -58,7 +66,7 @@ test('broadcast to renderers carries only the sentinel for secrets',()=>{
   assert.equal(sentFrames.length,2,'one frame per webContents');
   for(const frame of sentFrames){
     assert.equal(frame.channel,'caisheng:translation-config-changed');
-    assert.equal(frame.payload.apiKey,SENTINEL);
+    assert.equal(frame.payload.apiKey,SENTINEL+':apiKey');
     assert.equal(frame.payload.targetLanguage,'de');
   }
 });
@@ -72,32 +80,41 @@ test('a save bouncing the sentinel keeps the stored secret',()=>{
   assert.equal(clean.targetLanguage,'fr','ordinary patch fields pass through');
 });
 
-test('redacted profiles inherit the stored key while endpoint+model match',()=>{
+test('redacted profiles restore their own stored key by position, never a neighbour’s',()=>{
   const stored={openaiApiProfiles:[{apiKey:SECRET,endpoint:'https://a.test/v1',model:'m1'},{apiKey:'key-2',endpoint:'https://b.test/v1',model:'m2'}]};
   const {ctx,warns}=makeCtx({stored});
   const clean=ctx.haituoUnredactConfigPatch({openaiApiProfiles:[
-    {apiKey:SENTINEL,endpoint:'https://a.test/v1',model:'m1'},
-    {apiKey:SENTINEL,endpoint:'https://b.test/v1',model:'m2'}
+    {apiKey:SENTINEL+':openaiApiProfiles.0',endpoint:'https://a.test/v1',model:'m1'},
+    {apiKey:SENTINEL+':openaiApiProfiles.1',endpoint:'https://b.test/v1',model:'m2'}
   ]});
   const home=JSON.parse(JSON.stringify(clean.openaiApiProfiles));
   assert.deepEqual(home,[{apiKey:SECRET,endpoint:'https://a.test/v1',model:'m1'},{apiKey:'key-2',endpoint:'https://b.test/v1',model:'m2'}]);
   assert.equal(warns.length,0);
 });
 
-test('a profile moved without retyping its key is dropped, never poisoned',()=>{
+test('P1-06: two different redacted keys are never merged into one',()=>{
+  const stored={openaiApiKeys:['key-AAAA','key-BBBB']};
+  const {ctx}=makeCtx({stored});
+  const clean=ctx.haituoUnredactConfigPatch({openaiApiKeys:[SENTINEL+':openaiApiKeys.0',SENTINEL+':openaiApiKeys.1']});
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),['key-AAAA','key-BBBB'],'each position restores its own stored secret');
+});
+
+test('a profile edited (moved) without retyping its key keeps the stored key — dropped only when nothing was stored there',()=>{
   const stored={openaiApiProfiles:[{apiKey:SECRET,endpoint:'https://a.test/v1',model:'m1'}]};
   const {ctx,warns}=makeCtx({stored});
-  const clean=ctx.haituoUnredactConfigPatch({openaiApiProfiles:[{apiKey:SENTINEL,endpoint:'https://new.test/v1',model:'m9'}]});
-  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiProfiles)),[],'unmatched redacted profile must not be stored with the sentinel as its key');
+  const moved=ctx.haituoUnredactConfigPatch({openaiApiProfiles:[{apiKey:SENTINEL+':openaiApiProfiles.0',endpoint:'https://new.test/v1',model:'m9'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(moved.openaiApiProfiles)),[{apiKey:SECRET,endpoint:'https://new.test/v1',model:'m9'}],'P1-06: positional restore must not drop or poison a moved profile');
+  const orphan=ctx.haituoUnredactConfigPatch({openaiApiProfiles:[{apiKey:SENTINEL+':openaiApiProfiles.7',endpoint:'https://x.test/v1',model:'mx'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(orphan.openaiApiProfiles)),[],'a sentinel whose stored original does not exist must be dropped, never stored as the sentinel');
   assert.ok(warns.some(w=>/re-enter the key/.test(w)),'the drop must be loud');
   for(const w of warns)assert.ok(!w.includes(SECRET),'logs must never leak the key: '+w);
 });
 
-test('legacy openaiApiKeys entries round-tripped as the sentinel are filtered',()=>{
+test('openaiApiKeys entries bounced as sentinels restore positionally; real edits win',()=>{
   const stored={openaiApiKeys:[SECRET,'key-2']};
   const {ctx}=makeCtx({stored});
-  const clean=ctx.haituoUnredactConfigPatch({openaiApiKeys:[SENTINEL,'fresh-real-key']});
-  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),['fresh-real-key']);
+  const clean=ctx.haituoUnredactConfigPatch({openaiApiKeys:[SENTINEL+':openaiApiKeys.0','fresh-real-key']});
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),[SECRET,'fresh-real-key'],'P1-05: a bounced sentinel must not wipe the stored key');
 });
 
 test('non-object payloads pass through untouched',()=>{

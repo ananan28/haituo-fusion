@@ -38,7 +38,14 @@ function sliceBalanced(startMarker) {
   throw Error(`unbalanced ${startMarker}`);
 }
 
-const decryptCode = sliceFn('function haituoDecryptWithStartupRetry', 'function haituoArmSqlInitWatchdog');
+// P0-02: the old blocking pre-ready retry (haituoDecryptWithStartupRetry +
+// Atomics.wait) froze the ready event and wiped settings on every restart.
+// The bundle must now defer encrypted reads pre-ready (never blocking, never
+// even attempting decrypt) and only decrypt single-shot once ready.
+const readyCode = sliceFn('function haituoAppReady', 'function haituoDecryptProtectedPayload');
+const describeCode = sliceFn('function haituoProtectedDescribeError', 'function haituoAppReady');
+const decryptPayloadCode = sliceFn('function haituoDecryptProtectedPayload', 'async function haituoDecryptAfterReady');
+const protectedReadCode = sliceFn('function haituoProtectedRead(file, fallback)', 'function haituoProtectedWrite');
 const watchdogCode = sliceBalanced('function haituoArmSqlInitWatchdog');
 const versionCode = `var HaituoConfigVersion = 0;\n` + sliceBalanced('function haituoNextConfigVersion');
 const setHandlerCode = sliceFn(
@@ -61,55 +68,83 @@ function recorder() {
   };
 }
 
-function makeDecryptCtx({ failTimes = Infinity, appReady = false } = {}) {
+function makeProtectedReadCtx({ appReady = false, decryptError = null } = {}) {
   const log = recorder();
   let decryptCalls = 0;
   const ctx = {
     console, JSON, Math, Date, RegExp, Error, String, Number, Array, Object, Boolean, Buffer, Promise, setTimeout, clearTimeout,
     p: {
+      app: { isReady: () => appReady },
       safeStorage: {
         decryptString: data => {
           decryptCalls += 1;
-          if (decryptCalls <= failTimes) throw Error(`keychain unavailable (mock)`);
-          return `decrypted:payload`;
+          if (decryptError) throw decryptError;
+          return `{"chatTranslationProvider":"deepl","targetLanguage":"fr","__real":1}`;
         },
       },
     },
-    haituoAppReady: () => appReady,
-    haituoSleepSync: () => {},
+    m: { readFileSync: null },
+    s: { basename: f => String(f).split('/').pop(), dirname: f => String(f).slice(0, String(f).lastIndexOf('/')) || '/', join: (...parts) => parts.join('/') },
     X: log,
+    __files: new Map(),
+  };
+  ctx.m.readFileSync = file => {
+    if (!ctx.__files.has(file)) {
+      const error = new Error(`ENOENT: no such file`);
+      error.code = 'ENOENT';
+      throw error;
+    }
+    return ctx.__files.get(file);
   };
   ctx.__log = log;
   ctx.__decryptCalls = () => decryptCalls;
   vm.createContext(ctx);
-  vm.runInContext(decryptCode, ctx);
+  vm.runInContext(
+    `var HaituoProtectedBlockedFiles = new Set(), HaituoProtectedReadOk = new Set(), HaituoProtectedDeferred = new Map();\n` +
+    describeCode + readyCode + decryptPayloadCode + protectedReadCode,
+    ctx
+  );
   return ctx;
 }
 
-test('R2: decrypt retry succeeds once keychain wakes up and logs the retry', () => {
-  const ctx = makeDecryptCtx({ failTimes: 2, appReady: false });
-  const result = vm.runInContext(`haituoDecryptWithStartupRetry('AAAA')`, ctx);
-  assert.equal(result.ok, true);
-  assert.equal(result.value, 'decrypted:payload');
-  assert.equal(ctx.__decryptCalls(), 3, 'must retry rather than reset to defaults');
-  const warns = ctx.__log.entries.filter(e => e[0] === 'warn').map(e => String(e[1]));
-  assert.ok(warns.some(w => w.includes('retrying while the app is still starting')), 'attempt-0 failure must be logged');
+test('P0-02: pre-ready encrypted read defers without blocking and never attempts decrypt', () => {
+  const ctx = makeProtectedReadCtx({ appReady: false, decryptError: Error('safeStorage cannot be used before app is ready') });
+  ctx.__files.set('/cfg/translation-settings.json', JSON.stringify({ haituoEncrypted: 1, data: 'AAAA' }));
+  const started = Date.now();
+  const result = vm.runInContext(`haituoProtectedRead('/cfg/translation-settings.json', {})`, ctx);
+  const elapsed = Date.now() - started;
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {}, 'fallback returned immediately');
+  assert.ok(elapsed < 300, `pre-ready read must not block (took ${elapsed}ms; the old loop burned 2.75s)`);
+  assert.equal(ctx.__decryptCalls(), 0, 'pre-ready read must not even attempt decrypt');
+  const deferred = vm.runInContext(`HaituoProtectedDeferred.has('/cfg/translation-settings.json')`, ctx);
+  assert.equal(deferred, true, 'file must be registered for post-ready recovery');
+  const readOk = vm.runInContext(`HaituoProtectedReadOk.has('/cfg/translation-settings.json')`, ctx);
+  assert.equal(readOk, false, 'a deferred file must not be writable');
+  const infos = ctx.__log.entries.filter(e => e[0] === 'info').map(e => String(e[1]));
+  assert.ok(infos.some(w => w.includes('read deferred until app ready')), 'deferral must be logged');
 });
 
-test('R2: decrypt gives up after a bounded number of pre-ready retries', () => {
-  const ctx = makeDecryptCtx({ failTimes: Infinity, appReady: false });
-  const result = vm.runInContext(`haituoDecryptWithStartupRetry('AAAA')`, ctx);
-  assert.equal(result.ok, false);
-  assert.equal(ctx.__decryptCalls(), 12, 'bounded retry count (attempts 0..11)');
-  const warns = ctx.__log.entries.filter(e => e[0] === 'warn').map(e => String(e[1]));
-  assert.ok(warns.some(w => w.includes('gave up after 12 attempts')), 'give-up must be logged with attempt count');
+test('P0-02: post-ready encrypted read decrypts single-shot and opens the write gate', () => {
+  const ctx = makeProtectedReadCtx({ appReady: true });
+  ctx.__files.set('/cfg/translation-settings.json', JSON.stringify({ haituoEncrypted: 1, data: 'AAAA' }));
+  const result = vm.runInContext(`haituoProtectedRead('/cfg/translation-settings.json', {})`, ctx);
+  assert.equal(result.__real, 1, 'real decrypted config returned');
+  assert.equal(result.targetLanguage, 'fr');
+  assert.equal(ctx.__decryptCalls(), 1, 'single-shot decrypt once ready');
+  const readOk = vm.runInContext(`HaituoProtectedReadOk.has('/cfg/translation-settings.json')`, ctx);
+  assert.equal(readOk, true);
 });
 
-test('R2: failure after app-ready returns immediately (no fixed delay masking)', () => {
-  const ctx = makeDecryptCtx({ failTimes: Infinity, appReady: true });
-  const result = vm.runInContext(`haituoDecryptWithStartupRetry('AAAA')`, ctx);
-  assert.equal(result.ok, false);
-  assert.equal(ctx.__decryptCalls(), 1, 'post-ready failure must not be hidden by retrying');
+test('P0-02: post-ready keychain denial keeps the file untouched and unwritable', () => {
+  const ctx = makeProtectedReadCtx({ appReady: true, decryptError: Error('Keychain denies access') });
+  ctx.__files.set('/cfg/translation-settings.json', JSON.stringify({ haituoEncrypted: 1, data: 'AAAA' }));
+  const result = vm.runInContext(`haituoProtectedRead('/cfg/translation-settings.json', { marker: 1 })`, ctx);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { marker: 1 }, 'fallback returned');
+  assert.equal(ctx.__decryptCalls(), 1, 'no retry loop masking a real post-ready failure');
+  const blocked = vm.runInContext(`HaituoProtectedBlockedFiles.has('/cfg/translation-settings.json')`, ctx);
+  assert.equal(blocked, true, 'denied file marked blocked');
+  const deferred = vm.runInContext(`HaituoProtectedDeferred.has('/cfg/translation-settings.json')`, ctx);
+  assert.equal(deferred, true, 'denied file stays in recovery set');
 });
 
 function makeWatchdogCtx() {

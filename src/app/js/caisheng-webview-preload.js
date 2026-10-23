@@ -1,4 +1,14 @@
 "use strict";
+// P0-01/P2-11: report real user gestures (record-button clicks) to the main
+// process so the media permission gate can distinguish "user just clicked
+// record" from silent probes. before-input-event alone is not reliably
+// delivered inside webviews, so the page reports pointer/key activity too.
+try {
+    const haituoGestureIpc = require("electron").ipcRenderer;
+    const haituoReportGesture = () => { try { haituoGestureIpc.send("haituo-user-gesture"); } catch {} };
+    addEventListener("pointerdown", haituoReportGesture, { passive: !0, capture: !0 });
+    addEventListener("keydown", haituoReportGesture, { passive: !0, capture: !0 });
+} catch {}
 // Translation-only layout transaction. Never observe or continuously write scrollTop.
 function haituoTranslationScroller(node) {
     for(let parent=node?.parentElement;parent;parent=parent.parentElement) {

@@ -24910,35 +24910,91 @@ const HaituoRedactedSecret = `__HAITUO_REDACTED__`;
 const HaituoSecretConfigFields = [ `apiKey`, `groqApiKey`, `deepLApiKey`, `kepplApiKey`, `deepseekApiKey`, `deepseekApiKeys`, `googleCloudApiKey`, `screenshotApiKey`, `openaiVoiceApiKey` ];
 
 function haituoRedactTranslationConfig(config) {
+    // P1-04: redaction is recursive over the pool shapes too, and every
+    // sentinel embeds a stable dotted path (its position in this config), so
+    // unredaction restores by index identity — never by content matching,
+    // which is what merged different keys (P1-06).
     if (!config || typeof config !== `object`) return config;
     const redacted = { ...config };
-    for (const field of HaituoSecretConfigFields) typeof redacted[field] === `string` && redacted[field] && (redacted[field] = HaituoRedactedSecret);
-    if (Array.isArray(redacted.openaiApiKeys)) redacted.openaiApiKeys = redacted.openaiApiKeys.map(key => typeof key === `string` && key ? HaituoRedactedSecret : key);
-    if (Array.isArray(redacted.openaiApiProfiles)) redacted.openaiApiProfiles = redacted.openaiApiProfiles.map(profile => profile && typeof profile === `object` ? { ...profile, apiKey: typeof profile.apiKey === `string` && profile.apiKey ? HaituoRedactedSecret : profile.apiKey } : profile);
+    for (const field of HaituoSecretConfigFields) typeof redacted[field] === `string` && redacted[field] && (redacted[field] = `${HaituoRedactedSecret}:${field}`);
+    if (Array.isArray(redacted.openaiApiKeys)) redacted.openaiApiKeys = redacted.openaiApiKeys.map((key, i) => typeof key === `string` && key ? `${HaituoRedactedSecret}:openaiApiKeys.${i}` : key);
+    if (Array.isArray(redacted.openaiApiProfiles)) redacted.openaiApiProfiles = redacted.openaiApiProfiles.map((profile, i) => profile && typeof profile === `object` ? { ...profile, apiKey: typeof profile.apiKey === `string` && profile.apiKey ? `${HaituoRedactedSecret}:openaiApiProfiles.${i}` : profile.apiKey } : profile);
+    if (redacted.translationPools && typeof redacted.translationPools === `object`) {
+        const pools = { ...redacted.translationPools };
+        for (const group of [ `primary`, `backup` ]) if (Array.isArray(pools[group])) pools[group] = pools[group].map((entry, i) => entry && typeof entry === `object` ? { ...entry, apiKey: typeof entry.apiKey === `string` && entry.apiKey ? `${HaituoRedactedSecret}:translationPools.${group}.${i}` : entry.apiKey } : entry);
+        redacted.translationPools = pools;
+    }
+    if (Array.isArray(redacted.screenshotApiPool)) redacted.screenshotApiPool = redacted.screenshotApiPool.map((entry, i) => entry && typeof entry === `object` ? { ...entry, apiKey: typeof entry.apiKey === `string` && entry.apiKey ? `${HaituoRedactedSecret}:screenshotApiPool.${i}` : entry.apiKey } : entry);
     return redacted;
 }
 
 function haituoUnredactConfigPatch(patch) {
-    // Renderer saves and translate requests carry the sentinel for secrets
-    // the user did not retype. Resolve those back to the stored values here,
-    // in the only place that may hold plaintext. Redacted profiles inherit
-    // the stored key while endpoint+model still match (deletions and plain
-    // edits survive); a profile moved to a new endpoint/model without
-    // retyping the key is dropped, never poisoned with the sentinel.
+    // Renderer saves and translate requests carry stable-ID sentinels
+    // (__HAITUO_REDACTED__:<dotted.path>) for secrets the user did not
+    // retype. Resolve them back to the stored values here, the only place
+    // that may hold plaintext. The sentinel's embedded path wins (a renderer
+    // may reorder entries); legacy bare sentinels fall back to the field /
+    // index being processed. Positions with no stored original are dropped
+    // with a warning — never saved as a sentinel, never refilled with a
+    // different key (P1-05/P1-06).
     if (!patch || typeof patch !== `object`) return patch;
     const stored = $p();
     const clean = { ...patch };
-    for (const field of HaituoSecretConfigFields) clean[field] === HaituoRedactedSecret && (clean[field] = stored[field]);
-    if (Array.isArray(clean.openaiApiKeys)) clean.openaiApiKeys = clean.openaiApiKeys.filter(key => key !== HaituoRedactedSecret);
-    if (Array.isArray(clean.openaiApiProfiles)) {
-        const storedProfiles = Array.isArray(stored.openaiApiProfiles) ? stored.openaiApiProfiles : [];
-        clean.openaiApiProfiles = clean.openaiApiProfiles.map(profile => {
-            if (!profile || typeof profile !== `object` || profile.apiKey !== HaituoRedactedSecret) return profile;
-            const match = storedProfiles.find(item => item && item.endpoint === profile.endpoint && item.model === profile.model && typeof item.apiKey === `string` && item.apiKey && item.apiKey !== HaituoRedactedSecret);
-            if (match) return { ...profile, apiKey: match.apiKey };
-            X.warn(`haituo: dropping an API profile whose key was not re-entered after redaction; re-enter the key to move or recreate this profile`);
-            return null;
-        }).filter(profile => profile !== null);
+    const isSentinel = value => typeof value === `string` && value.startsWith(HaituoRedactedSecret);
+    const storedAtPath = parts => {
+        let node = stored;
+        for (const part of parts) {
+            if (!node || typeof node !== `object`) return void 0;
+            node = node[Array.isArray(node) ? Number(part) : part];
+        }
+        return node;
+    };
+    const resolveSentinel = (value, fallbackPath) => {
+        const rel = value.slice(HaituoRedactedSecret.length).replace(/^:/u, ``);
+        const storedValue = rel ? storedAtPath(rel.split(`.`)) : storedAtPath(fallbackPath);
+        return typeof storedValue === `string` ? storedValue : null;
+    };
+    for (const field of HaituoSecretConfigFields) {
+        if (!isSentinel(clean[field])) continue;
+        const resolved = resolveSentinel(clean[field], [ field ]);
+        resolved === null ? delete clean[field] : clean[field] = resolved;
+    }
+    const restoreKeyArray = (incoming, name, keyField) => {
+        if (!Array.isArray(incoming)) return incoming;
+        const out = [];
+        for (let i = 0; i < incoming.length; i += 1) {
+            const item = incoming[i];
+            const sentinel = item && typeof item === `object` ? item[keyField] : item;
+            if (!isSentinel(sentinel)) { out.push(item); continue; }
+            const rel = sentinel.slice(HaituoRedactedSecret.length).replace(/^:/u, ``);
+            let resolved = resolveSentinel(sentinel, [ name, String(i), ...(item && typeof item === `object` ? [ keyField ] : []) ]);
+            if ((resolved === null || !resolved) && rel && item && typeof item === `object`) resolved = resolveSentinel(`${HaituoRedactedSecret}:${rel}.${keyField}`, null);
+            if (resolved === null || !resolved) {
+                X.warn(`haituo: dropping a redacted ${name} entry whose stored original is missing at index ${i}; re-enter the key to recreate it`);
+                continue;
+            }
+            out.push(item && typeof item === `object` ? { ...item, [keyField]: resolved } : resolved);
+        }
+        return out;
+    };
+    if (Array.isArray(clean.openaiApiKeys)) clean.openaiApiKeys = restoreKeyArray(clean.openaiApiKeys, `openaiApiKeys`, ``);
+    if (Array.isArray(clean.openaiApiProfiles)) clean.openaiApiProfiles = restoreKeyArray(clean.openaiApiProfiles, `openaiApiProfiles`, `apiKey`);
+    if (Array.isArray(clean.screenshotApiPool)) clean.screenshotApiPool = restoreKeyArray(clean.screenshotApiPool, `screenshotApiPool`, `apiKey`);
+    if (clean.translationPools && typeof clean.translationPools === `object`) {
+        const pools = { ...clean.translationPools };
+        for (const group of [ `primary`, `backup` ]) {
+            if (!Array.isArray(pools[group])) continue;
+            pools[group] = pools[group].map((entry, i) => {
+                if (!entry || typeof entry !== `object` || !isSentinel(entry.apiKey)) return entry;
+                const resolved = resolveSentinel(entry.apiKey, [ `translationPools`, group, String(i), `apiKey` ]);
+                if (resolved === null || !resolved) {
+                    X.warn(`haituo: clearing a redacted translationPools.${group} entry whose stored original is missing at index ${i}; re-enter the key to recreate it`);
+                    return { ...entry, apiKey: `` };
+                }
+                return { ...entry, apiKey: resolved };
+            });
+        }
+        clean.translationPools = pools;
     }
     return clean;
 }
@@ -25005,14 +25061,21 @@ const Qp = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-settings
 
 const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-cache.json`);
 
-// Files whose last read failed (corrupt or undecryptable). They are preserved
-// untouched on disk (the ciphertext may become readable again once system
-// keychain access is restored, and garbage may be salvageable by hand) and a
-// write must back them up before replacing them, never silently drop them.
+// Files whose last read failed (corrupt or undecryptable). They stay untouched
+// on disk: the ciphertext may become readable again once system keychain
+// access is restored, and garbage may be salvageable by hand.
 const HaituoProtectedBlockedFiles = new Set();
-// Files already backed up once this session; a second write must not create
-// backup spam.
-const HaituoProtectedBackupDone = new Set();
+// P0-02: files read back successfully (or genuinely absent) this session.
+// haituoProtectedWrite refuses to touch any other file, so a failed or
+// deferred read can never be "repaired" by overwriting real settings with
+// in-memory defaults.
+const HaituoProtectedReadOk = new Set();
+// P0-02: encrypted files seen before app ready, when safeStorage is unusable.
+// The read returns the fallback immediately (the old blocking retry loop
+// froze the ready event and made every restart wipe settings) and
+// haituoRecoverDeferredProtectedReads decrypts and applies the real contents
+// once the app is ready.
+const HaituoProtectedDeferred = new Map();
 
 function haituoProtectedDescribeError(error) {
     // Logs must never contain key material, plaintext or full configs.
@@ -25028,28 +25091,27 @@ function haituoAppReady() {
     }
 }
 
-function haituoSleepSync(ms) {
+function haituoDecryptProtectedPayload(data) {
     try {
-        const channel = new Int32Array(new SharedArrayBuffer(4));
-        Atomics.wait(channel, 0, 0, ms);
-    } catch {}
+        return { ok: !0, value: p.safeStorage.decryptString(Buffer.from(data, `base64`)) };
+    } catch (error) {
+        return { ok: !1, error };
+    }
 }
 
-function haituoDecryptWithStartupRetry(data) {
-    // Settings are read once at module load, before the app is ready. On some
-    // systems safeStorage refuses decrypts during that window yet works fine
-    // moments later — which used to reset every setting to defaults on each
-    // restart. Retry only while the app is still starting; after ready, a
-    // failure is real and must not be hidden by a delay.
-    for (let attempt = 0; ; attempt++) {
-        try {
-            return { ok: !0, value: p.safeStorage.decryptString(Buffer.from(data, `base64`)) };
-        } catch (error) {
-            attempt === 0 && X.warn(`haituo: startup settings decrypt failed (${error?.message ?? error}); retrying while the app is still starting`);
-            if (haituoAppReady() || attempt >= 11) return attempt > 0 && X.warn(`haituo: startup settings decrypt gave up after ${attempt + 1} attempts`), { ok: !1, error };
-            haituoSleepSync(250);
-        }
+async function haituoDecryptAfterReady(data, attempts = 6, delayMs = 500) {
+    // Keychain prompts can take a moment even after ready. Retry without ever
+    // blocking the event loop; a persistent denial stays unreadable and the
+    // write gate keeps protecting the file until a later launch can decrypt.
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const result = haituoDecryptProtectedPayload(data);
+        if (result.ok) return result;
+        lastError = result.error;
+        attempt === 0 && X.warn(`haituo: settings decrypt failed after app ready (${haituoProtectedDescribeError(result.error)}); retrying without blocking`);
+        if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, delayMs));
     }
+    return { ok: !1, error: lastError };
 }
 
 function haituoArmSqlInitWatchdog(sqlInitPromise) {
@@ -25080,13 +25142,135 @@ function haituoArmSqlInitWatchdog(sqlInitPromise) {
     });
 }
 
+function haituoListProtectedBackups(file) {
+    try {
+        const dir = (0, s.dirname)(file), base = (0, s.basename)(file);
+        return (0, m.readdirSync)(dir).filter(name => name.startsWith(`${base}.unreadable-`)).sort().map(name => (0, s.join)(dir, name));
+    } catch {
+        return [];
+    }
+}
+
+async function haituoRecoverProtectedFile(file, recovered) {
+    HaituoProtectedDeferred.delete(file), HaituoProtectedBlockedFiles.delete(file), HaituoProtectedReadOk.add(file);
+    if (file === Qp) {
+        // Apply through the normal path so recovered values are normalized,
+        // persisted (the write gate is open now), broadcast to every
+        // renderer and forwarded to child windows.
+        X.info(`haituo: recovered encrypted translation settings after app ready`);
+        return haituoApplyTranslationConfig(recovered);
+    }
+    if (file === HaituoTranslationCachePath) {
+        HaituoTranslationCache = recovered && typeof recovered === `object` && !Array.isArray(recovered) ? recovered : {};
+        X.info(`haituo: recovered encrypted translation cache after app ready (${Object.keys(HaituoTranslationCache).length} entries)`);
+        return { ok: !0 };
+    }
+    return haituoProtectedWrite(file, recovered) ? { ok: !0 } : { ok: !1 };
+}
+
+async function haituoRecoverDeferredProtectedReads() {
+    // P0-02: decrypt files whose reads were deferred before app ready, and
+    // salvage the newest readable .unreadable-* backup when the main file
+    // itself stays undecryptable. Nothing here may block the ready event.
+    const candidates = new Set(HaituoProtectedDeferred.keys());
+    for (const file of [ Qp, HaituoTranslationCachePath ]) {
+        if (HaituoProtectedReadOk.has(file) || candidates.has(file)) continue;
+        try {
+            (0, m.statSync)(file);
+        } catch {
+            continue;
+        }
+        let parsed = null;
+        try {
+            parsed = JSON.parse((0, m.readFileSync)(file, `utf8`));
+        } catch {}
+        if (!parsed || parsed.haituoEncrypted !== 1 || typeof parsed.data !== `string` || !parsed.data) continue;
+        if (!haituoDecryptProtectedPayload(parsed.data).ok) candidates.add(file);
+    }
+    for (const file of candidates) {
+        try {
+            let payload = null;
+            try {
+                const parsed = JSON.parse((0, m.readFileSync)(file, `utf8`));
+                if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) payload = parsed.data;
+            } catch (error) {
+                if (!error || error.code !== `ENOENT`) X.warn(`haituoRecoverDeferredProtectedReads: cannot re-read ${(0, s.basename)(file)}: ${haituoProtectedDescribeError(error)}`);
+            }
+            let value = null;
+            if (payload !== null) {
+                const result = await haituoDecryptAfterReady(payload);
+                if (result.ok && typeof result.value === `string` && result.value) {
+                    try {
+                        const parsedValue = JSON.parse(result.value);
+                        if (parsedValue && typeof parsedValue === `object` && !Array.isArray(parsedValue)) value = parsedValue;
+                    } catch {}
+                }
+                if (!value) X.warn(`haituo: ${(0, s.basename)(file)} undecryptable after app ready; falling back to the newest readable backup`);
+            }
+            if (value) {
+                await haituoRecoverProtectedFile(file, value);
+                continue;
+            }
+            // Main file missing, unreadable, or its decrypt failed: restore
+            // from the newest backup that still decrypts. This is the
+            // explicit recovery flow — it brings the user's real settings
+            // back, not just a log line.
+            for (const backup of haituoListProtectedBackups(file).reverse()) {
+                let backupValue = null;
+                try {
+                    const parsed = JSON.parse((0, m.readFileSync)(backup, `utf8`));
+                    if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
+                        const result = await haituoDecryptAfterReady(parsed.data, 2, 250);
+                        if (result.ok && typeof result.value === `string`) {
+                            const parsedValue = JSON.parse(result.value);
+                            if (parsedValue && typeof parsedValue === `object` && !Array.isArray(parsedValue)) backupValue = parsedValue;
+                        }
+                    }
+                } catch {}
+                if (!backupValue) continue;
+                X.warn(`haituo: ${(0, s.basename)(file)} could not be read; restoring settings from backup ${(0, s.basename)(backup)}`);
+                await haituoRecoverProtectedFile(file, backupValue);
+                p.dialog.showMessageBox({
+                    type: `info`,
+                    buttons: [ `知道了` ],
+                    title: `设置已从备份恢复`,
+                    message: `上次启动未能读取加密设置，已从自动备份恢复。`,
+                    detail: `备份文件：${(0, s.basename)(backup)}。如设置仍异常，请携带 main.log 联系支持。`
+                }).catch(() => {});
+                break;
+            }
+            if (!HaituoProtectedReadOk.has(file)) {
+                X.error(`haituo: ${(0, s.basename)(file)} and its backups are unreadable; the real settings stay preserved on disk and recovery will retry on next launch`);
+                if (file === HaituoTranslationCachePath) try {
+                    // Cross-platform ciphertext (e.g. a macOS keychain blob
+                    // opened on Windows) can never decrypt here. Quarantine
+                    // it once — renamed, kept on disk, never deleted — so a
+                    // fresh cache can be written; settings files are never
+                    // auto-quarantined.
+                    const quarantined = `${file}.undecryptable-${Date.now()}`;
+                    (0, m.renameSync)(file, quarantined);
+                    HaituoProtectedReadOk.add(file);
+                    X.warn(`haituo: translation cache undecryptable on this platform; quarantined as ${(0, s.basename)(quarantined)} (original preserved) and starting a fresh cache`);
+                } catch (error) {
+                    X.warn(`haituo: could not quarantine undecryptable translation cache: ${haituoProtectedDescribeError(error)}`);
+                }
+            }
+        } catch (error) {
+            X.warn(`haituoRecoverDeferredProtectedReads: recovery of ${(0, s.basename)(file)} failed: ${haituoProtectedDescribeError(error)}`);
+        }
+    }
+}
+
 function haituoProtectedRead(file, fallback) {
     let raw;
     try {
         raw = (0, m.readFileSync)(file, `utf8`);
     } catch (error) {
-        // First run: no file yet. Anything else (permissions, etc.) is logged.
-        if (error && error.code === `ENOENT`) return fallback;
+        // First run: no file yet — nothing exists that a write could destroy.
+        if (error && error.code === `ENOENT`) {
+            HaituoProtectedReadOk.add(file);
+            return fallback;
+        }
         X.warn(`haituoProtectedRead: cannot read ${(0, s.basename)(file)}: ${haituoProtectedDescribeError(error)}`);
         return fallback;
     }
@@ -25094,17 +25278,30 @@ function haituoProtectedRead(file, fallback) {
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        // Unrecoverable garbage. Keep it on disk for salvage and mark it so a
-        // later save backs it up instead of silently replacing it.
+        // Unrecoverable garbage. Keep it on disk for salvage; the write gate
+        // refuses to replace it with defaults.
         X.warn(`haituoProtectedRead: ${(0, s.basename)(file)} is not valid JSON; keeping the existing file untouched`);
         HaituoProtectedBlockedFiles.add(file);
         return fallback;
     }
     if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
-        const result = haituoDecryptWithStartupRetry(parsed.data);
+        if (!haituoAppReady()) {
+            // P0-02: safeStorage is unusable before app ready. The old
+            // blocking retry loop stalled the ready event itself and every
+            // restart wiped settings. Defer: return the fallback now, recover
+            // the real contents after ready, and let the write gate keep the
+            // on-disk file untouched in between.
+            HaituoProtectedDeferred.set(file, { fallback });
+            X.info(`haituo: encrypted ${(0, s.basename)(file)} read deferred until app ready (real settings stay on disk)`);
+            return fallback;
+        }
+        const result = haituoDecryptProtectedPayload(parsed.data);
         let decrypted = null;
         if (result.ok) decrypted = result.value;
-        else X.warn(`haituoProtectedRead: decryption failed for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable: ${haituoProtectedDescribeError(result.error)}`);
+        else {
+            X.warn(`haituoProtectedRead: decryption failed for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable: ${haituoProtectedDescribeError(result.error)}`);
+            HaituoProtectedDeferred.set(file, { fallback });
+        }
         if (typeof decrypted !== `string` || !decrypted) {
             if (result.ok) X.warn(`haituoProtectedRead: decryption produced no data for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable`);
             HaituoProtectedBlockedFiles.add(file);
@@ -25114,6 +25311,7 @@ function haituoProtectedRead(file, fallback) {
             const value = JSON.parse(decrypted);
             if (value && typeof value === `object`) {
                 HaituoProtectedBlockedFiles.delete(file);
+                HaituoProtectedReadOk.add(file);
                 return value;
             }
             X.warn(`haituoProtectedRead: decrypted payload of ${(0, s.basename)(file)} is not an object; keeping the existing file untouched`);
@@ -25125,6 +25323,7 @@ function haituoProtectedRead(file, fallback) {
     }
     if (parsed && typeof parsed === `object`) {
         HaituoProtectedBlockedFiles.delete(file);
+        HaituoProtectedReadOk.add(file);
         return parsed;
     }
     X.warn(`haituoProtectedRead: ${(0, s.basename)(file)} does not hold an object; keeping the existing file untouched`);
@@ -25133,25 +25332,21 @@ function haituoProtectedRead(file, fallback) {
 }
 
 function haituoProtectedWrite(file, value) {
-    if (HaituoProtectedBlockedFiles.has(file)) {
-        // The on-disk file could not be read back (keychain failure or
-        // corruption), so replacing it with in-memory defaults would destroy
-        // the only copy of the user's settings. Settings must still be
-        // changeable, though: back the original up once (it stays
-        // recoverable), then let the new save land. If even the backup fails,
-        // refuse rather than risk the data.
-        if (!HaituoProtectedBackupDone.has(file)) {
-            try {
-                const backup = `${file}.unreadable-${Date.now()}`;
-                (0, m.copyFileSync)(file, backup);
-                HaituoProtectedBackupDone.add(file);
-                X.warn(`haituoProtectedWrite: ${(0, s.basename)(file)} could not be read; the original was backed up to ${(0, s.basename)(backup)} before writing fresh settings`);
-            } catch (error) {
-                X.warn(`haituoProtectedWrite: refusing to overwrite ${(0, s.basename)(file)} because its current contents could not be read and no backup could be made: ${haituoProtectedDescribeError(error)}`);
-                return !1;
-            }
+    if (!HaituoProtectedReadOk.has(file)) {
+        // P0-02: a file that exists but was never read back successfully this
+        // session (deferred pre-ready read, keychain denial, or corruption)
+        // holds real user settings a write could destroy — refuse. A file
+        // that genuinely does not exist is a first run: the save must land.
+        let exists = !0;
+        try {
+            (0, m.readFileSync)(file, `utf8`);
+        } catch (error) {
+            exists = !(error && error.code === `ENOENT`);
         }
-        HaituoProtectedBlockedFiles.delete(file);
+        if (exists) {
+            X.warn(`haituoProtectedWrite: refusing to overwrite ${(0, s.basename)(file)} because its current contents were never read back successfully this session`);
+            return !1;
+        }
     }
     (0, m.mkdirSync)((0, s.dirname)(file), {
         recursive: !0
@@ -25532,7 +25727,7 @@ function tm() {
     }), p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
         Jp(e.senderFrame?.url ?? ``);
         let n = $p(), r = haituoUnredactConfigPatch(t ?? {}), selectedProvider = r.provider;
-        r.strictProvider = typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
+        r.strictProvider = r.purpose === `input` && typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `input` && (selectedProvider = n.inputTranslationProvider || `google-free`);
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `chat` && (selectedProvider = n.chatTranslationProvider || `google-free`);
         let a = {
@@ -25562,7 +25757,7 @@ function tm() {
             context: typeof i == `string` ? i.slice(-6000) : typeof i?.context == `string` ? i.context.slice(-6000) : ``,
             purpose: typeof i?.purpose == `string` ? i.purpose : `chat`,
             provider: typeof i?.provider == `string` ? i.provider : $p().chatTranslationProvider || `google-free`,
-            strictProvider: typeof i?.provider == `string` && !!i.provider.trim()
+            strictProvider: typeof i?.purpose == `string` && i.purpose === `input` && typeof i?.provider == `string` && !!i.provider.trim() && i.provider !== `auto`
         };
         const startedAt = Date.now();
         const result = r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r));
@@ -28557,7 +28752,32 @@ async function nv() {
         }
         return callback(!1);
     }
-    Z.webContents.on(`will-attach-webview`, (e, t, r) => {
+    function haituoTrackWebviewGuest(event, guest) {
+        // P0-01: will-attach-webview hands us a plain webPreferences object,
+        // not WebContents — attaching input listeners there threw a TypeError
+        // that aborted the WhatsApp UA/permission/header setup and blacked
+        // every webview. Gesture tracking lives here, on the real guest.
+        if (!guest || typeof guest.on !== `function`) return;
+        guest.on(`before-input-event`, (e, input) => {
+            (input.type === `mouseDown` || input.type === `keyDown`) && (guest.haituoLastGestureAt = Date.now());
+        });
+        guest.on(`ipc-message`, (e, channel) => {
+            channel === `haituo-user-gesture` && (guest.haituoLastGestureAt = Date.now());
+        });
+    }
+    function haituoMediaPermissionCheckHandler(e, permission, requestingOrigin, details) {
+        // Same policy as the request handler: the check handler is consulted
+        // before getUserMedia, so a blanket false here would veto every mic
+        // request before the request handler ever runs.
+        if (permission === `notifications`) return !0;
+        if (permission === `media`) {
+            const mediaTypes = details?.mediaTypes ?? [];
+            const lastGesture = Number(e?.haituoLastGestureAt ?? 0);
+            return mediaTypes.includes(`audio`) && !mediaTypes.includes(`video`) && Date.now() - lastGesture < 8000;
+        }
+        return !1;
+    }
+    function haituoAttachWebviewHandler(e, t, r) {
         let a = ``, attachedWorkspaceId = ``;
         try {
             const attachedUrl = new URL(r.src ?? ``);
@@ -28578,15 +28798,13 @@ async function nv() {
         const workspaceId = String(attachedWorkspaceId || o?.id || o?.workspaceId || r.partition || ``);
         a === `web.whatsapp.com` && workspaceId && (t.additionalArguments = [ ...(t.additionalArguments ?? []), `--haituo-canvas-profile=${require(`node:crypto`).createHash(`sha256`).update(`haituo-canvas-v1:` + workspaceId).digest(`hex`)}` ]);
         workspaceId && (HaituoWorkspaceBySession.set(p.session.fromPartition(r.partition ?? ``), workspaceId), t.additionalArguments = [ ...(t.additionalArguments ?? []), `--caisheng-web-workspace=${workspaceId}` ]);
-        if (t.nodeIntegration = !1, t.nodeIntegrationInWorker = !1, t.contextIsolation = !0, 
-        t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`), 
-        t.on(`before-input-event`, (e, input) => {
-            (input.type === `mouseDown` || input.type === `keyDown`) && (t.haituoLastGestureAt = Date.now());
-        }), p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler), 
-        c === `whatsapp`) {
+        t.nodeIntegration = !1, t.nodeIntegrationInWorker = !1, t.contextIsolation = !0,
+        t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`),
+        p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler);
+        if (c === `whatsapp`) {
             let e = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, t = p.session.fromPartition(r.partition ?? ``);
             t.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
-            t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler((e, t) => t === `notifications`), 
+            t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler(haituoMediaPermissionCheckHandler),
             t.setPermissionRequestHandler(haituoMediaPermissionHandler), t.webRequest.onBeforeSendHeaders((t, n) => {
                 let r = t.requestHeaders;
                 r[`User-Agent`] = e, r[`Accept-Language`] = `zh-CN,zh;q=0.9`, r[`sec-ch-ua`] = `"Chromium";v="140", "Google Chrome";v="140", "Not=A?Brand";v="24"`, 
@@ -28595,7 +28813,8 @@ async function nv() {
                 });
             });
         }
-    }), Z.webContents.on(`preload-error`, (e, n, r) => {
+    }
+    Z.webContents.on(`will-attach-webview`, haituoAttachWebviewHandler), Z.webContents.on(`did-attach-webview`, haituoTrackWebviewGuest), Z.webContents.on(`preload-error`, (e, n, r) => {
         X.error(t.Aa(r)), a.S(a.y()) && p.app.quit();
     }), o_ && o_.setMainWindow(Z), qg = !0, At(Z, H_(), U_(), Q().i18n, X), $u === `signal-main` && !m && (!z_ || z_.maximized) && Z.maximize(), 
     $u === `signal-main` && !m && z_ && z_.fullscreen && Z.setFullScreen(!0), P_ && P_.setMainWindow(Z);
@@ -29686,7 +29905,15 @@ function Iv() {
     u = Fv(), e = !0);
     if (e && l) {
         X.info(`getSQLKey: updating encrypted key in the config`);
-        const blob = p.safeStorage.encryptString(u);
+        // P1-07: an encryptString throw here (e.g. keychain locked mid-boot on
+        // macOS) must not kill startup — it degrades to the same "keep the
+        // plaintext recovery key" path as a failed round-trip.
+        let blob = null;
+        try {
+            blob = p.safeStorage.encryptString(u);
+        } catch (e) {
+            X.warn(`getSQLKey: safeStorage encrypt threw; keeping plaintext recovery key`);
+        }
         // Only trust safeStorage after a round-trip check, and never drop the
         // recovery key on unsigned macOS builds: keychain access can break
         // between builds and would otherwise brick the database forever. The
@@ -29959,6 +30186,7 @@ p.app.on(`ready`, async () => {
         signalColors: !0
     });
     haituoArmSqlInitWatchdog(Vv);
+    haituoRecoverDeferredProtectedReads().catch(error => X.warn(`haituo: deferred settings recovery failed: ${haituoProtectedDescribeError(error)}`));
     Promise.race([ Vv, u ]).then(async e => {
         e === `timeout` && (X.info(`sql.initialize is taking more than three seconds; showing loading dialog`), 
         Jg = new p.BrowserWindow({
