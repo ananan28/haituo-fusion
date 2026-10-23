@@ -1,0 +1,46 @@
+name: P1-08 macOS launch check
+# Verifies the release .app leaves the loading screen under four conditions on
+# a real macOS desktop: normal network / offline / dead proxy / fresh user dir.
+# Manual only — it consumes the macOS artifact of a chosen build run.
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Build run that produced the Haituo-macos artifact (blank = latest success on build/1.5.1)'
+        required: false
+        default: ''
+permissions:
+  contents: read
+  actions: read
+env:
+  PYTHONUTF8: 1
+jobs:
+  launch-check:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve build run
+        id: build
+        run: |
+          if [ -n "${{ inputs.build_run_id }}" ]; then
+            echo "id=${{ inputs.build_run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?branch=build/1.5.1&status=success&per_page=1" \
+              | python3 -c 'import sys,json;print("id="+str(json.load(sys.stdin)["workflow_runs"][0]["id"]))' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the macOS release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Haituo-macos
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.build.outputs.id }}
+      - name: Run the four launch scenarios
+        run: python3 scripts/p1-08-launch-check.py
+      - name: Upload evidence (logs, screenshots, results)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-08-launch-check
+          path: p1-08/**
