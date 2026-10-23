@@ -24972,8 +24972,18 @@ function haituoUnredactConfigPatch(patch) {
             const sentinel = item && typeof item === `object` ? item[keyField] : item;
             if (!isSentinel(sentinel)) { out.push(item); continue; }
             const rel = sentinel.slice(HaituoRedactedSecret.length).replace(/^:/u, ``);
+            const shape = rel.split(`.`), expectedShape = shape[0] === name && /^\d+$/u.test(shape[1] || ``) && (shape.length === 2 || (shape.length === 3 && !!keyField && shape[2] === keyField));
             let resolved = resolveSentinel(sentinel, [ name, String(i), ...(item && typeof item === `object` ? [ keyField ] : []) ]);
-            if ((resolved === null || !resolved) && rel && item && typeof item === `object`) resolved = resolveSentinel(`${HaituoRedactedSecret}:${rel}.${keyField}`, null);
+            if ((resolved === null || !resolved) && rel && !expectedShape && item && typeof item === `object`) resolved = resolveSentinel(`${HaituoRedactedSecret}:${rel}.${keyField}`, null);
+            if (resolved === null && rel && !expectedShape) {
+                // Same trap as translationPools: typing inside the masked
+                // placeholder corrupts its embedded path, and dropping the
+                // entry here would also discard the profile's endpoint/model.
+                // Only a malformed path (not a stale, well-formed index) may
+                // recover the same position; a valid path always wins.
+                const fallback = storedAtPath([ name, String(i), ...(item && typeof item === `object` ? [ keyField ] : []) ]);
+                typeof fallback === `string` && fallback && (resolved = fallback);
+            }
             if (resolved === null || !resolved) {
                 X.warn(`haituo: dropping a redacted ${name} entry whose stored original is missing at index ${i}; re-enter the key to recreate it`);
                 continue;
@@ -24995,11 +25005,16 @@ function haituoUnredactConfigPatch(patch) {
                 if (resolved === null) {
                     // Editing inside the masked placeholder turns its path
                     // into garbage. Fall back to the same position instead of
-                    // wiping the stored key; a valid path always wins, so
+                    // wiping the stored key; only a malformed path may do
+                    // this — a well-formed (even stale) path always wins, so
                     // entries can never swap keys. An empty stored value is
                     // still honoured — no neighbour's key is borrowed.
-                    const fallback = storedAtPath([ `translationPools`, group, String(i), `apiKey` ]);
-                    typeof fallback === `string` && fallback && (resolved = fallback);
+                    const shape = entry.apiKey.slice(HaituoRedactedSecret.length).replace(/^:/u, ``).split(`.`);
+                    const wellFormed = (shape.length === 3 || shape.length === 4 && shape[3] === `apiKey`) && shape[0] === `translationPools` && shape[1] === group && /^\d+$/u.test(shape[2] || ``);
+                    if (!wellFormed) {
+                        const fallback = storedAtPath([ `translationPools`, group, String(i), `apiKey` ]);
+                        typeof fallback === `string` && fallback && (resolved = fallback);
+                    }
                 }
                 if (resolved === null || !resolved) {
                     X.warn(`haituo: clearing a redacted translationPools.${group} entry whose stored original is missing at index ${i}; re-enter the key to recreate it`);
@@ -25907,7 +25922,7 @@ function tm() {
         };
         debug.on(`message`, onMessage);
         try {
-            await contents.executeJavaScript(`(()=>{try{window.__haituoVoiceBlobs=[];if(window.__haituoVoiceBlobHook)return;window.__haituoVoiceBlobHook=true;const native=URL.createObjectURL.bind(URL);URL.createObjectURL=function(blob){try{if(blob instanceof Blob&&blob.size>256&&blob.size<=104857600&&String(blob.type||"").startsWith("audio/")){const reader=new FileReader;reader.onload=()=>{const value=String(reader.result||"");if(value){const list=window.__haituoVoiceBlobs;list.push({dataUrl:value,mimeType:blob.type,at:Date.now()});list.length>12&&list.splice(0,list.length-12)}};reader.readAsDataURL(blob)}}catch{}return native(blob)}}catch{}})()`, !0).catch(() => {});
+            await contents.executeJavaScript(`(()=>{try{window.__haituoVoiceCaptureActive=!0;window.__haituoVoiceBlobs=[];window.__haituoVoiceBlobBytes=0;if(window.__haituoVoiceBlobHook)return;window.__haituoVoiceBlobHook=!0;const native=URL.createObjectURL.bind(URL);URL.createObjectURL=function(blob){try{if(window.__haituoVoiceCaptureActive===!0&&blob instanceof Blob&&blob.size>256&&blob.size<=104857600&&String(blob.type||"").startsWith("audio/")){const reader=new FileReader;reader.onload=()=>{try{const value=String(reader.result||"");if(!value||window.__haituoVoiceCaptureActive!==!0)return;const list=window.__haituoVoiceBlobs||[];if((window.__haituoVoiceBlobBytes||0)+value.length>26214400)return;window.__haituoVoiceBlobBytes=(window.__haituoVoiceBlobBytes||0)+value.length;list.push({dataUrl:value,mimeType:blob.type,at:Date.now()});while(list.length>6)list.shift()}catch{}};reader.readAsDataURL(blob)}}catch{}return native(blob)}}catch{}})()`, !0).catch(() => {});
             await debug.sendCommand(`Network.enable`, { maxTotalBufferSize: 104857600, maxResourceBufferSize: 104857600 }), await debug.sendCommand(`Network.setCacheDisabled`, { cacheDisabled: !0 });
             contents.focus(), contents.sendInputEvent({ type: `mouseMove`, x, y }), contents.sendInputEvent({ type: `mouseDown`, x, y, button: `left`, clickCount: 1 }), contents.sendInputEvent({ type: `mouseUp`, x, y, button: `left`, clickCount: 1 });
             const blobResult = (async () => {
@@ -25924,6 +25939,10 @@ function tm() {
             const value = await Promise.race([ result, blobResult, new Promise(resolve => setTimeout(() => resolve({ ok: !1 }), 18e3)) ]);
             return value;
         } finally {
+            // The hook stays installed for later captures, but it must not
+            // keep converting background audio to data URLs (or retain it)
+            // once this capture is over.
+            try { await contents.executeJavaScript(`(()=>{window.__haituoVoiceCaptureActive=!1;window.__haituoVoiceBlobs=[];window.__haituoVoiceBlobBytes=0})()`, !0); } catch {}
             await cleanup();
         }
     }), p.ipcMain.removeHandler(`caisheng:transcribe-audio`), p.ipcMain.handle(`caisheng:transcribe-audio`, async (e, t) => {

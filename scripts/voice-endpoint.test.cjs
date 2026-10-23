@@ -52,7 +52,7 @@ test('userinfo, query and fragment are rejected on any scheme',()=>{
 
 // The blob hook ships to the page as a string; execute the real string in a
 // vm page harness so the exact production code runs (VOICE-02/03/04).
-const hookStart=code.indexOf('(()=>{try{window.__haituoVoiceBlobs=[];');
+const hookStart=code.indexOf('(()=>{try{window.__haituoVoiceCaptureActive=!0;window.__haituoVoiceBlobs=[];');
 assert.ok(hookStart>=0,'blob hook script found');
 let hookEnd=hookStart, depth=0;
 for(let i=hookStart;i<code.length;i+=1){
@@ -101,9 +101,9 @@ test('re-running the hook resets the stale queue (VOICE-03)',()=>{
   assert.equal(vm.runInContext(`window.__haituoVoiceBlobs.length`,page),1,'original hook keeps working for the new session');
 });
 
-test('the queue is bounded to 12 entries (VOICE-04)',()=>{
+test('the queue is bounded to 6 entries (VOICE-04)',()=>{
   const page=makePage();
   vm.runInContext(`for(let i=0;i<20;i+=1)window.hookedCreateObjectURL(new Blob(['x'.repeat(999)],{type:'audio/ogg'}))`,page);
-  assert.equal(vm.runInContext(`window.__haituoVoiceBlobs.length`,page),12);
+  assert.equal(vm.runInContext(`window.__haituoVoiceBlobs.length`,page),6);
   assert.equal(vm.runInContext(`window.__haituoVoiceBlobs[0].dataUrl`,page).includes('AAAA'),true);
 });

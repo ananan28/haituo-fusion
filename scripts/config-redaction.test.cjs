@@ -194,3 +194,38 @@ test('non-object payloads pass through untouched',()=>{
   assert.equal(ctx.haituoRedactTranslationConfig(null),null);
   assert.equal(ctx.haituoUnredactConfigPatch(undefined),undefined);
 });
+
+test('a key field edited inside the mask keeps profile and screenshot entries intact',()=>{
+  const stored={
+    screenshotApiPool:[{provider:'openai',apiKey:SECRET,endpoint:'https://s.test/v1',model:'sm'}],
+    openaiApiProfiles:[{apiKey:'profile-key',endpoint:'https://p.test/v1',model:'pm',vision:true}],
+    openaiApiKeys:['array-key','second-key']
+  };
+  const {ctx,warns}=makeCtx({stored});
+  const mangled=path=>SENTINEL+':'+path+'sk-live-appended';
+  const clean=ctx.haituoUnredactConfigPatch({
+    screenshotApiPool:[{provider:'openai',apiKey:mangled('screenshotApiPool.0'),endpoint:'https://s.test/v1',model:'sm'}],
+    openaiApiProfiles:[{apiKey:mangled('openaiApiProfiles.0'),endpoint:'https://p.test/v1',model:'pm',vision:true}],
+    openaiApiKeys:[mangled('openaiApiKeys.0'),'second-key']
+  });
+  assert.equal(clean.screenshotApiPool[0].apiKey,SECRET,'screenshot entry keeps the same-position key');
+  assert.equal(clean.screenshotApiPool[0].endpoint,'https://s.test/v1','screenshot entry is not dropped');
+  assert.equal(clean.openaiApiProfiles[0].apiKey,'profile-key','profile keeps the same-position key');
+  assert.equal(clean.openaiApiProfiles[0].endpoint,'https://p.test/v1','profile endpoint/model must survive');
+  assert.equal(clean.openaiApiProfiles[0].vision,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),['array-key','second-key'],'array key entry keeps the same-position key');
+  assert.equal(warns.length,0,'nothing may be dropped for a mask-edit save');
+});
+
+test('an array sentinel pointing at an empty position still never borrows a neighbour key',()=>{
+  const stored={screenshotApiPool:[{apiKey:'first'},{apiKey:''}],openaiApiProfiles:[{apiKey:'profile-first'},{apiKey:''}],openaiApiKeys:['first','']};
+  const {ctx}=makeCtx({stored});
+  const clean=ctx.haituoUnredactConfigPatch({
+    screenshotApiPool:[{apiKey:SENTINEL+':screenshotApiPool.1'},{apiKey:SENTINEL+':screenshotApiPool.1'}],
+    openaiApiProfiles:[{apiKey:SENTINEL+':openaiApiProfiles.1',endpoint:'e'},{apiKey:SENTINEL+':openaiApiProfiles.1',endpoint:'e2'}],
+    openaiApiKeys:[SENTINEL+':openaiApiKeys.1','']
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.screenshotApiPool)),[],'an empty stored key cannot borrow the neighbour; the empty entry is dropped');
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiProfiles)),[],'profiles may not borrow the neighbour key either');
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),[''],'the plain empty tail entry survives; the empty sentinel is dropped');
+});
