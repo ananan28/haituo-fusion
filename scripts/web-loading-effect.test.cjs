@@ -70,6 +70,16 @@ test('next unloaded web account schedules the 3.5s load timer without throwing',
   assert.equal(typeof cleanup, 'function');
 });
 
+test('the serial-loading effect never reaches for Electron IPC from the renderer', () => {
+  // The 1.5.3 build on the reporter's machine called
+  // require(`electron`).ipcRenderer.invoke inside this effect; the renderer has
+  // no such module, so it threw "Cannot read properties of undefined (reading
+  // 'invoke')" on launch and took the window down. Timer-only scheduling is the
+  // supported design; a visibility poll belongs in the preload bridge.
+  const body = effectBody();
+  assert.doesNotMatch(body, /require\([`'"]electron[`'"]\)|ipcRenderer/);
+});
+
 test('nothing to do when every web account is loaded and ready', () => {
   const { cleanup, timers } = runEffect({ qLoaded: ['w1', 'tg1'], qReady: ['w1', 'tg1'] });
   assert.equal(timers.length, 0);
