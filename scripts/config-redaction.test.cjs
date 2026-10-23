@@ -117,6 +117,57 @@ test('openaiApiKeys entries bounced as sentinels restore positionally; real edit
   assert.deepEqual(JSON.parse(JSON.stringify(clean.openaiApiKeys)),[SECRET,'fresh-real-key'],'P1-05: a bounced sentinel must not wipe the stored key');
 });
 
+test('P1-04 regression: pausing one pool model keeps every stored pool key',()=>{
+  const stored={translationPools:{primary:[
+    {provider:'google-cloud',apiKey:'key-google-cloud',endpoint:'https://translation.googleapis.com/language/translate/v2',model:''},
+    {provider:'deepseek',apiKey:'key-deepseek',endpoint:'https://api.deepseek.com/v1',model:'deepseek-flash'},
+    {provider:'openai',apiKey:'key-openai',endpoint:'https://api.openai.com/v1',model:'gpt-4.1-mini'}
+  ],backup:[]}};
+  const {ctx,warns}=makeCtx({stored});
+  const bounced=JSON.parse(JSON.stringify(ctx.haituoRedactTranslationConfig(JSON.parse(JSON.stringify(stored)))));
+  bounced.translationPools.primary[0].enabled=false;
+  const clean=ctx.haituoUnredactConfigPatch({translationPools:bounced.translationPools});
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.translationPools.primary.map(entry=>entry.apiKey))),['key-google-cloud','key-deepseek','key-openai'],'pause must not clear untouched keys');
+  assert.equal(clean.translationPools.primary[0].enabled,false,'the pause flag itself still lands');
+  assert.equal(warns.length,0,'nothing was dropped');
+});
+
+test('P1-04 regression: entering each pool key, then pausing the first model, keeps all three keys',()=>{
+  const stored={translationPools:{primary:[
+    {provider:'google-cloud',apiKey:'',endpoint:'https://translation.googleapis.com/language/translate/v2',model:''},
+    {provider:'deepseek',apiKey:'',endpoint:'https://api.deepseek.com/v1',model:'deepseek-flash'},
+    {provider:'openai',apiKey:'',endpoint:'https://api.openai.com/v1',model:'gpt-4.1-mini'}
+  ],backup:[]}};
+  const {ctx,warns}=makeCtx({stored});
+  const savePools=mutate=>{
+    const bounced=JSON.parse(JSON.stringify(ctx.haituoRedactTranslationConfig(JSON.parse(JSON.stringify(stored)))));
+    mutate(bounced.translationPools);
+    stored.translationPools=ctx.haituoUnredactConfigPatch({translationPools:bounced.translationPools}).translationPools;
+  };
+  savePools(pools=>{pools.primary[0].apiKey='sk-live-one';});
+  savePools(pools=>{pools.primary[1].apiKey='sk-live-two';});
+  savePools(pools=>{pools.primary[2].apiKey='sk-live-three';});
+  savePools(pools=>{pools.primary[0].enabled=false;});
+  assert.deepEqual(JSON.parse(JSON.stringify(stored.translationPools.primary.map(entry=>entry.apiKey))),['sk-live-one','sk-live-two','sk-live-three'],'no save may wipe a key entered by an earlier save');
+  assert.equal(stored.translationPools.primary[0].enabled,false,'the paused entry is flagged');
+  assert.ok(!('enabled' in stored.translationPools.primary[1])&&!('enabled' in stored.translationPools.primary[2]),'untouched entries are not rewritten as paused');
+  assert.equal(warns.length,0,'no key was dropped during the whole flow');
+});
+
+test('P1-04 regression: pool sentinels written with an explicit apiKey path also resolve',()=>{
+  const stored={translationPools:{primary:[{provider:'deepseek',apiKey:SECRET}]}};
+  const {ctx}=makeCtx({stored});
+  const clean=ctx.haituoUnredactConfigPatch({translationPools:{primary:[{apiKey:SENTINEL+':translationPools.primary.0.apiKey'}]}});
+  assert.equal(clean.translationPools.primary[0].apiKey,SECRET,'both sentinel shapes restore the stored key');
+});
+
+test('a pool sentinel whose stored original is missing still clears loudly',()=>{
+  const {ctx,warns}=makeCtx({stored:{translationPools:{primary:[]}}});
+  const clean=ctx.haituoUnredactConfigPatch({translationPools:{primary:[{provider:'openai',apiKey:SENTINEL+':translationPools.primary.3'}]}});
+  assert.equal(clean.translationPools.primary[0].apiKey,'','no sentinel may be persisted, and no neighbour key may be borrowed');
+  assert.ok(warns.some(w=>/clearing a redacted translationPools/.test(w)),'the drop must stay loud');
+});
+
 test('non-object payloads pass through untouched',()=>{
   const {ctx}=makeCtx({});
   assert.equal(ctx.haituoRedactTranslationConfig(null),null);

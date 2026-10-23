@@ -24951,7 +24951,12 @@ function haituoUnredactConfigPatch(patch) {
     };
     const resolveSentinel = (value, fallbackPath) => {
         const rel = value.slice(HaituoRedactedSecret.length).replace(/^:/u, ``);
-        const storedValue = rel ? storedAtPath(rel.split(`.`)) : storedAtPath(fallbackPath);
+        let storedValue = rel ? storedAtPath(rel.split(`.`)) : storedAtPath(fallbackPath);
+        // Pool sentinels embed the entry's path (…primary.0), not the key
+        // field. Resolving that path yields the entry object, so dereference
+        // apiKey — otherwise every save treated the key as missing and wiped
+        // all pool keys.
+        storedValue && typeof storedValue === `object` && !Array.isArray(storedValue) && typeof storedValue.apiKey === `string` && (storedValue = storedValue.apiKey);
         return typeof storedValue === `string` ? storedValue : null;
     };
     for (const field of HaituoSecretConfigFields) {
