@@ -1,10 +1,16 @@
 'use strict';
 
-// Windows registers the login item with --start-in-tray. A second launch that
-// carries that flag is a background/login start, not a user request to surface
-// the app, so the single-instance handler must not restore or raise the window.
+// Old builds registered the login item with --start-in-tray, and even older
+// ones with --use-tray-icon. A launch carrying either flag is a background or
+// login start, not a user request to surface the app.
+const BACKGROUND_LAUNCH_FLAGS = new Set(['--start-in-tray', '--use-tray-icon']);
+
+function isBackgroundLaunch(argv) {
+  return Array.isArray(argv) && argv.some(argument => BACKGROUND_LAUNCH_FLAGS.has(argument));
+}
+
 function secondInstanceShouldShow(argv) {
-  return !Array.isArray(argv) || !argv.includes('--start-in-tray');
+  return !isBackgroundLaunch(argv);
 }
 
 // Refreshes and child-window syncs also run while the app sits in the tray.
@@ -13,4 +19,4 @@ function keepShellVisibleAllowed(state) {
   return Boolean(state) && state.visible === true && state.minimized !== true;
 }
 
-module.exports = { secondInstanceShouldShow, keepShellVisibleAllowed };
+module.exports = { isBackgroundLaunch, secondInstanceShouldShow, keepShellVisibleAllowed };

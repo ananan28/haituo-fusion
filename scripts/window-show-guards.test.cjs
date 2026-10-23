@@ -37,6 +37,7 @@ function fakeWindow({ visible = true, minimized = false } = {}) {
 test('secondInstanceShouldShow: login item argv never surfaces the window', () => {
   assert.equal(guards.secondInstanceShouldShow([ 'Haituo.exe' ]), true);
   assert.equal(guards.secondInstanceShouldShow([ 'Haituo.exe', '--start-in-tray' ]), false);
+  assert.equal(guards.secondInstanceShouldShow([ 'Haituo.exe', '--use-tray-icon' ]), false);
   assert.equal(guards.secondInstanceShouldShow(undefined), true);
   assert.equal(guards.secondInstanceShouldShow('not-an-array'), true);
 });
@@ -57,11 +58,13 @@ test('start-in-tray startup gate evaluates true only for the main process with t
       process: { argv },
       u: traySetting,
       n: { ot: { MinimizeToAndStartInSystemTray: 'minimize-and-start-in-tray' } },
+      HaituoWindowGuards: guards,
     };
     vm.createContext(ctx);
     return vm.runInContext(source[1], ctx);
   };
   assert.equal(evaluate({ isMain: true, argv: [ 'Haituo.exe', '--start-in-tray' ], traySetting: 'use-tray-icon' }), true);
+  assert.equal(evaluate({ isMain: true, argv: [ 'Haituo.exe', '--use-tray-icon' ], traySetting: 'use-tray-icon' }), true);
   assert.equal(evaluate({ isMain: true, argv: [ 'Haituo.exe' ], traySetting: 'minimize-and-start-in-tray' }), true);
   assert.equal(evaluate({ isMain: true, argv: [ 'Haituo.exe' ], traySetting: 'do-not-use-tray' }), false);
   assert.equal(evaluate({ isMain: false, argv: [ 'Haituo.exe', '--start-in-tray' ], traySetting: 'minimize-and-start-in-tray' }), false);
@@ -93,6 +96,9 @@ test('sliced second-instance handler does not restore/show for the login item', 
 
   assert.equal(handlers['second-instance']({}, [ 'Haituo.exe', '--start-in-tray' ]), true);
   assert.deepEqual(shown, [], 'login-item second instance must stay in the tray');
+
+  assert.equal(handlers['second-instance']({}, [ 'Haituo.exe', '--use-tray-icon' ]), true);
+  assert.deepEqual(shown, [], 'the older tray-icon login item also stays in the tray');
 
   assert.equal(handlers['second-instance']({}, [ 'Haituo.exe' ]), true);
   assert.deepEqual(shown, [ 'keystroke', 'showWindow', 'syncChildren' ], 'a real user launch still surfaces the window');

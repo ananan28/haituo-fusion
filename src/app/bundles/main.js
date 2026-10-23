@@ -28726,7 +28726,7 @@ async function nv() {
     // The Windows login item always passes --start-in-tray. Starting from the
     // login item must stay in the tray, otherwise every sign-in pops the app
     // open on top of whatever the user is doing.
-    const haituoMainStartHidden = h && (process.argv.includes(`--start-in-tray`) || u === n.ot.MinimizeToAndStartInSystemTray);
+    const haituoMainStartHidden = h && (HaituoWindowGuards.isBackgroundLaunch(process.argv) || u === n.ot.MinimizeToAndStartInSystemTray);
     let g = {
         show: !1,
         width: c,
