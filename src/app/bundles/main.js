@@ -24732,10 +24732,19 @@ function haituoSplitTranslationText(e, t) {
             const t = r.slice(a, e), n = Math.max(t.lastIndexOf(`\n`), t.lastIndexOf(`. `), t.lastIndexOf(`! `), t.lastIndexOf(`? `), t.lastIndexOf(`。`), t.lastIndexOf(`！`), t.lastIndexOf(`？`)), o = Math.max(t.lastIndexOf(`; `), t.lastIndexOf(`, `), t.lastIndexOf(`: `), t.lastIndexOf(`；`), t.lastIndexOf(`，`), t.lastIndexOf(`：`), t.lastIndexOf(` `)), s = n >= Math.floor(t.length * .55) ? n : o >= Math.floor(t.length * .68) ? o : -1;
             s >= 0 && (e = a + s + 1);
         }
-        const o = r.slice(a, e).trim();
-        o && n.push(o), a = e;
+        if (e < r.length && e > a && r.charCodeAt(e - 1) >= 55296 && r.charCodeAt(e - 1) <= 56319 && r.charCodeAt(e) >= 56320 && r.charCodeAt(e) <= 57343) e -= 1;
+        const raw = r.slice(a, e), o = raw.trim();
+        if (o) {
+            let g = e;
+            while (g < r.length && /\s/u.test(r[g])) g += 1;
+            n.push({ text: o, gap: raw.match(/\s*$/u)[0] + r.slice(e, g) }), a = g;
+        } else a = e;
     }
     return n;
+}
+
+function haituoJoinTranslatedChunks(translated) {
+    return translated.map((part, index) => part.text + (index < translated.length - 1 ? part.gap : ``)).join(``).replace(/\s+([,.!?;:。！？；：])/gu, `$1`).trim();
 }
 
 function haituoNaturalizeFreeTranslation(source, targetLanguage, translated) {
@@ -24762,16 +24771,16 @@ async function Xp(e) {
     if (chunkLimit && t.length > chunkLimit) {
         const chunks = haituoSplitTranslationText(t, chunkLimit), translated = [];
         for (const chunk of chunks) {
-            const part = { ...e, text: chunk }, key = haituoTranslationCacheKey(part), cache = loadHaituoTranslationCache();
+            const part = { ...e, text: chunk.text }, key = haituoTranslationCacheKey(part), cache = loadHaituoTranslationCache();
             const existing = cache[key];
-            if (!e.__haituoForceChunks && existing?.text?.trim()) { translated.push(existing.text); continue; }
+            if (!e.__haituoForceChunks && existing?.text?.trim()) { translated.push({ text: existing.text, gap: chunk.gap }); continue; }
             const result = await Xp(part);
             cache[key] = { ...result, updatedAt: Date.now() };
             saveHaituoTranslationCache();
-            translated.push(result.text);
+            translated.push({ text: result.text, gap: chunk.gap });
         }
         return {
-            text: translated.join(` `).replace(/\s+([,.!?;:。！？；：])/gu, `$1`).trim(),
+            text: haituoJoinTranslatedChunks(translated),
             provider: r
         };
     }
@@ -24847,14 +24856,15 @@ async function Xp(e) {
         }, a))?.[0]?.translations?.[0]?.text?.trim() ?? ``;
     } else if (r === `openai` || r === `qwen` || r === `glm` || r === `deepseek` || r === `groq`) {
         if (typeof e.apiKey != `string` || !e.apiKey) throw Error(`${r} 需要 API Key`);
-        o = (await Yp(haituoCompatibleEndpoint(e.endpoint,r === `groq` ? `https://api.groq.com/openai/v1` : r === `deepseek` ? `https://api.deepseek.com/v1` : `https://api.openai.com/v1`,`chat/completions`), {
+        const groqHost = /^https:\/\/api\.groq\.com(?:\/|$)/iu;
+        o = (await Yp(haituoCompatibleEndpoint(r === `groq` ? typeof e.groqEndpoint == `string` && e.groqEndpoint.trim() ? e.groqEndpoint : groqHost.test(e.endpoint || ``) ? e.endpoint : `` : e.endpoint,r === `groq` ? `https://api.groq.com/openai/v1` : r === `deepseek` ? `https://api.deepseek.com/v1` : `https://api.openai.com/v1`,`chat/completions`), {
             method: `POST`,
             headers: {
                 Authorization: `Bearer ${String(e.apiKey).trim().replace(/^Bearer\s+/iu,``)}`,
                 "Content-Type": `application/json`
             },
             body: JSON.stringify({
-                model: e.model || (r === `groq` ? `openai/gpt-oss-120b` : r === `deepseek` ? `deepseek-flash` : `gpt-4.1-mini`),
+                model: (r === `groq` ? typeof e.groqModel == `string` && e.groqModel.trim() ? e.groqModel : groqHost.test(e.endpoint || ``) ? e.model : `` : e.model) || (r === `groq` ? `openai/gpt-oss-120b` : r === `deepseek` ? `deepseek-flash` : `gpt-4.1-mini`),
                 ...(/^https:\/\/api\.deepseek\.com(?:\/|$)/iu.test(e.endpoint || (r === `deepseek` ? `https://api.deepseek.com` : ``)) ? {thinking:{type:`disabled`}} : {}),
                 temperature: e.forceRefresh || e.provider === `smart-retranslate` ? .35 : .15,
                 messages: [ {
@@ -24865,7 +24875,9 @@ async function Xp(e) {
                     content: `${typeof e.context == `string` && e.context.trim() ? `Recent conversation (context only):\n${e.context.slice(-6000)}\n\n` : ``}Target language: ${n}\nMessage to translate:\n${t}`
                 } ]
             })
-        }, a))?.choices?.[0]?.message?.content?.trim() ?? ``;
+        }, a));
+        if (o?.choices?.[0]?.finish_reason === `length`) throw Error(`翻译结果被模型截断（finish_reason=length），请调大 max_tokens 或缩短文本后重试`);
+        o = o?.choices?.[0]?.message?.content?.trim() ?? ``;
     } else throw Error(`不支持的翻译服务`);
     o = String(o || ``).replace(/^(?:目标语言|Target language)\s*[:：]\s*[A-Za-z-]+\s*(?:\r?\n)+/iu, ``).trim(), [ `google-free`, `mymemory` ].includes(r) && (o = haituoNaturalizeFreeTranslation(t, n, o));
     if (!o) throw Error(`翻译服务未返回结果`);
@@ -24879,13 +24891,78 @@ let Zp = {
     provider: `google-free`
 };
 
+// R3: monotonic version stamp for the effective settings. Saves carry the
+// version they were based on; a save older than the current version is a
+// stale writeback and is rejected instead of overwriting newer settings.
+let HaituoConfigVersion = 0;
+function haituoNextConfigVersion() {
+    const now = Date.now();
+    HaituoConfigVersion = now > HaituoConfigVersion ? now : HaituoConfigVersion + 1;
+    return HaituoConfigVersion;
+}
+
 let HaituoLastTranslationStatus = {};
 
+// STORE-03: API keys must never be persisted in a renderer. Broadcasts and
+// get-config responses carry this sentinel in place of secrets; saves and
+// translate requests bouncing the sentinel back keep the stored secret.
+const HaituoRedactedSecret = `__HAITUO_REDACTED__`;
+const HaituoSecretConfigFields = [ `apiKey`, `groqApiKey`, `deepLApiKey`, `kepplApiKey`, `deepseekApiKey`, `deepseekApiKeys`, `googleCloudApiKey`, `screenshotApiKey`, `openaiVoiceApiKey` ];
+
+function haituoRedactTranslationConfig(config) {
+    if (!config || typeof config !== `object`) return config;
+    const redacted = { ...config };
+    for (const field of HaituoSecretConfigFields) typeof redacted[field] === `string` && redacted[field] && (redacted[field] = HaituoRedactedSecret);
+    if (Array.isArray(redacted.openaiApiKeys)) redacted.openaiApiKeys = redacted.openaiApiKeys.map(key => typeof key === `string` && key ? HaituoRedactedSecret : key);
+    if (Array.isArray(redacted.openaiApiProfiles)) redacted.openaiApiProfiles = redacted.openaiApiProfiles.map(profile => profile && typeof profile === `object` ? { ...profile, apiKey: typeof profile.apiKey === `string` && profile.apiKey ? HaituoRedactedSecret : profile.apiKey } : profile);
+    return redacted;
+}
+
+function haituoUnredactConfigPatch(patch) {
+    // Renderer saves and translate requests carry the sentinel for secrets
+    // the user did not retype. Resolve those back to the stored values here,
+    // in the only place that may hold plaintext. Redacted profiles inherit
+    // the stored key while endpoint+model still match (deletions and plain
+    // edits survive); a profile moved to a new endpoint/model without
+    // retyping the key is dropped, never poisoned with the sentinel.
+    if (!patch || typeof patch !== `object`) return patch;
+    const stored = $p();
+    const clean = { ...patch };
+    for (const field of HaituoSecretConfigFields) clean[field] === HaituoRedactedSecret && (clean[field] = stored[field]);
+    if (Array.isArray(clean.openaiApiKeys)) clean.openaiApiKeys = clean.openaiApiKeys.filter(key => key !== HaituoRedactedSecret);
+    if (Array.isArray(clean.openaiApiProfiles)) {
+        const storedProfiles = Array.isArray(stored.openaiApiProfiles) ? stored.openaiApiProfiles : [];
+        clean.openaiApiProfiles = clean.openaiApiProfiles.map(profile => {
+            if (!profile || typeof profile !== `object` || profile.apiKey !== HaituoRedactedSecret) return profile;
+            const match = storedProfiles.find(item => item && item.endpoint === profile.endpoint && item.model === profile.model && typeof item.apiKey === `string` && item.apiKey && item.apiKey !== HaituoRedactedSecret);
+            if (match) return { ...profile, apiKey: match.apiKey };
+            X.warn(`haituo: dropping an API profile whose key was not re-entered after redaction; re-enter the key to move or recreate this profile`);
+            return null;
+        }).filter(profile => profile !== null);
+    }
+    return clean;
+}
+
+function haituoIsLoopbackHost(hostname) {
+    // VOICE-01: plaintext HTTP is acceptable only for a local model server
+    // (whisper.cpp and friends bind loopback); anything else must be HTTPS
+    // so the Authorization header and audio never travel in cleartext.
+    const host = String(hostname || ``).toLowerCase().replace(/^\[|\]$/gu, ``);
+    return host === `localhost` || host === `::1` || host === `0:0:0:0:0:0:0:1` || /^127(?:\.\d{1,3}){3}$/u.test(host);
+}
+
+function haituoValidateVoiceEndpoint(raw) {
+    const base = String(raw).trim().replace(/\/+$/u, ``).replace(/\/(chat\/completions|audio\/transcriptions)$/u, ``);
+    const parsed = new URL(base);
+    if ((parsed.protocol !== `https:` && !(parsed.protocol === `http:` && haituoIsLoopbackHost(parsed.hostname))) || parsed.username || parsed.password || parsed.search || parsed.hash) throw Error(`语音 API 地址格式错误：仅支持 HTTPS，或本机回环地址（localhost/127.0.0.1）的 HTTP 本地服务`);
+    return `${base}/audio/transcriptions`;
+}
+
 function haituoBroadcastTranslationConfig(config) {
-    const payload = {
+    const payload = haituoRedactTranslationConfig({
         ...config,
         
-    };
+    });
     for (const contents of p.webContents.getAllWebContents()) try {
         contents.isDestroyed() || contents.send(`caisheng:translation-config-changed`, payload);
     } catch {}
@@ -24928,15 +25005,79 @@ const Qp = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-settings
 
 const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-cache.json`);
 
-// Files whose last read failed at the decryption stage. They are preserved
+// Files whose last read failed (corrupt or undecryptable). They are preserved
 // untouched on disk (the ciphertext may become readable again once system
-// keychain access is restored) and must never be overwritten with defaults.
+// keychain access is restored, and garbage may be salvageable by hand) and a
+// write must back them up before replacing them, never silently drop them.
 const HaituoProtectedBlockedFiles = new Set();
+// Files already backed up once this session; a second write must not create
+// backup spam.
+const HaituoProtectedBackupDone = new Set();
 
 function haituoProtectedDescribeError(error) {
     // Logs must never contain key material, plaintext or full configs.
     const message = String(error && error.code || error && error.message || error || ``);
     return message.replace(/[A-Za-z0-9+/=]{24,}/gu, `[redacted]`).slice(0, 120);
+}
+
+function haituoAppReady() {
+    try {
+        return typeof p.app?.isReady === `function` ? p.app.isReady() : !0;
+    } catch {
+        return !0;
+    }
+}
+
+function haituoSleepSync(ms) {
+    try {
+        const channel = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(channel, 0, 0, ms);
+    } catch {}
+}
+
+function haituoDecryptWithStartupRetry(data) {
+    // Settings are read once at module load, before the app is ready. On some
+    // systems safeStorage refuses decrypts during that window yet works fine
+    // moments later — which used to reset every setting to defaults on each
+    // restart. Retry only while the app is still starting; after ready, a
+    // failure is real and must not be hidden by a delay.
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return { ok: !0, value: p.safeStorage.decryptString(Buffer.from(data, `base64`)) };
+        } catch (error) {
+            attempt === 0 && X.warn(`haituo: startup settings decrypt failed (${error?.message ?? error}); retrying while the app is still starting`);
+            if (haituoAppReady() || attempt >= 11) return attempt > 0 && X.warn(`haituo: startup settings decrypt gave up after ${attempt + 1} attempts`), { ok: !1, error };
+            haituoSleepSync(250);
+        }
+    }
+}
+
+function haituoArmSqlInitWatchdog(sqlInitPromise) {
+    // R2: never let the loading screen spin forever. Stage logs around
+    // getSQLKey/sql.initialize show which phase stalls; after 30s we surface
+    // a dialog with the likely cause (macOS Keychain prompt blocked or
+    // unanswered) and let the user wait or quit instead of an unclosable,
+    // silent spinner.
+    const startedAt = Date.now();
+    const watchdog = setTimeout(() => {
+        X.error(`haituo: sql.initialize watchdog: still pending after ${(Date.now() - startedAt) / 1e3}s since app.ready; the loading screen would spin forever. On macOS this is usually the Keychain access prompt being blocked or unanswered.`);
+        p.dialog.showMessageBox({
+            type: `warning`,
+            buttons: [ `继续等待`, `退出海拓` ],
+            defaultId: 0,
+            cancelId: 0,
+            title: `海拓启动卡住`,
+            message: `数据库初始化超过 30 秒仍未完成。`,
+            detail: `macOS 上通常是“钥匙串访问”提示被拦截或未处理（请在弹出的钥匙串对话框中点击“始终允许”）。也可以继续等待，或退出后重新打开。诊断日志见 main.log 的 getSQLKey / sql.initialize 条目。`
+        }).then(({ response: e }) => {
+            e === 1 && p.app.exit(1);
+        }).catch(() => {});
+    }, 3e4);
+    sqlInitPromise.then(() => {
+        clearTimeout(watchdog), X.info(`haituo: sql.initialize resolved in ${Date.now() - startedAt}ms`);
+    }, e => {
+        clearTimeout(watchdog), X.error(`haituo: sql.initialize rejected after ${Date.now() - startedAt}ms:`, e);
+    });
 }
 
 function haituoProtectedRead(file, fallback) {
@@ -24953,23 +25094,19 @@ function haituoProtectedRead(file, fallback) {
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        // Unrecoverable garbage, but keep it on disk: a human may still be
-        // able to salvage it, and a later save must not silently replace it
-        // without the user knowing. Log loudly instead.
+        // Unrecoverable garbage. Keep it on disk for salvage and mark it so a
+        // later save backs it up instead of silently replacing it.
         X.warn(`haituoProtectedRead: ${(0, s.basename)(file)} is not valid JSON; keeping the existing file untouched`);
+        HaituoProtectedBlockedFiles.add(file);
         return fallback;
     }
     if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
-        let decrypted;
-        try {
-            decrypted = p.safeStorage.decryptString(Buffer.from(parsed.data, `base64`));
-        } catch (error) {
-            X.warn(`haituoProtectedRead: decryption failed for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable: ${haituoProtectedDescribeError(error)}`);
-            HaituoProtectedBlockedFiles.add(file);
-            return fallback;
-        }
+        const result = haituoDecryptWithStartupRetry(parsed.data);
+        let decrypted = null;
+        if (result.ok) decrypted = result.value;
+        else X.warn(`haituoProtectedRead: decryption failed for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable: ${haituoProtectedDescribeError(result.error)}`);
         if (typeof decrypted !== `string` || !decrypted) {
-            X.warn(`haituoProtectedRead: decryption produced no data for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable`);
+            if (result.ok) X.warn(`haituoProtectedRead: decryption produced no data for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable`);
             HaituoProtectedBlockedFiles.add(file);
             return fallback;
         }
@@ -24986,16 +25123,35 @@ function haituoProtectedRead(file, fallback) {
         HaituoProtectedBlockedFiles.add(file);
         return fallback;
     }
-    return parsed && typeof parsed === `object` ? parsed : fallback;
+    if (parsed && typeof parsed === `object`) {
+        HaituoProtectedBlockedFiles.delete(file);
+        return parsed;
+    }
+    X.warn(`haituoProtectedRead: ${(0, s.basename)(file)} does not hold an object; keeping the existing file untouched`);
+    HaituoProtectedBlockedFiles.add(file);
+    return fallback;
 }
 
 function haituoProtectedWrite(file, value) {
     if (HaituoProtectedBlockedFiles.has(file)) {
-        // The on-disk file could not be read back (e.g. keychain failure), so
-        // overwriting it with in-memory defaults would destroy the only copy of
-        // the user's settings once decryption works again. Refuse, loudly.
-        X.warn(`haituoProtectedWrite: refusing to overwrite ${(0, s.basename)(file)} because its current contents could not be decrypted; fix keychain access and restart to keep or change those settings`);
-        return !1;
+        // The on-disk file could not be read back (keychain failure or
+        // corruption), so replacing it with in-memory defaults would destroy
+        // the only copy of the user's settings. Settings must still be
+        // changeable, though: back the original up once (it stays
+        // recoverable), then let the new save land. If even the backup fails,
+        // refuse rather than risk the data.
+        if (!HaituoProtectedBackupDone.has(file)) {
+            try {
+                const backup = `${file}.unreadable-${Date.now()}`;
+                (0, m.copyFileSync)(file, backup);
+                HaituoProtectedBackupDone.add(file);
+                X.warn(`haituoProtectedWrite: ${(0, s.basename)(file)} could not be read; the original was backed up to ${(0, s.basename)(backup)} before writing fresh settings`);
+            } catch (error) {
+                X.warn(`haituoProtectedWrite: refusing to overwrite ${(0, s.basename)(file)} because its current contents could not be read and no backup could be made: ${haituoProtectedDescribeError(error)}`);
+                return !1;
+            }
+        }
+        HaituoProtectedBlockedFiles.delete(file);
     }
     (0, m.mkdirSync)((0, s.dirname)(file), {
         recursive: !0
@@ -25043,7 +25199,10 @@ function saveHaituoTranslationCache() {
 }
 
 function haituoTranslationCacheKey(e) {
-    return JSON.stringify([ `free-ai-chat-v5`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []) ]);
+    let contextHash = 0;
+    const context = String(e.context || ``).trim();
+    if (context) for (let i = 0; i < context.length; i += 1) contextHash = (contextHash * 33 ^ context.charCodeAt(i)) >>> 0;
+    return JSON.stringify([ `free-ai-chat-v6`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, e.model || ``, contextHash, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []) ]);
 }
 
 function haituoSharedChatCacheKey(e) {
@@ -25139,7 +25298,7 @@ function haituoOpenAIProfiles(config) {
         Array.isArray(config?.openaiApiKeys) ? config.openaiApiKeys.map(apiKey => ({ apiKey })) : [];
     const profiles = [ ...first, ...configured ].filter(profile => profile && typeof profile.apiKey === `string` && profile.apiKey.trim())
         .map(profile => ({ apiKey: profile.apiKey.trim().replace(/^Bearer\s+/iu,``), endpoint: String(profile.endpoint || config?.endpoint || ``).trim(), model: String(profile.model || config?.model || ``).trim() }));
-    return [ ...new Map(profiles.map(profile => [ `${profile.endpoint}\0${profile.apiKey}`, profile ])).values() ].slice(0, 12);
+    return [ ...new Map(profiles.map(profile => [ `${profile.endpoint}\0${profile.apiKey}\0${profile.model}`, profile ])).values() ].slice(0, 12);
 }
 
 function haituoPumpRequests() {
@@ -25354,8 +25513,12 @@ function tm() {
         sender.sendInputEvent({type:`keyDown`,keyCode:`Enter`});
         sender.sendInputEvent({type:`keyUp`,keyCode:`Enter`});
         return true;
-    }), p.ipcMain.removeHandler(`caisheng:set-translation-config`), p.ipcMain.handle(`caisheng:set-translation-config`, async (e, t) => (Jp(e.senderFrame?.url ?? ``), haituoApplyTranslationConfig({ ...$p(), ...t, ...(typeof t?.darkTheme === `boolean` && !t?.nativeTheme ? {nativeTheme:t.darkTheme ? `dark` : `light`} : {}) }))), p.ipcMain.removeHandler(`caisheng:get-translation-config`), p.ipcMain.handle(`caisheng:get-translation-config`, e => (Jp(e.senderFrame?.url ?? ``), 
-    ({ ...$p(), ...HaituoLastTranslationStatus }))), p.ipcMain.removeHandler(`caisheng:read-clipboard-image`), p.ipcMain.handle(`caisheng:read-clipboard-image`, async e => {
+    }), p.ipcMain.removeHandler(`caisheng:set-translation-config`), p.ipcMain.handle(`caisheng:set-translation-config`, async (e, t) => (Jp(e.senderFrame?.url ?? ``), (() => {
+        const patch = haituoUnredactConfigPatch(t);
+        if (typeof patch.__v == `number` && patch.__v < HaituoConfigVersion) throw Error(`设置已被其他窗口更新，请重试`);
+        return haituoApplyTranslationConfig({ ...$p(), ...patch, ...(typeof t?.darkTheme === `boolean` && !t?.nativeTheme ? {nativeTheme:t.darkTheme ? `dark` : `light`} : {}) });
+    })())), p.ipcMain.removeHandler(`caisheng:get-translation-config`), p.ipcMain.handle(`caisheng:get-translation-config`, e => (Jp(e.senderFrame?.url ?? ``), 
+    haituoRedactTranslationConfig({ ...$p(), ...HaituoLastTranslationStatus }))), p.ipcMain.removeHandler(`caisheng:read-clipboard-image`), p.ipcMain.handle(`caisheng:read-clipboard-image`, async e => {
         Jp(e.senderFrame?.url ?? ``);
         const image = await require('../js/haituo-clipboard.js').readImage(p);
         if (!image || image.isEmpty()) return null;
@@ -25368,7 +25531,8 @@ function tm() {
         return typeof t == `string` ? t : `ctrl-r`;
     }), p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
         Jp(e.senderFrame?.url ?? ``);
-        let n = $p(), r = t ?? {}, selectedProvider = r.provider;
+        let n = $p(), r = haituoUnredactConfigPatch(t ?? {}), selectedProvider = r.provider;
+        r.strictProvider = typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `input` && (selectedProvider = n.inputTranslationProvider || `google-free`);
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `chat` && (selectedProvider = n.chatTranslationProvider || `google-free`);
         let a = {
@@ -25397,7 +25561,8 @@ function tm() {
             targetLanguage: n,
             context: typeof i == `string` ? i.slice(-6000) : typeof i?.context == `string` ? i.context.slice(-6000) : ``,
             purpose: typeof i?.purpose == `string` ? i.purpose : `chat`,
-            provider: typeof i?.provider == `string` ? i.provider : $p().chatTranslationProvider || `google-free`
+            provider: typeof i?.provider == `string` ? i.provider : $p().chatTranslationProvider || `google-free`,
+            strictProvider: typeof i?.provider == `string` && !!i.provider.trim()
         };
         const startedAt = Date.now();
         const result = r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r));
@@ -25408,14 +25573,15 @@ function tm() {
         if (typeof t !== `string` || !t.trim() || t.length > 3e4) throw Error(`译文无效`);
         let n = await p.clipboard.readText();
         try {
+            const selectAllModifier = process.platform === `darwin` ? `meta` : `control`;
             e.sender.focus(), e.sender.sendInputEvent({
                 type: `keyDown`,
                 keyCode: `A`,
-                modifiers: [ `control` ]
+                modifiers: [ selectAllModifier ]
             }), e.sender.sendInputEvent({
                 type: `keyUp`,
                 keyCode: `A`,
-                modifiers: [ `control` ]
+                modifiers: [ selectAllModifier ]
             }), e.sender.sendInputEvent({
                 type: `keyDown`,
                 keyCode: `Backspace`
@@ -25474,13 +25640,13 @@ function tm() {
         };
         debug.on(`message`, onMessage);
         try {
-            await contents.executeJavaScript(`(()=>{try{if(window.__haituoVoiceBlobHook)return;window.__haituoVoiceBlobHook=true;window.__haituoVoiceBlobs=[];const native=URL.createObjectURL.bind(URL);URL.createObjectURL=function(blob){try{if(blob instanceof Blob&&blob.size>256&&blob.size<=104857600){const reader=new FileReader;reader.onload=()=>{const value=String(reader.result||"");if(value)window.__haituoVoiceBlobs.push({dataUrl:value,mimeType:blob.type||"audio/ogg",at:Date.now()})};reader.readAsDataURL(blob)}}catch{}return native(blob)}}catch{}})()`, !0).catch(() => {});
+            await contents.executeJavaScript(`(()=>{try{window.__haituoVoiceBlobs=[];if(window.__haituoVoiceBlobHook)return;window.__haituoVoiceBlobHook=true;const native=URL.createObjectURL.bind(URL);URL.createObjectURL=function(blob){try{if(blob instanceof Blob&&blob.size>256&&blob.size<=104857600&&String(blob.type||"").startsWith("audio/")){const reader=new FileReader;reader.onload=()=>{const value=String(reader.result||"");if(value){const list=window.__haituoVoiceBlobs;list.push({dataUrl:value,mimeType:blob.type,at:Date.now()});list.length>12&&list.splice(0,list.length-12)}};reader.readAsDataURL(blob)}}catch{}return native(blob)}}catch{}})()`, !0).catch(() => {});
             await debug.sendCommand(`Network.enable`, { maxTotalBufferSize: 104857600, maxResourceBufferSize: 104857600 }), await debug.sendCommand(`Network.setCacheDisabled`, { cacheDisabled: !0 });
             contents.focus(), contents.sendInputEvent({ type: `mouseMove`, x, y }), contents.sendInputEvent({ type: `mouseDown`, x, y, button: `left`, clickCount: 1 }), contents.sendInputEvent({ type: `mouseUp`, x, y, button: `left`, clickCount: 1 });
             const blobResult = (async () => {
                 for (let attempt = 0; attempt < 72; attempt += 1) {
                     await new Promise(resolve => setTimeout(resolve, 250));
-                    const captured = await contents.executeJavaScript(`(()=>{const list=window.__haituoVoiceBlobs||[];return list.shift()||null})()`, !0).catch(() => null);
+                    const captured = await contents.executeJavaScript(`(()=>{const list=window.__haituoVoiceBlobs||[];const now=Date.now();while(list.length){const item=list[0];if(!item||now-item.at>30000){list.shift();continue}return list.shift()||null}return null})()`, !0).catch(() => null);
                     if (captured?.dataUrl) {
                         const base64 = String(captured.dataUrl).split(`,`)[1] || ``, bytes = Buffer.from(base64, `base64`);
                         if (bytes.length > 256) return { ok: !0, bytes, mimeType: captured.mimeType || `audio/ogg` };
@@ -25508,9 +25674,7 @@ function tm() {
             form.append(`model`, model), form.append(`response_format`, `json`), form.append(`file`, new Blob([ a ], {
                 type: typeof t?.mimeType === `string` && t.mimeType ? t.mimeType : `audio/ogg`
             }), typeof t?.fileName === `string` && t.fileName ? t.fileName : `voice.ogg`);
-            const base=String(url).trim().replace(/\/+$/u,``).replace(/\/(chat\/completions|audio\/transcriptions)$/u,``);
-            const parsed=new URL(base);if(![`https:`,`http:`].includes(parsed.protocol)||parsed.username||parsed.password||parsed.search||parsed.hash)throw Error(`语音 API 地址格式错误`);
-            const endpoint=`${base}/audio/transcriptions`;
+            const endpoint=haituoValidateVoiceEndpoint(url);
             const response = await haituoTranslationFetch(endpoint, {
                 method: `POST`, headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(6e4)
             });
@@ -27653,6 +27817,7 @@ let caishengLabelRequestSequence = 0;
 
 let haituoScreenshotController;
 function haituoApplyTranslationConfig(t) {
+    t = haituoUnredactConfigPatch(t);
     if ($u !== `signal-main` && process.connected) return haituoRequestGlobalSettings(t);
     if (haituoScreenshotController) haituoScreenshotController.configure({...$p(), ...t});
     Zp = {
@@ -27720,6 +27885,7 @@ function haituoApplyTranslationConfig(t) {
     Zp.chatTextColor = /^#[0-9a-f]{6}$/iu.test(t?.chatTextColor || ``) ? t.chatTextColor : ``;
     Zp.outgoingBubbleColor = /^#[0-9a-f]{6}$/iu.test(t?.outgoingBubbleColor || ``) ? t.outgoingBubbleColor : ``;
     Zp.incomingBubbleColor = Zp.incomingBubbleLinked ? Zp.outgoingBubbleColor : /^#[0-9a-f]{6}$/iu.test(t?.incomingBubbleColor || ``) ? t.incomingBubbleColor : ``;
+    Zp.__v = haituoNextConfigVersion();
     em(Zp), haituoBroadcastTranslationConfig(Zp);
     haituoPublishGlobalSettings(Zp);
     Pm(`theme-setting`, Zp.nativeTheme);
@@ -28377,6 +28543,20 @@ async function nv() {
             });
         }
     }
+    function haituoMediaPermissionHandler(e, permission, callback, details) {
+        // Voice recording (WhatsApp/Telegram mic) requests audio only,
+        // immediately after the user clicks record. Approve audio-only media
+        // requests that follow a recent user gesture; video and gestureless
+        // probes stay denied — no silent microphone access.
+        if (permission === `notifications`) return callback(!0);
+        if (permission === `media`) {
+            const mediaTypes = details?.mediaTypes ?? [];
+            const lastGesture = Number(e?.haituoLastGestureAt ?? 0);
+            if (mediaTypes.includes(`audio`) && !mediaTypes.includes(`video`) && Date.now() - lastGesture < 8000) return callback(!0);
+            return callback(!1);
+        }
+        return callback(!1);
+    }
     Z.webContents.on(`will-attach-webview`, (e, t, r) => {
         let a = ``, attachedWorkspaceId = ``;
         try {
@@ -28400,11 +28580,14 @@ async function nv() {
         workspaceId && (HaituoWorkspaceBySession.set(p.session.fromPartition(r.partition ?? ``), workspaceId), t.additionalArguments = [ ...(t.additionalArguments ?? []), `--caisheng-web-workspace=${workspaceId}` ]);
         if (t.nodeIntegration = !1, t.nodeIntegrationInWorker = !1, t.contextIsolation = !0, 
         t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`), 
+        t.on(`before-input-event`, (e, input) => {
+            (input.type === `mouseDown` || input.type === `keyDown`) && (t.haituoLastGestureAt = Date.now());
+        }), p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler), 
         c === `whatsapp`) {
             let e = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, t = p.session.fromPartition(r.partition ?? ``);
             t.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
             t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler((e, t) => t === `notifications`), 
-            t.setPermissionRequestHandler((e, t, n) => n(t === `notifications`)), t.webRequest.onBeforeSendHeaders((t, n) => {
+            t.setPermissionRequestHandler(haituoMediaPermissionHandler), t.webRequest.onBeforeSendHeaders((t, n) => {
                 let r = t.requestHeaders;
                 r[`User-Agent`] = e, r[`Accept-Language`] = `zh-CN,zh;q=0.9`, r[`sec-ch-ua`] = `"Chromium";v="140", "Google Chrome";v="140", "Not=A?Brand";v="24"`, 
                 r[`sec-ch-ua-mobile`] = `?0`, r[`sec-ch-ua-platform`] = `"Windows"`, n({
@@ -28564,7 +28747,9 @@ p.ipcMain.handle(`caisheng:login`, async (e, t) => {
     let r = new AbortController, a = setTimeout(() => r.abort(), 15e3);
     try {
         /* Chat, login and media must never inherit a translation proxy. */
-        await p.session.defaultSession.setProxy({
+        await p.session.defaultSession.setProxy(n.data?.proxyUrl ? {
+            proxyRules: String(n.data.proxyUrl).slice(0, 256)
+        } : {
             mode: `system`
         });
         await p.session.defaultSession.closeAllConnections();
@@ -29032,6 +29217,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         if(Yg.get(t)===r&&e?.type===`haituo-show-settings-panel`){haituoShowSettingsWindow().catch(error=>X.warn(String(error)));return}
         if (Yg.get(t) === r && e?.type === `haituo-global-settings-request`) {
             try {
+                if (typeof e.config?.__v == `number` && e.config.__v < HaituoConfigVersion) throw Error(`设置已被其他窗口更新，请重试`);
                 haituoApplyTranslationConfig({ ...$p(), ...e.config });
                 caishengSendChild(r, {type:`haituo-global-settings-ack`, requestId:e.requestId, ok:true});
             } catch (error) {
@@ -29480,12 +29666,14 @@ function Iv() {
         if (!l) throw Error(`Can't decrypt database key`);
         X.info(`getSQLKey: decrypting key`);
         let e = Buffer.from(o, `hex`);
+        const haituoKeyDecryptStartedAt = Date.now();
         try {
             u = p.safeStorage.decryptString(e);
             if (!u) throw Error(`getSQLKey: safeStorage returned an empty key`);
+            X.info(`getSQLKey: decrypted key in ${Date.now() - haituoKeyDecryptStartedAt}ms`);
         } catch (e) {
-            if (typeof r != `string`) throw e;
-            X.warn(`getSQLKey: safeStorage decryption failed; using preserved recovery key`),
+            if (typeof r != `string`) throw X.warn(`getSQLKey: safeStorage decryption failed after ${Date.now() - haituoKeyDecryptStartedAt}ms and no recovery key is available`), e;
+            X.warn(`getSQLKey: safeStorage decryption failed after ${Date.now() - haituoKeyDecryptStartedAt}ms; using preserved recovery key`),
             u = r, h = !0;
         }
         if (typeof r == `string`) if (u === r) X.info(`getSQLKey: recovery key verified`),
@@ -29770,6 +29958,7 @@ p.app.on(`ready`, async () => {
         ephemeralOnly: !0,
         signalColors: !0
     });
+    haituoArmSqlInitWatchdog(Vv);
     Promise.race([ Vv, u ]).then(async e => {
         e === `timeout` && (X.info(`sql.initialize is taking more than three seconds; showing loading dialog`), 
         Jg = new p.BrowserWindow({
@@ -30792,7 +30981,7 @@ function haituoRequestGlobalSettings(config) {
 }
 function haituoPublishGlobalSettings(config) {
     if ($u !== `signal-main`) return;
-    for (const child of Yg.values()) caishengSendChild(child, {type:`haituo-global-settings-update`, config});
+    for (const child of Yg.values()) caishengSendChild(child, {type:`haituo-global-settings-update`, config: haituoRedactTranslationConfig(config)});
 }
 if ($u !== `signal-main`) process.on(`message`, value => {
     if (value?.type === `haituo-global-settings-ack`) {
@@ -30803,6 +30992,7 @@ if ($u !== `signal-main`) process.on(`message`, value => {
         return;
     }
     if (value?.type !== `haituo-global-settings-update` || !value.config) return;
+    if (typeof Zp?.__v == `number` && typeof value.config.__v == `number` && value.config.__v < Zp.__v) return;
     Zp = {...value.config};
     if (Qg) Qg = {...Qg, nativeTheme:Zp.nativeTheme, darkTheme:Zp.darkTheme,
         chatTextColor:Zp.chatTextColor, outgoingBubbleColor:Zp.outgoingBubbleColor,

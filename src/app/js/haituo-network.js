@@ -65,8 +65,10 @@ async function resolveSignalProxy(session, serverUrl, explicit) {
   try {
     // Honour the first route chosen by the OS/PAC. Never borrow the translation pool.
     const first = String(await session.resolveProxy(serverUrl)).split(';')[0].trim();
-    const match = /^(PROXY|HTTPS)\s+([^\s]+)$/iu.exec(first);
-    return match ? `${match[1].toUpperCase() === 'HTTPS' ? 'https' : 'http'}://${match[2]}` : undefined;
+    const match = /^(PROXY|HTTPS|SOCKS5?|SOCKS4)\s+([^\s]+)$/iu.exec(first);
+    if (!match) return undefined;
+    const kind = match[1].toUpperCase();
+    return `${kind.startsWith('SOCKS') ? 'socks5' : kind === 'HTTPS' ? 'https' : 'http'}://${match[2]}`;
   } catch { return undefined; }
 }
 
@@ -96,6 +98,7 @@ async function retryTranslation(work, sleep = ms => new Promise(resolve => setTi
   for (let attempt=0; attempt<=5; attempt++) {
     try { return await work(); } catch(error) {
       const message=String(error?.message||error);
+      if (error?.code===`TRANSLATION_BAD_JSON`) { const failure=Error(message);failure.code=`TRANSLATION_BAD_JSON`;failure.status=error?.status;throw failure; }
       if ([400,401,402,403,404,422].includes(error?.status) || /HTTP (400|401|402|403|404|422)\b|invalid.api.key|insufficient_quota|认证失败|未配置|请.*填写|不支持图片/i.test(message)) throw error;
       if(attempt===5) { const failure=Error('翻译失败，已自动重试 5 次：'+message);failure.cause=error;throw failure; }
       onRetry(attempt+1,5);

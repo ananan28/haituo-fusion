@@ -21582,6 +21582,19 @@ http://jedwatson.github.io/classnames
     function haituoProviderOptionLabel(settings, provider, label) {
         return haituoProviderConfigured(settings, provider) ? `${label}（已配置）` : `${label}（需配置）`;
     }
+    // STORE-03: renderer storage must never hold API keys in plaintext. The
+    // main process redacts secrets to this sentinel in every config push; a
+    // freshly typed key lives only in memory and in the main-process store.
+    const haituoRedactedSecretV = `__HAITUO_REDACTED__`;
+    const haituoSecretFieldNames = [ `apiKey`, `groqApiKey`, `deepLApiKey`, `kepplApiKey`, `deepseekApiKey`, `deepseekApiKeys`, `googleCloudApiKey`, `screenshotApiKey`, `openaiVoiceApiKey` ];
+    function haituoRedactConfigSecrets(e) {
+        if (!e || typeof e !== `object`) return e;
+        const out = { ...e };
+        for (const field of haituoSecretFieldNames) typeof out[field] === `string` && out[field] && (out[field] = haituoRedactedSecretV);
+        if (Array.isArray(out.openaiApiKeys)) out.openaiApiKeys = out.openaiApiKeys.map(key => typeof key === `string` && key ? haituoRedactedSecretV : key);
+        if (Array.isArray(out.openaiApiProfiles)) out.openaiApiProfiles = out.openaiApiProfiles.map(profile => profile && typeof profile === `object` ? { ...profile, apiKey: typeof profile.apiKey === `string` && profile.apiKey ? haituoRedactedSecretV : profile.apiKey } : profile);
+        return out;
+    }
     function x_() {
         try {
             if (!window.__haituoCfgSync) {
@@ -21589,13 +21602,13 @@ http://jedwatson.github.io/classnames
                 try {
                     window.SignalContext?.caishengOnTranslationConfig?.(cfg => {
                         try {
-                            const cur = JSON.parse(localStorage.getItem(Mve) ?? `{}`);
-                            localStorage.setItem(Mve, JSON.stringify({ ...cur, ...cfg }));
+                            const cur = haituoRedactConfigSecrets(JSON.parse(localStorage.getItem(Mve) ?? `{}`));
+                            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...cur, ...cfg })));
                         } catch {}
                     });
                 } catch {}
             }
-            let e = JSON.parse(localStorage.getItem(Mve) ?? `{}`);
+            let e = haituoRedactConfigSecrets(JSON.parse(localStorage.getItem(Mve) ?? `{}`));
             if (!e._nativeAppearanceV1111) {
                 e._nativeAppearanceV1111 = true; e.nativeTheme = `dark`;
                 e.darkTheme = true; delete e.waterInkTheme; delete e.waterInkBackgroundUrl;
@@ -21612,9 +21625,9 @@ http://jedwatson.github.io/classnames
         }
     }
     function kve(e, changes) {
-        localStorage.setItem(Mve, JSON.stringify(e));
-        if (changes) return window.SignalContext.caishengSetTranslationConfig(changes);
-        window.SignalContext.caishengSetTranslationConfig({
+        localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(e)));
+        if (changes) return haituoSendConfigPatch(changes, e.__v);
+        haituoSendConfigPatch({
             provider: e.provider,
             inputTranslationProvider: e.inputTranslationProvider,
             chatTranslationProvider: e.chatTranslationProvider,
@@ -21652,7 +21665,21 @@ http://jedwatson.github.io/classnames
             autoTranslateIncoming: e.autoTranslateIncoming,
             telegramTranslationEnabled: e.telegramTranslationEnabled,
             translationMode: e.translationMode || `normal`,
-            efficiencyMode: e.translationMode === `efficiency`
+            efficiencyMode: e.translationMode === `efficiency`,
+            __v: e.__v
+        });
+    }
+    // R3: carries the config version the patch was based on. Main rejects a
+    // stale save instead of letting an old snapshot clobber newer settings;
+    // on rejection we re-read the current config once and resend.
+    function haituoSendConfigPatch(patch, baseVersion) {
+        const send = value => window.SignalContext.caishengSetTranslationConfig(value);
+        return send(typeof baseVersion == `number` ? { ...patch, __v: baseVersion } : patch).catch(async error => {
+            if (!/已被其他窗口更新/u.test(String(error?.message || error))) throw error;
+            const fresh = await window.SignalContext.caishengGetTranslationConfig().catch(() => null);
+            if (!fresh || typeof fresh.__v != `number`) throw error;
+            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(fresh)));
+            return send({ ...patch, __v: fresh.__v });
         });
     }
     function Ave(e) {
@@ -21769,10 +21796,10 @@ http://jedwatson.github.io/classnames
                 compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint
             };
             delete t.model, delete t.endpoint;
-            localStorage.setItem(Mve, JSON.stringify({
+            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({
                 ...x_(),
                 ...t
-            })), Pve = {
+            }))), Pve = {
                 ...Pve,
                 ...t
             };
@@ -21780,7 +21807,7 @@ http://jedwatson.github.io/classnames
         }).catch(() => {}), window.SignalContext.caishengOnTranslationConfig?.(e => {
             if (!e || typeof e !== `object`) return;
             let t = { ...e, openAIModel: e.model ?? Pve.openAIModel, compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint };
-            delete t.model, delete t.endpoint, Pve = { ...Pve, ...t }, localStorage.setItem(Mve, JSON.stringify({ ...x_(), ...t })), haituoApplySignalIncomingAppearance(Pve);
+            delete t.model, delete t.endpoint, Pve = { ...Pve, ...t }, localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoApplySignalIncomingAppearance(Pve);
         });
     });
     function HaituoShowSignalTranslation(text, isError = !1) {
