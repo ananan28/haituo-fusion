@@ -25059,7 +25059,10 @@ function haituoProviderOrder(e, t) {
 
 const Qp = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-settings.json`);
 
-const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-cache.json`);
+// Per profile: child processes have a different safeStorage key than the
+// main process, so a shared cache file makes each one treat the other's
+// ciphertext as undecryptable and quarantine it in a loop.
+const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, $u === `signal-main` ? `translation-cache.json` : `translation-cache.${$u}.json`);
 
 // Files whose last read failed (corrupt or undecryptable). They stay untouched
 // on disk: the ciphertext may become readable again once system keychain
@@ -25173,7 +25176,9 @@ async function haituoRecoverDeferredProtectedReads() {
     // salvage the newest readable .unreadable-* backup when the main file
     // itself stays undecryptable. Nothing here may block the ready event.
     const candidates = new Set(HaituoProtectedDeferred.keys());
-    for (const file of [ Qp, HaituoTranslationCachePath ]) {
+    // Children cannot decrypt the shared settings file (different safeStorage
+    // key) and must not salvage or rewrite it; only the main process owns Qp.
+    for (const file of [ $u === `signal-main` ? Qp : null, HaituoTranslationCachePath ].filter(Boolean)) {
         if (HaituoProtectedReadOk.has(file) || candidates.has(file)) continue;
         try {
             (0, m.statSync)(file);
@@ -25188,6 +25193,7 @@ async function haituoRecoverDeferredProtectedReads() {
         if (!haituoDecryptProtectedPayload(parsed.data).ok) candidates.add(file);
     }
     for (const file of candidates) {
+        if (file === Qp && $u !== `signal-main`) continue;
         try {
             let payload = null;
             try {
@@ -25241,6 +25247,29 @@ async function haituoRecoverDeferredProtectedReads() {
             }
             if (!HaituoProtectedReadOk.has(file)) {
                 X.error(`haituo: ${(0, s.basename)(file)} and its backups are unreadable; the real settings stay preserved on disk and recovery will retry on next launch`);
+                if (file === Qp && $u === `signal-main` && process.platform === `win32`) try {
+                    // Windows DPAPI keys are stable per user profile, so a
+                    // file written under a different key (old cross-profile
+                    // writes to this shared path) can never decrypt here and
+                    // every save stays blocked forever. Preserve it verbatim
+                    // and start fresh so the user can save settings again.
+                    const quarantined = `${file}.unreadable-${Date.now()}`;
+                    (0, m.renameSync)(file, quarantined);
+                    HaituoProtectedReadOk.add(file);
+                    HaituoProtectedDeferred.delete(file);
+                    HaituoProtectedBlockedFiles.delete(file);
+                    X.warn(`haituo: settings stayed undecryptable on Windows; preserved the old file as ${(0, s.basename)(quarantined)} and started fresh so saves are accepted again`);
+                    await haituoApplyTranslationConfig($p());
+                    p.dialog.showMessageBox({
+                        type: `warning`,
+                        buttons: [ `知道了` ],
+                        title: `设置文件无法解密`,
+                        message: `检测到加密设置文件无法解密，海拓已用默认设置继续运行。`,
+                        detail: `原文件已完整保留为 ${(0, s.basename)(quarantined)}（未删除）。请重新填写 API 配置；如需找回旧设置，请保留该备份并携带 main.log 联系支持。`
+                    }).catch(() => {});
+                } catch (error) {
+                    X.warn(`haituo: could not recover the undecryptable settings file: ${haituoProtectedDescribeError(error)}`);
+                }
                 if (file === HaituoTranslationCachePath) try {
                     // Cross-platform ciphertext (e.g. a macOS keychain blob
                     // opened on Windows) can never decrypt here. Quarantine
@@ -25382,6 +25411,24 @@ function haituoProtectedWrite(file, value) {
 }
 
 let HaituoTranslationCache;
+
+function haituoChildTranslationConfig() {
+    // A child profile shares translation-settings.json with this main process
+    // but not its safeStorage key (Windows derives the key from each
+    // userData dir). Reading or writing that file here is exactly what left
+    // it undecryptable and made every pool save vanish. Children run on the
+    // unredacted snapshot pushed over IPC from the main process instead.
+    const snapshot = Zp && typeof Zp === `object` ? Zp : {};
+    return {
+        chatTextColor: ``, outgoingBubbleColor: ``, incomingBubbleColor: ``, nativeTheme: `dark`, darkTheme: !0,
+        _nativeAppearanceV1111: !0, translationMode: `normal`, translateShortcut: `triple-space`,
+        blockChineseOutgoing: !0, backTranslationEnabled: !0, groupBackTranslationEnabled: !0,
+        telegramTranslationEnabled: !1, autoTranslateIncoming: !0, inputTranslationProvider: `google-free`,
+        chatTranslationProvider: `google-free`, voiceTranscriptionProvider: `groq`, incomingBubbleLinked: !0,
+        chatTextGradientIndex: 0, outgoingBubbleGradientIndex: 0,
+        ...snapshot
+    };
+}
 
 function loadHaituoTranslationCache() {
     if (HaituoTranslationCache) return HaituoTranslationCache;
@@ -25632,6 +25679,7 @@ async function cachedHaituoTranslate(e, t = !1) {
 }
 
 function $p() {
+    if ($u !== `signal-main`) return haituoChildTranslationConfig();
     try {
         let e = haituoProtectedRead(Qp, {});
         let changed = !1;
@@ -25668,6 +25716,12 @@ function rmRefresh(e, t) {
 }
 
 function em(e) {
+    // Single-writer rule: only the main process may persist the shared
+    // settings file. Child profiles have their own safeStorage key, so a
+    // child write re-encrypts the file with a key nobody else can read and
+    // every later save is refused by the read-back gate. Writes before app
+    // ready would also fall back to plaintext (safeStorage unavailable).
+    if ($u !== `signal-main` || !haituoAppReady()) return;
     haituoProtectedWrite(Qp, e);
 }
 
@@ -29448,8 +29502,15 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
             caishengFinishChildLabelRequest(r, e);
             return;
         }
-        if (Yg.get(t) === r && (e && typeof e == `object` && e.type === `caisheng-ready` && (Xg.add(t), 
-        $g(t, r), haituoMacFocusSelectedAccount()), e && typeof e == `object` && e.type === `caisheng-unread-count`)) {
+        if (Yg.get(t) === r && e && typeof e == `object` && e.type === `caisheng-ready`) {
+            Xg.add(t), $g(t, r), haituoMacFocusSelectedAccount();
+            // The child never reads the shared settings file itself; seed it
+            // with the real values as soon as it is ready.
+            const current = $p();
+            caishengSendChild(r, {type:`haituo-global-settings-update`, config:{...current, __v: Math.max(HaituoConfigVersion, Number(current.__v) || 0)}});
+            return;
+        }
+        if (Yg.get(t) === r && e && typeof e == `object` && e.type === `caisheng-unread-count`) {
             let n = e.count;
             typeof n == `number` && Number.isFinite(n) && Z?.webContents.send(`caisheng:unread-count`, {
                 id: t,
@@ -31209,7 +31270,11 @@ function haituoRequestGlobalSettings(config) {
 }
 function haituoPublishGlobalSettings(config) {
     if ($u !== `signal-main`) return;
-    for (const child of Yg.values()) caishengSendChild(child, {type:`haituo-global-settings-update`, config: haituoRedactTranslationConfig(config)});
+    // Child main processes are trusted peers and cannot decrypt the shared
+    // settings file anymore (single-writer rule), so they receive the real
+    // config over IPC. Renderers still only ever see the redacted copy via
+    // haituoBroadcastTranslationConfig.
+    for (const child of Yg.values()) caishengSendChild(child, {type:`haituo-global-settings-update`, config});
 }
 if ($u !== `signal-main`) process.on(`message`, value => {
     if (value?.type === `haituo-global-settings-ack`) {
@@ -31221,6 +31286,7 @@ if ($u !== `signal-main`) process.on(`message`, value => {
     }
     if (value?.type !== `haituo-global-settings-update` || !value.config) return;
     if (typeof Zp?.__v == `number` && typeof value.config.__v == `number` && value.config.__v < Zp.__v) return;
+    if (typeof value.config.__v == `number`) HaituoConfigVersion = Math.max(HaituoConfigVersion, value.config.__v);
     Zp = {...value.config};
     if (Qg) Qg = {...Qg, nativeTheme:Zp.nativeTheme, darkTheme:Zp.darkTheme,
         chatTextColor:Zp.chatTextColor, outgoingBubbleColor:Zp.outgoingBubbleColor,

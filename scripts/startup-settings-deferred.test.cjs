@@ -93,7 +93,7 @@ function jsonEq(actual, expected, message) {
   assert.equal(JSON.stringify(actual), JSON.stringify(expected), message);
 }
 
-function makeCtx() {
+function makeCtx({ platform = 'darwin' } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'haituo-p002-'));
   const log = recorder();
   const state = { appReady: false };
@@ -109,7 +109,9 @@ function makeCtx() {
         return Reflect.get(target, prop);
       },
     }),
-    process: { pid: 987654 },
+    process: { pid: 987654, platform },
+    $u: 'signal-main',
+    $p: () => ({ provider: 'google-free', chatTranslationProvider: 'google-free' }),
     X: log,
     m: {
       readFileSync: fs.readFileSync,
@@ -310,6 +312,29 @@ test('P0-02 persistent denial: main file and backup stay on disk, never join Rea
     assert.equal(fs.readFileSync(`${file}.unreadable-1000`, 'utf8'), beforeBackup, 'backup must survive a failed recovery');
     assert.ok(!ctx.HaituoProtectedReadOk.has(file), 'a never-decryptable file must never unlock writes');
     assert.ok(warnsOrErrors(ctx).some(m => m.includes('and its backups are unreadable')), 'persistent denial must be logged');
+  } finally { cleanup(ctx); }
+});
+
+test('P0-02b Windows: a settings file that can never decrypt is preserved verbatim and replaced with a fresh saveable config', async () => {
+  const ctx = makeCtx({ platform: 'win32' });
+  try {
+    const file = path.join(ctx.__tmp, 'translation-settings.json');
+    writeEncrypted(file, 'FAIL:main');
+    fs.writeFileSync(`${file}.unreadable-1000`, JSON.stringify({ haituoEncrypted: 1, data: b64tag('FAIL:backup') }));
+    const beforeMain = fs.readFileSync(file, 'utf8');
+    ctx.__state.appReady = true;
+    ctx.__controller.decrypt = () => { throw Error('wrong DPAPI key (mock)'); };
+    await vm.runInContext('haituoRecoverDeferredProtectedReads()', ctx);
+    assert.equal(fs.existsSync(file), false, 'the poisoned path must be cleared so fresh saves can land');
+    const preserved = fs.readdirSync(ctx.__tmp).filter(name => /^translation-settings\.json\.unreadable-\d+$/u.test(name)).sort();
+    assert.ok(preserved.length >= 1, 'the undecryptable file must be preserved, never deleted');
+    assert.equal(fs.readFileSync(path.join(ctx.__tmp, preserved.at(-1)), 'utf8'), beforeMain, 'preserved copy must be byte-identical');
+    assert.ok(ctx.HaituoProtectedReadOk.has(file), 'writes must be allowed again');
+    assert.equal(ctx.__applyCalls.length, 1, 'a fresh default config must be applied');
+    assert.equal(ctx.__applyCalls[0].provider, 'google-free');
+    assert.equal(ctx.__dialogs.length, 1, 'the user must be told the old file is preserved');
+    assert.ok(String(ctx.__dialogs[0].title).includes('设置文件无法解密'), `dialog title was: ${ctx.__dialogs[0].title}`);
+    assert.ok(warns(ctx).some(m => m.includes('preserved the old file as')), 'quarantine must be logged');
   } finally { cleanup(ctx); }
 });
 

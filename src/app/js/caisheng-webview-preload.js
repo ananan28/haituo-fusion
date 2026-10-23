@@ -1773,7 +1773,7 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
         ? '.chatlist .chatlist-chat,.chatlist-chat,.chatlist a[href],[class*="chatlist-chat"]'
         : '#pane-side [role="row"],#pane-side [role="listitem"],#pane-side [data-testid="cell-frame-container"],[data-testid="chat-list"] [role="row"],[aria-label="Chat list"] [role="row"],[aria-label="聊天列表"] [role="row"]';
     const cache = new Map(), pending = new Map(), nativeTitles = new Map();
-    let active, snapshot, timer, popup, sourceBox, targetBox, sequence = 0, observer;
+    let active, snapshot, timer, popup, sequence = 0, observer;
     const textOf = node => {
         const visible = String(node?.innerText || node?.textContent || '');
         const held = nativeTitles.get(node);
@@ -1799,6 +1799,111 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
         return text ? { text, name, node, key: name + '\0' + text } : null;
     }
     const valid = (row, data, id) => sequence === id && active === row && row.isConnected && read(row)?.key === data.key;
+
+    // ---- Unread accumulation -------------------------------------------
+    // Both WhatsApp Web and Telegram Web keep only the LAST message in each
+    // chat-list row. Opening a chat to read the rest would send read
+    // receipts, so instead every snippet change observed while the app runs
+    // is accumulated per chat (bounded, session-scoped). On hover the row's
+    // unread badge decides how many of the recorded messages to show; when
+    // fewer were observed than the badge reports, the popup says so instead
+    // of pretending. No click, focus, navigation or read receipt is ever
+    // issued here.
+    const MAX_MESSAGES = 8, MAX_SNIPPETS = 16, HISTORY_KEY = 'haituo-unread-preview-v1';
+    const history = new Map();
+    try {
+        const saved = JSON.parse(window.sessionStorage.getItem(HISTORY_KEY) || '[]');
+        for (const [key, entry] of Array.isArray(saved) ? saved : []) {
+            if (typeof key !== 'string' || !entry || !Array.isArray(entry.texts)) continue;
+            if (Date.now() - Number(entry.updatedAt || 0) > 24 * 60 * 60 * 1000) continue;
+            const texts = entry.texts.filter(item => item && typeof item.text === 'string' && item.text).map(item => ({ text: item.text.slice(0, 4000), at: Number(item.at || 0) }));
+            if (texts.length) history.set(key, { texts: texts.slice(-MAX_SNIPPETS), updatedAt: Number(entry.updatedAt || 0) });
+        }
+    } catch {}
+    function saveHistory() {
+        try {
+            const saved = [...history.entries()].slice(-40).map(([key, entry]) => [key, { texts: entry.texts.slice(-MAX_SNIPPETS), updatedAt: entry.updatedAt }]);
+            window.sessionStorage.setItem(HISTORY_KEY, JSON.stringify(saved));
+        } catch {}
+    }
+    const chatKey = (row, name) => String(row.getAttribute?.('data-id') || row.getAttribute?.('data-peer-id') || row.getAttribute?.('data-chat-id') || name || '').replace(/\u200e|\u200f/gu, '').trim();
+    function unreadCount(row) {
+        // Returns >0 for a numeric or dot badge, 0 only when we can see there
+        // is no unread badge at all. A badge we cannot parse counts as 1.
+        if (isTelegram()) {
+            const badges = row.querySelectorAll('.unread,.dialog-badge,[class*="unread" i],[class*="badge" i]');
+            let seen = false;
+            for (const el of badges) {
+                const text = String(el.textContent || '').trim();
+                if (!text) continue;
+                seen = true;
+                const count = Number(text.replace(/[^\d]/gu, ''));
+                if (Number.isFinite(count) && count > 0) return count;
+            }
+            return seen ? 1 : 0;
+        }
+        const labels = [row.getAttribute('aria-label') || '', ...[...row.querySelectorAll('[aria-label]')].map(el => el.getAttribute('aria-label') || '')].join(' ');
+        const match = labels.match(/(?:unread|未读)[^\d]{0,16}(\d{1,4})/iu) || labels.match(/(\d{1,4})[^\d]{0,16}(?:unread|未读)/iu);
+        if (match && Number(match[1]) > 0) return Number(match[1]);
+        let seen = false;
+        for (const el of row.querySelectorAll('[data-testid="icon-unread-count"],[data-icon="unread-count"],[aria-label*="unread" i],[aria-label*="未读" i]')) {
+            const text = String(el.textContent || '').trim().replace(/[^\d]/gu, '');
+            seen = true;
+            const count = Number(text);
+            if (Number.isFinite(count) && count > 0) return count;
+        }
+        return seen ? 1 : 0;
+    }
+    function remember(row, data, count) {
+        const key = chatKey(row, data.name);
+        if (!key) return;
+        const entry = history.get(key) || { texts: [], updatedAt: 0 };
+        const text = String(data.text || '').slice(0, 4000);
+        entry.updatedAt = Date.now();
+        history.set(key, entry);
+        if (!text || entry.texts.at(-1)?.text === text) return;
+        entry.texts.push({ text, at: entry.updatedAt });
+        if (entry.texts.length > MAX_SNIPPETS) entry.texts.splice(0, entry.texts.length - MAX_SNIPPETS);
+        saveHistory();
+    }
+    function messagesFor(row, data) {
+        const unread = unreadCount(row), entry = history.get(chatKey(row, data.name));
+        // No unread badge: this is a read chat, so preview only its latest
+        // message instead of replaying stale unread history.
+        if (!unread) return { texts: [data.text], unread: 0, missing: 0 };
+        let texts = entry ? entry.texts.map(item => item.text) : [];
+        if (!texts.length || texts.at(-1) !== data.text) texts.push(data.text);
+        texts = texts.slice(-Math.min(unread, MAX_MESSAGES));
+        return { texts: texts.filter(Boolean), unread, missing: unread > texts.length ? unread - texts.length : 0 };
+    }
+    let observedList, listObserver, rootObserver, scanTimer;
+    function scanList() {
+        const list = document.querySelector(isTelegram() ? '.chatlist' : '#pane-side,[aria-label="Chat list"],[aria-label="聊天列表"]');
+        if (!list) return;
+        for (const row of list.querySelectorAll(rows)) {
+            const data = read(row);
+            if (!data) continue;
+            const unread = unreadCount(row);
+            if (unread > 0) remember(row, data, unread);
+            else history.delete(chatKey(row, data.name));
+        }
+    }
+    const scheduleScan = () => { if (!scanTimer) scanTimer = setTimeout(() => { scanTimer = undefined; scanList(); }, 150); };
+    if (document.documentElement) {
+        rootObserver = new window.MutationObserver(() => {
+            const list = document.querySelector(isTelegram() ? '.chatlist' : '#pane-side,[aria-label="Chat list"],[aria-label="聊天列表"]');
+            if (list && list !== observedList) {
+                listObserver?.disconnect();
+                listObserver = new window.MutationObserver(scheduleScan);
+                listObserver.observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-label'] });
+                observedList = list;
+            }
+            if (list) scheduleScan();
+        });
+        rootObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-label'] });
+        scheduleScan();
+    }
+
     function position() {
         if (!popup || !active) return;
         const box = active.getBoundingClientRect(), width = Math.min(420, window.innerWidth - 24);
@@ -1815,50 +1920,85 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
         active = undefined; snapshot = undefined;
         popup?.remove(); popup = undefined;
     }
-    function create(data) {
+    function create(data, messages) {
         // Replace only the native preview title while our bilingual tooltip is visible.
         // No clicks, focus, navigation, or read receipts are issued.
         const title = data.node?.getAttribute('title');
         if (title) { nativeTitles.set(data.node,{title,visible:String(data.node.innerText || data.node.textContent || '')}); data.node.removeAttribute('title'); }
         if (popup) popup.remove();
         popup = document.createElement('section'); popup.id = 'haituo-whatsapp-chat-preview';
-        popup.setAttribute('role', 'tooltip'); popup.setAttribute('aria-label', '消息双语预览');
-        Object.assign(popup.style, { position:'fixed', zIndex:'2147483647', boxSizing:'border-box', padding:'12px', borderRadius:'10px', border:'1px solid #52616b', background:'#202c33', color:'#e9edef', boxShadow:'0 6px 24px #0006', font:'14px/1.5 system-ui,sans-serif', maxHeight:'calc(100vh - 24px)', overflow:'auto', textAlign:'left' });
-        const add = (label, id, text) => {
-            const title = document.createElement('strong'); title.textContent = label;
-            Object.assign(title.style,{display:'block',color:'#55d6b0',fontSize:'12px',marginBottom:'4px'});
-            const body = document.createElement('div'); body.id = id; body.textContent = text;
-            Object.assign(body.style,{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'24vh',overflowY:'auto',marginBottom:'8px',userSelect:'text'});
-            popup.append(title,body); return body;
-        };
-        if (data.name) { const name=document.createElement('div');name.textContent=data.name;name.style.fontWeight='700';name.style.marginBottom='8px';popup.append(name); }
-        sourceBox = add('原文', 'haituo-chat-preview-source', data.text);
-        targetBox = add('中文翻译', 'haituo-chat-preview-translation', '正在翻译…');
+        popup.setAttribute('role', 'tooltip'); popup.setAttribute('aria-label', '未读消息双语预览');
+        Object.assign(popup.style, { position:'fixed', zIndex:'2147483647', boxSizing:'border-box', padding:'12px', borderRadius:'10px', border:'1px solid #52616b', background:'#202c33', color:'#e9edef', boxShadow:'0 6px 24px #0006', font:'14px/1.5 system-ui,sans-serif', maxHeight:'min(70vh,560px)', overflow:'auto', textAlign:'left' });
+        const header = document.createElement('div');
+        header.textContent = data.name || '未读消息';
+        Object.assign(header.style, { fontWeight:'700', marginBottom:'8px', display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' });
+        if (messages.unread > 0) {
+            const badge = document.createElement('span'); badge.textContent = messages.unread + ' 条未读';
+            Object.assign(badge.style, { color:'#0b141a', background:'#25d366', borderRadius:'999px', padding:'1px 7px', fontSize:'12px', fontWeight:'600' });
+            header.append(badge);
+        }
+        popup.append(header);
+        const boxes = [];
+        messages.texts.forEach((text, index) => {
+            const item = document.createElement('div');
+            Object.assign(item.style, { marginBottom:'8px', paddingBottom:'8px', borderBottom:'1px solid #2f3b43' });
+            if (messages.texts.length > 1) {
+                const number = document.createElement('span');
+                number.textContent = String(index + 1) + '.';
+                Object.assign(number.style, { color:'#55d6b0', fontSize:'12px', fontWeight:'700', marginRight:'5px' });
+                item.append(number);
+            }
+            const source = document.createElement('div'); source.className = 'haituo-chat-preview-source'; source.textContent = text;
+            Object.assign(source.style, { color:'#8696a0', whiteSpace:'pre-wrap', overflowWrap:'anywhere', maxHeight:'12vh', overflowY:'auto', fontSize:'12px' });
+            const target = document.createElement('div'); target.className = 'haituo-chat-preview-translation'; target.textContent = '正在翻译…';
+            Object.assign(target.style, { whiteSpace:'pre-wrap', overflowWrap:'anywhere', maxHeight:'22vh', overflowY:'auto', userSelect:'text', marginTop:'2px' });
+            item.append(source, target);
+            popup.append(item);
+            boxes.push(target);
+        });
+        if (messages.missing > 0) {
+            // Be explicit rather than pretending: older unread messages exist
+            // only inside the conversation, which cannot be opened without
+            // sending a read receipt.
+            const note = document.createElement('div');
+            note.textContent = '还有 ' + messages.missing + ' 条更早的未读消息只能打开会话查看；海拓不会自动打开会话，以免发送已读回执。';
+            Object.assign(note.style, { color:'#f0b866', fontSize:'12px', lineHeight:'1.4', marginTop:'2px' });
+            popup.append(note);
+        }
         popup.addEventListener('pointerleave', e => { if (!active?.contains(e.relatedTarget)) hide(); });
         // Preview interactions never bubble into WhatsApp's chat-row navigation.
         popup.addEventListener('click', e => e.stopPropagation());
         (document.body || document.documentElement).append(popup); position();
+        return boxes;
     }
     async function load(row, data, id) {
         if (!valid(row,data,id)) return;
-        create(data);
-        if (cache.has(data.text)) { targetBox.textContent=cache.get(data.text); position(); return; }
-        try {
-            // One outstanding preview request per account; fast hovering must not fill the API queue.
-            if (pending.size && !pending.has(data.text)) await Promise.allSettled([...pending.values()]);
-            if (!valid(row,data,id)) return;
-            if (!pending.has(data.text)) {
-                const task = Promise.resolve().then(() => translate(data.text)).then(result => {
-                    const text=String(typeof result === 'string' ? result : result?.text || '').trim();
-                    if (!text) throw Error('empty preview');
-                    cache.set(data.text,text); if(cache.size>128)cache.delete(cache.keys().next().value); return text;
-                }).finally(() => pending.delete(data.text));
-                pending.set(data.text,task);
+        const messages = messagesFor(row, data);
+        const boxes = create(data, messages);
+        for (let i = 0; i < messages.texts.length; i += 1) {
+            const text = messages.texts[i];
+            if (cache.has(text)) { boxes[i].textContent = cache.get(text); position(); continue; }
+            try {
+                // One outstanding preview request per account; fast hovering must not fill the API queue.
+                if (pending.size) await Promise.allSettled([...pending.values()]);
+                if (!valid(row,data,id)) return;
+                if (!pending.has(text)) {
+                    const task = Promise.resolve().then(() => translate(text)).then(result => {
+                        const translated=String(typeof result === 'string' ? result : result?.text || '').trim();
+                        if (!translated) throw Error('empty preview');
+                        cache.set(text,translated); if(cache.size>128)cache.delete(cache.keys().next().value); return translated;
+                    }).finally(() => pending.delete(text));
+                    pending.set(text,task);
+                }
+                const translated=await pending.get(text);
+                if (!valid(row,data,id)) return;
+                boxes[i].textContent=translated;
+                position();
+            } catch {
+                if (!valid(row,data,id)) return;
+                boxes[i].textContent='暂时无法翻译，请移开鼠标后再次悬停重试';
+                position();
             }
-            const translated=await pending.get(data.text);
-            if (valid(row,data,id)) { targetBox.textContent=translated; position(); }
-        } catch {
-            if (valid(row,data,id)) { targetBox.textContent='暂时无法翻译，请移开鼠标后再次悬停重试'; position(); }
         }
     }
     function start(row) {
@@ -1881,7 +2021,7 @@ function haituoInstallChatHoverPreview({ document, window, translate, delayMs = 
     document.addEventListener('pointerdown',close,true);document.addEventListener('wheel',close,true);document.addEventListener('scroll',close,true);
     document.addEventListener('keydown',key,true);document.addEventListener('visibilitychange',visible);
     window.addEventListener('blur',hide);window.addEventListener('resize',hide);
-    return { hide, destroy(){hide();document.removeEventListener('pointerover',over,true);document.removeEventListener('pointerout',out,true);document.removeEventListener('pointerdown',close,true);document.removeEventListener('wheel',close,true);document.removeEventListener('scroll',close,true);document.removeEventListener('keydown',key,true);document.removeEventListener('visibilitychange',visible);window.removeEventListener('blur',hide);window.removeEventListener('resize',hide);} };
+    return { hide, destroy(){hide();rootObserver?.disconnect();listObserver?.disconnect();if(scanTimer){clearTimeout(scanTimer);scanTimer=undefined}document.removeEventListener('pointerover',over,true);document.removeEventListener('pointerout',out,true);document.removeEventListener('pointerdown',close,true);document.removeEventListener('wheel',close,true);document.removeEventListener('scroll',close,true);document.removeEventListener('keydown',key,true);document.removeEventListener('visibilitychange',visible);window.removeEventListener('blur',hide);window.removeEventListener('resize',hide);} };
 }
 // HAITUO_CHAT_PREVIEW_END
 

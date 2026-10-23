@@ -250,7 +250,7 @@ function makeChildCtx() {
   vm.createContext(ctx);
   vm.runInContext(`$u = 'haituo-child';`, ctx);
   vm.runInContext(`Zp = { __v: 100, nativeTheme: 'dark', chatTextColor: '#111111' };`, ctx);
-  vm.runInContext(childHandlerCode, ctx);
+  vm.runInContext(versionCode + childHandlerCode, ctx);
   ctx.__broadcasts = broadcasts;
   ctx.__themeWrites = themeWrites;
   ctx.__child = msg => childHandler['message'](msg);
