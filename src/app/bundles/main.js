@@ -24928,35 +24928,98 @@ const Qp = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-settings
 
 const HaituoTranslationCachePath = (0, s.join)(p.app.getPath(`appData`), `Haituo`, `translation-cache.json`);
 
+// Files whose last read failed at the decryption stage. They are preserved
+// untouched on disk (the ciphertext may become readable again once system
+// keychain access is restored) and must never be overwritten with defaults.
+const HaituoProtectedBlockedFiles = new Set();
+
+function haituoProtectedDescribeError(error) {
+    // Logs must never contain key material, plaintext or full configs.
+    const message = String(error && error.code || error && error.message || error || ``);
+    return message.replace(/[A-Za-z0-9+/=]{24,}/gu, `[redacted]`).slice(0, 120);
+}
+
 function haituoProtectedRead(file, fallback) {
+    let raw;
     try {
-        const parsed = JSON.parse((0, m.readFileSync)(file, `utf8`));
-        if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
-            const decrypted = p.safeStorage.decryptString(Buffer.from(parsed.data, `base64`));
-            if (!decrypted) return fallback;
-            const value = JSON.parse(decrypted);
-            return value && typeof value === `object` ? value : fallback;
-        }
-        return parsed && typeof parsed === `object` ? parsed : fallback;
-    } catch {
+        raw = (0, m.readFileSync)(file, `utf8`);
+    } catch (error) {
+        // First run: no file yet. Anything else (permissions, etc.) is logged.
+        if (error && error.code === `ENOENT`) return fallback;
+        X.warn(`haituoProtectedRead: cannot read ${(0, s.basename)(file)}: ${haituoProtectedDescribeError(error)}`);
         return fallback;
     }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        // Unrecoverable garbage, but keep it on disk: a human may still be
+        // able to salvage it, and a later save must not silently replace it
+        // without the user knowing. Log loudly instead.
+        X.warn(`haituoProtectedRead: ${(0, s.basename)(file)} is not valid JSON; keeping the existing file untouched`);
+        return fallback;
+    }
+    if (parsed && parsed.haituoEncrypted === 1 && typeof parsed.data === `string` && parsed.data) {
+        let decrypted;
+        try {
+            decrypted = p.safeStorage.decryptString(Buffer.from(parsed.data, `base64`));
+        } catch (error) {
+            X.warn(`haituoProtectedRead: decryption failed for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable: ${haituoProtectedDescribeError(error)}`);
+            HaituoProtectedBlockedFiles.add(file);
+            return fallback;
+        }
+        if (typeof decrypted !== `string` || !decrypted) {
+            X.warn(`haituoProtectedRead: decryption produced no data for ${(0, s.basename)(file)}; keeping the existing file so it stays recoverable`);
+            HaituoProtectedBlockedFiles.add(file);
+            return fallback;
+        }
+        try {
+            const value = JSON.parse(decrypted);
+            if (value && typeof value === `object`) {
+                HaituoProtectedBlockedFiles.delete(file);
+                return value;
+            }
+            X.warn(`haituoProtectedRead: decrypted payload of ${(0, s.basename)(file)} is not an object; keeping the existing file untouched`);
+        } catch (error) {
+            X.warn(`haituoProtectedRead: decrypted payload of ${(0, s.basename)(file)} is not valid JSON; keeping the existing file untouched: ${haituoProtectedDescribeError(error)}`);
+        }
+        HaituoProtectedBlockedFiles.add(file);
+        return fallback;
+    }
+    return parsed && typeof parsed === `object` ? parsed : fallback;
 }
 
 function haituoProtectedWrite(file, value) {
+    if (HaituoProtectedBlockedFiles.has(file)) {
+        // The on-disk file could not be read back (e.g. keychain failure), so
+        // overwriting it with in-memory defaults would destroy the only copy of
+        // the user's settings once decryption works again. Refuse, loudly.
+        X.warn(`haituoProtectedWrite: refusing to overwrite ${(0, s.basename)(file)} because its current contents could not be decrypted; fix keychain access and restart to keep or change those settings`);
+        return !1;
+    }
     (0, m.mkdirSync)((0, s.dirname)(file), {
         recursive: !0
     });
     let payload = ``;
-    if (process.platform !== `darwin` && p.safeStorage.isEncryptionAvailable()) {
-        const blob = p.safeStorage.encryptString(JSON.stringify(value));
-        blob?.length && (payload = JSON.stringify({
-            haituoEncrypted: 1,
-            data: blob.toString(`base64`)
-        }));
+    // Encrypted storage is attempted on every platform, including macOS: the
+    // 1.4.5 macOS startup hang came from an *unverified* encrypted write, so an
+    // encrypted payload is only trusted after a full encrypt→decrypt round-trip
+    // in this very call. Any failure (unavailable keychain, throwing encrypt,
+    // empty blob, failed round-trip) falls back to plaintext 0600 — a save
+    // always lands and is always readable again.
+    try {
+        if (p.safeStorage.isEncryptionAvailable()) {
+            const serialized = JSON.stringify(value);
+            const blob = p.safeStorage.encryptString(serialized);
+            if (blob?.length && p.safeStorage.decryptString(blob) === serialized) payload = JSON.stringify({
+                haituoEncrypted: 1,
+                data: blob.toString(`base64`)
+            });
+            else X.warn(`haituoProtectedWrite: safeStorage round-trip failed for ${(0, s.basename)(file)}; falling back to a plaintext file`);
+        }
+    } catch (error) {
+        X.warn(`haituoProtectedWrite: safeStorage encryption failed for ${(0, s.basename)(file)}; falling back to a plaintext file: ${haituoProtectedDescribeError(error)}`);
     }
-    // macOS builds are ad-hoc signed, so keychain access can silently fail (or
-    // block startup on a prompt) between builds. Keep settings readable there.
     payload || (payload = JSON.stringify(value));
     const temporary = `${file}.${process.pid}.tmp`;
     (0, m.writeFileSync)(temporary, payload, {
@@ -24964,6 +25027,7 @@ function haituoProtectedWrite(file, value) {
         mode: 384
     });
     (0, m.renameSync)(temporary, file);
+    return !0;
 }
 
 let HaituoTranslationCache;

@@ -7,14 +7,14 @@ const start=code.indexOf('function Fv()'),end=code.indexOf('\nfunction Lv',start
 assert.ok(start>=0&&end>start,'getSQLKey slice found');
 const slice=code.slice(start,end);
 
-function makeContext({platform='darwin',config=new Map(),safeStorage}){
+function makeContext({platform='darwin',config=new Map(),safeStorage,profile='signal-main'}){
   const store=config;
   const ctx={
     Buffer,console,
     process:{platform,env:{}},
     n:{Lt:{isLinux:()=>false}},
     a:{S:()=>true,y:()=>'production'},
-    $u:'signal-main',
+    $u:profile,
     p:{app:{isPackaged:true},safeStorage},
     f:{randomBytes:n=>crypto.randomBytes(n)},
     X:{info(){},warn(){},error(){}},
@@ -125,6 +125,18 @@ test('empty ciphertext left by an older build never becomes the database key',()
   const key=ctx.Iv();
   assert.match(key,/^[0-9a-f]{64}$/);
   assert.notEqual(key,'');
+});
+
+test('sub-account profile never touches the recovery key, on any platform',()=>{
+  const storage=goodStorage();
+  storage.decryptString=()=>{throw Error('keychain denied')};
+  for(const platform of ['win32','darwin']){
+    const config=new Map([['key','g'.repeat(64)],['encryptedKey','deadbeef']]);
+    const ctx=makeContext({platform,config,safeStorage:storage,profile:'caisheng-web-1'});
+    assert.equal(ctx.Iv(),'g'.repeat(64));
+    assert.equal(config.get('key'),'g'.repeat(64));
+    assert.equal(config.get('encryptedKey'),'deadbeef','sub-account branch must not rewrite the config either');
+  }
 });
 
 test('recovery key verification drops plaintext only off darwin',()=>{

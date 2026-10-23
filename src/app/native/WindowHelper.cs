@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 public static class HaituoWindowFollower {
@@ -13,30 +12,47 @@ public static class HaituoWindowFollower {
   [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("dwmapi.dll")] static extern int DwmFlush();
   [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint uPeriod);
+  [DllImport("winmm.dll")] static extern uint timeEndPeriod(uint uPeriod);
   public static void Run(long childValue, long parentValue, int left, int top, int right, int bottom) {
     var child = new IntPtr(childValue); var parent = new IntPtr(parentValue);
     const uint positionFlags = 0x0010u | 0x0004u | 0x0100u;
-    try { timeBeginPeriod(1); } catch {}
-    try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High; Thread.CurrentThread.Priority = ThreadPriority.Highest; } catch {}
+    // No process/thread priority boost: the follower must not starve other
+    // programs. Responsiveness comes from the adaptive poll below.
     SetWindowLongPtr(child, -8, parent);
     int stable = 0;
-    while (IsWindow(child) && IsWindow(parent)) {
-      RECT clientRect, childRect; POINT origin = new POINT();
-      bool moved = false;
-      if (GetClientRect(parent, out clientRect) && ClientToScreen(parent, ref origin) && GetWindowRect(child, out childRect)) {
-        int clientWidth = clientRect.Right - clientRect.Left, clientHeight = clientRect.Bottom - clientRect.Top;
-        int x = origin.X + left, y = origin.Y + top;
-        int width = Math.Max(1, clientWidth - left - right), height = Math.Max(1, clientHeight - top - bottom);
-        if (childRect.Left != x || childRect.Top != y || childRect.Right - childRect.Left != width || childRect.Bottom - childRect.Top != height) {
-          SetWindowPos(child, IntPtr.Zero, x, y, width, height, positionFlags);
-          DwmFlush();
-          moved = true;
+    bool timerArmed = false;
+    try {
+      while (IsWindow(child) && IsWindow(parent)) {
+        RECT clientRect, childRect; POINT origin = new POINT();
+        bool moved = false;
+        if (GetClientRect(parent, out clientRect) && ClientToScreen(parent, ref origin) && GetWindowRect(child, out childRect)) {
+          int clientWidth = clientRect.Right - clientRect.Left, clientHeight = clientRect.Bottom - clientRect.Top;
+          int x = origin.X + left, y = origin.Y + top;
+          int width = Math.Max(1, clientWidth - left - right), height = Math.Max(1, clientHeight - top - bottom);
+          if (childRect.Left != x || childRect.Top != y || childRect.Right - childRect.Left != width || childRect.Bottom - childRect.Top != height) {
+            SetWindowPos(child, IntPtr.Zero, x, y, width, height, positionFlags);
+            DwmFlush();
+            moved = true;
+          }
+        }
+        // Adaptive polling: 1ms only while the parent actually moves (with the
+        // 1ms scheduler resolution armed for that period), easing to 8ms once
+        // it settles and to 16ms once it stays parked long enough, at which
+        // point the raised timer resolution is released again so an idle
+        // window costs almost no wakeups and no system-wide timer pressure.
+        stable = moved ? 0 : stable + 1;
+        if (stable == 0) {
+          if (!timerArmed) { try { timeBeginPeriod(1); } catch {} timerArmed = true; }
+          Thread.Sleep(1);
+        } else if (stable < 32) {
+          Thread.Sleep(stable >= 8 ? 8 : 1);
+        } else {
+          if (timerArmed) { try { timeEndPeriod(1); } catch {} timerArmed = false; }
+          Thread.Sleep(16);
         }
       }
-      // Poll at 1ms while the parent keeps moving; drop to 8ms once it is idle
-      // so a parked window costs a fraction of the wakeups.
-      stable = moved ? 0 : Math.Min(stable + 1, 8);
-      Thread.Sleep(stable >= 8 ? 8 : 1);
+    } finally {
+      if (timerArmed) { try { timeEndPeriod(1); } catch {} }
     }
   }
 

@@ -24,11 +24,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/tools-package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: node --test scripts/translation-validation.test.cjs scripts/network.test.cjs scripts/screenshot.test.cjs scripts/key-recovery.test.cjs scripts/preload-completion.test.cjs scripts/web-loading-effect.test.cjs
-      - run: python scripts/build.py --target ${{ matrix.target }} --test
+      - name: Unit and regression tests
+        run: node --test scripts/translation-validation.test.cjs scripts/network.test.cjs scripts/screenshot.test.cjs scripts/key-recovery.test.cjs scripts/preload-completion.test.cjs scripts/web-loading-effect.test.cjs scripts/protected-config.test.cjs scripts/screenshot-source.test.cjs scripts/preview-concurrency.test.cjs
+      - name: Build installer, verify package, run runtime tests (GUI only where a desktop session exists)
+        run: python scripts/build.py --target ${{ matrix.target }} --test
       - run: python scripts/package-source.py --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:

@@ -12,6 +12,16 @@ function profilesForConfig(cfg){
  return [...new Map(candidates.filter(p=>p.apiKey&&p.model).map(p=>[String(p.endpoint||'')+'\0'+p.apiKey+'\0'+p.model,p])).values()];
 }
 function screenshotRoutes(cfg){const free=[{provider:'google-free',apiKey:''}];if(Array.isArray(cfg.screenshotApiPool))return cfg.screenshotApiPool.length?cfg.screenshotApiPool.filter(p=>p.enabled!==false):free;if(['google-free','google-cloud'].includes(cfg.screenshotTranslationProvider))return[{provider:cfg.screenshotTranslationProvider,apiKey:cfg.googleCloudApiKey||''}];if(!cfg.screenshotApiKey)return free;const legacy=profilesForConfig(cfg).map(p=>({...p,provider:'openai'}));return legacy.length?legacy:free}
+function pickScreenSource(sources,displayId){
+ // Exact display-id match only. Source order is NOT guaranteed to follow the
+ // display list, so index-based pairing and "any non-empty thumbnail" picks can
+ // silently capture the wrong monitor; with several unmatched screens we fail
+ // loudly instead and let the user retry.
+ if(!Array.isArray(sources)||!sources.length)return null;
+ const byDisplayId=sources.find(s=>s.display_id===String(displayId));
+ if(byDisplayId)return byDisplayId;
+ return sources.length===1?sources[0]:null;
+}
 function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},getAppWindow=()=>null}){
  let overlay,translationEpoch=0,capturing=false,shortcut='',copyShortcut='',shortcutPaused=false,image,display,generation=0;
  const preload=path.join(__dirname,'haituo-screenshot-preload.js');
@@ -44,7 +54,7 @@ function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},
    throw lastError||Error('没有可用截图接口');
   }catch(error){send({status:'截图翻译失败：'+String(error.message||error).replace(/Bearer\s+\S+/gi,'[已隐藏密钥]').slice(0,350),failed:true})}
  }
- async function start(options={}){if(capturing)return;const captureOnly=options.mode==='capture';if(!captureOnly&&!screenshotRoutes(getConfig()).length){await openSettings();return;}capturing=true;const token=++generation;try{display=e.screen.getDisplayNearestPoint(e.screen.getCursorScreenPoint());const sources=await e.desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.bounds.width*display.scaleFactor),height:Math.round(display.bounds.height*display.scaleFactor)},fetchWindowIcons:false});if(token!==generation)return;const byDisplayId=sources.find(s=>s.display_id===String(display.id));const byDisplayIndex=()=>{const displays=e.screen.getAllDisplays?.()||[];const index=displays.findIndex(d=>d.id===display.id);return index>=0&&index<sources.length?sources[index]:null};const source=byDisplayId||(sources.length===1?sources[0]:null)||byDisplayIndex()||sources.find(s=>!s.thumbnail.isEmpty())||null;if(!source||source.thumbnail.isEmpty())throw Error('无法获取屏幕画面。Mac：请到 系统设置 → 隐私与安全性 → 屏幕录制 勾选海拓，然后完全退出海拓（Cmd+Q）再重新打开；多显示器下如仍失败，请重启后再试');if(source!==byDisplayId){const fallbackDisplay=(e.screen.getAllDisplays?.()||[]).find(d=>d.id===Number(source.display_id));if(fallbackDisplay)display=fallbackDisplay;}image=source.thumbnail;const data=image.toDataURL();overlay=windowFor({x:display.bounds.x,y:display.bounds.y,width:display.bounds.width,height:display.bounds.height,frame:false,resizable:false,movable:false,alwaysOnTop:true,skipTaskbar:true,show:false});const w=overlay;w.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});w.on('closed',()=>{if(overlay===w){overlay=null;image=null;capturing=false;generation++}});await w.loadFile(path.join(__dirname,'haituo-screenshot.html'));w.webContents.send('haituo:screenshot-result',{type:'capture',image:data,mode:captureOnly?'capture':'translate'});if(token!==generation||w.isDestroyed())return;w.show();w.focus();}catch(error){cancel();e.dialog.showErrorBox('截图翻译',String(error.message||error))}}
+ async function start(options={}){if(capturing)return;const captureOnly=options.mode==='capture';if(!captureOnly&&!screenshotRoutes(getConfig()).length){await openSettings();return;}capturing=true;const token=++generation;try{display=e.screen.getDisplayNearestPoint(e.screen.getCursorScreenPoint());const sources=await e.desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.bounds.width*display.scaleFactor),height:Math.round(display.bounds.height*display.scaleFactor)},fetchWindowIcons:false});if(token!==generation)return;const byDisplayId=sources.find(s=>s.display_id===String(display.id));const source=pickScreenSource(sources,display.id);if(!source||source.thumbnail.isEmpty())throw Error('无法获取屏幕画面。Mac：请到 系统设置 → 隐私与安全性 → 屏幕录制 勾选海拓，然后完全退出海拓（Cmd+Q）再重新打开；多显示器下如仍失败，请重启后再试；多显示器且无法可靠匹配到当前屏幕时，海拓不会猜测其他屏幕，请重新插拔显示器或改为单屏后重试');if(source!==byDisplayId){const fallbackDisplay=(e.screen.getAllDisplays?.()||[]).find(d=>d.id===Number(source.display_id));if(fallbackDisplay)display=fallbackDisplay;}image=source.thumbnail;const data=image.toDataURL();overlay=windowFor({x:display.bounds.x,y:display.bounds.y,width:display.bounds.width,height:display.bounds.height,frame:false,resizable:false,movable:false,alwaysOnTop:true,skipTaskbar:true,show:false});const w=overlay;w.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});w.on('closed',()=>{if(overlay===w){overlay=null;image=null;capturing=false;generation++}});await w.loadFile(path.join(__dirname,'haituo-screenshot.html'));w.webContents.send('haituo:screenshot-result',{type:'capture',image:data,mode:captureOnly?'capture':'translate'});if(token!==generation||w.isDestroyed())return;w.show();w.focus();}catch(error){cancel();e.dialog.showErrorBox('截图翻译',String(error.message||error))}}
  function configure(config){
   const next=config.screenshotEnabled!==true?'':String(config.screenshotShortcut||'CommandOrControl+Alt+O').trim(),copy=config.screenshotCopyEnabled===true?String(config.screenshotCopyShortcut||'CommandOrControl+Alt+S').trim():'';
   if(next&&next.toLowerCase()===copy.toLowerCase())throw Error('截图与截图翻译不能使用同一快捷键');
@@ -81,4 +91,4 @@ function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},
 
  return{start,configure,pauseShortcut,resumeShortcut,verifyUI,get capturing(){return capturing}};
 }
-module.exports={screenshotRoutes,createController,cropRect,parseResult,endpoint,profilesForConfig};
+module.exports={screenshotRoutes,createController,cropRect,parseResult,endpoint,profilesForConfig,pickScreenSource};

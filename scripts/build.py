@@ -12,6 +12,13 @@ def run(args, **kwargs):
     print('Running:', ' '.join(args), flush=True)
     subprocess.run(args, check=True, **kwargs)
 
+def npm_git_flag():
+    # npm ≥12 refuses git dependencies unless explicitly allowed; npm ≤11 has
+    # no such switch. Detect the major version so both install paths work.
+    binary = shutil.which('npm.cmd') if os.name == 'nt' else 'npm'
+    version = subprocess.run([binary, '--version'], capture_output=True, text=True, check=True).stdout.strip()
+    return ['--allow-git=all'] if int(version.split('.')[0]) >= 12 else []
+
 def fetch(url):
     for attempt in range(4):
         try:
@@ -37,7 +44,7 @@ def install_archive(data, dest, prefix=''):
             target.write_bytes(archive.extractfile(member).read())
             target.chmod(member.mode)
 
-def prepare(target, include_test_hook=False):
+def prepare(target):
     app = ROOT/'macos/staging/app'
     if app.exists():
         shutil.rmtree(app)
@@ -58,10 +65,19 @@ def prepare(target, include_test_hook=False):
     install_archive(data, dest)
     tools = ROOT/'.build/tools'
     tools.mkdir(parents=True, exist_ok=True)
-    (tools/'package.json').write_text(json.dumps({'private': True}), encoding='utf-8')
-    run(['npm','install','--prefix',tools,'--ignore-scripts','--no-audit','--no-fund','--save-exact',
-         'electron-builder@'+CFG['tools']['electron-builder'],
-         '@electron/packager@'+CFG['tools']['packager'], 'tar@'+CFG['tools']['tar']])
+    # Deterministic tool install: the committed lockfile pins the full
+    # transitive tree so a fresh machine resolves the exact same versions.
+    deps = {
+        'electron-builder': CFG['tools']['electron-builder'],
+        '@electron/packager': CFG['tools']['packager'],
+        'tar': CFG['tools']['tar'],
+    }
+    (tools/'package.json').write_text(json.dumps({'private': True, 'dependencies': deps}, indent=2), encoding='utf-8')
+    committed_lock = ROOT/'scripts/tools-package-lock.json'
+    if not committed_lock.exists():
+        raise SystemExit('scripts/tools-package-lock.json is missing; restore it from the repository — it pins the build-tool dependency tree.')
+    shutil.copy2(committed_lock, tools/'package-lock.json')
+    run(['npm','ci','--prefix',tools,'--ignore-scripts','--no-audit','--no-fund',*npm_git_flag()])
     nested = dest/'node_modules'
     nested.mkdir(exist_ok=True)
     for path in (tools/'node_modules').iterdir():
@@ -71,12 +87,9 @@ def prepare(target, include_test_hook=False):
     if target == 'macos':
         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
     if target == 'windows':
-        env = {**os.environ}
-        # Ship a clean bundle: the runtime test hook is injected only when the
-        # subsequent test phase will actually use it.
-        if include_test_hook:
-            env['HAITUO_INCLUDE_TEST_HOOK'] = '1'
-        run([sys.executable,'scripts/prepare-windows.py'], env=env)
+        # Always stage a clean bundle; the runtime test hook is injected later
+        # into a separate test build, never into the release package.
+        run([sys.executable,'scripts/prepare-windows.py'])
     run(['node','scripts/test-native-ocr.cjs',app])
     pkgpath=app/'package.json'
     pkg=json.loads(pkgpath.read_text(encoding='utf-8'))
@@ -91,6 +104,27 @@ def prepare(target, include_test_hook=False):
     for file in ['bundles/main.js','bundles/preload/main.js','js/caisheng-webview-preload.js']:
         run(['node','--check',app/file])
     return app, tools
+
+WINDOWS_TEST_HOOK_MARKERS = [b'HAITUO_WINDOWS_RUNTIME', b'HAITUO_MESSAGE_TEST']
+
+def inject_windows_test_hook(app):
+    target = app/'bundles/main.js'
+    hook = (ROOT/'windows/runtime-test-hook.js').read_text(encoding='utf-8')
+    target.write_text(target.read_text(encoding='utf-8')+'\n'+hook, encoding='utf-8')
+    run(['node','--check',target])
+
+def windows_unpacked_asar():
+    return ROOT/'windows/out/win-unpacked/resources/app.asar'
+
+def check_windows_package(marker_present):
+    # Inspect the final asar that ships in the installer, not the source
+    # switches: the release package must never contain the runtime test hook.
+    data = windows_unpacked_asar().read_bytes()
+    found = any(marker in data for marker in WINDOWS_TEST_HOOK_MARKERS)
+    if marker_present and not found:
+        raise SystemExit('Test build sanity check failed: runtime test hook missing from app.asar')
+    if not marker_present and found:
+        raise SystemExit('Release package check failed: runtime test hook present in the final app.asar')
 
 def windows(app, tools):
     run([sys.executable,'scripts/prepare-helper.py'])
@@ -158,6 +192,28 @@ def macos(app, tools):
             time.sleep(2)
     run(['hdiutil','verify',dmg])
 
+def run_windows_tests(app, tools):
+    # The release installer is built and verified clean first. Tests then run
+    # against a separate hooked build so the shipped artifact never contains
+    # the runtime test hook.
+    release_dir = ROOT/'windows/out-release'
+    shutil.rmtree(release_dir, ignore_errors=True)
+    release_dir.mkdir(parents=True)
+    for artifact in (ROOT/'windows/out').glob('*Setup.exe'):
+        artifact.rename(release_dir/artifact.name)
+    try:
+        shutil.rmtree(ROOT/'windows/out/win-unpacked', ignore_errors=True)
+        inject_windows_test_hook(app)
+        windows(app, tools)
+        check_windows_package(marker_present=True)
+        run([sys.executable,'scripts/test-project.py','--target','windows'])
+    finally:
+        for artifact in (ROOT/'windows/out').glob('*Setup.exe'):
+            artifact.unlink()
+        for artifact in release_dir.glob('*Setup.exe'):
+            artifact.rename(ROOT/'windows/out'/artifact.name)
+        shutil.rmtree(release_dir, ignore_errors=True)
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--target',choices=['windows','macos'],required=True)
     parser.add_argument('--test',action='store_true');args=parser.parse_args()
@@ -165,9 +221,14 @@ def main():
         raise SystemExit('Use a matching Windows x64 or macOS ARM64 machine.')
     if args.target=='macos' and platform.machine()!='arm64':
         raise SystemExit('Mac 构建需要 Apple Silicon（arm64）机器，避免产出架构不匹配的原生组件。')
-    app,tools=prepare(args.target, include_test_hook=args.test)
+    app,tools=prepare(args.target)
     globals()[args.target](app,tools)
+    if args.target=='windows':
+        check_windows_package(marker_present=False)
     if args.test:
-        run([sys.executable,'scripts/test-project.py','--target',args.target])
+        if args.target=='windows':
+            run_windows_tests(app, tools)
+        else:
+            run([sys.executable,'scripts/test-project.py','--target','macos'])
 
 if __name__=='__main__':main()

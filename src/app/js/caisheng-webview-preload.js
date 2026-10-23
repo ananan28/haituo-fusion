@@ -795,7 +795,7 @@ function toggleApiSettings() {
         return wrap.append(select), wrap;
     };
     const version = document.createElement("div");
-    version.innerHTML = "<strong>海拓 1.4.5 翻译设置</strong>", Object.assign(version.style, { padding: "8px 10px", borderRadius: "7px", fontSize: "13px", lineHeight: "1.45" }), settingsPanel.append(version);
+    version.innerHTML = "<strong>海拓 1.5.0 翻译设置</strong>", Object.assign(version.style, { padding: "8px 10px", borderRadius: "7px", fontSize: "13px", lineHeight: "1.45" }), settingsPanel.append(version);
     settingsPanel.append(makeProviderSelect("输入翻译服务", "inputTranslationProvider"), makeProviderSelect("聊天翻译服务", "chatTranslationProvider"), makeProviderSelect("语音转文字服务", "voiceTranscriptionProvider", [ [ "groq", "Groq Whisper（默认）" ], [ "openai", "OpenAI Whisper" ], [ "keppl", "Keppl Whisper" ] ]), makeInput("OpenAI API Key", "apiKey", "password"), makeInput("DeepL API Key", "deepLApiKey", "password"), makeInput("Groq API Key", "groqApiKey", "password"), makeInput("Keppl 音转文 API Key", "kepplApiKey", "password"), makeInput("Keppl 音转文地址", "kepplEndpoint"), makeInput("Keppl 音转文模型", "kepplModel"), makeInput("API 地址", "endpoint"), makeInput("模型", "model"), makeInput("区域", "region")), 
     document.body.append(settingsPanel), applyTranslatorTheme();
     const drawerButton = document.createElement("button"), drawer = document.createElement("div"), rows = document.createElement("div"), add = document.createElement("button");

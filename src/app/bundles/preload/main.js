@@ -230434,7 +230434,7 @@ function haituoCachedSignalTranslation(text) {
                 children: [ (0, O9.jsxs)(`div`, {
                     className: `HaituoBrand`,
                     children: [ (0, O9.jsx)(`img`, { className: `HaituoBrand__coin`, src: `images/haituo-coin.png`, alt: `海拓` }), (0, O9.jsxs)(`span`, {
-                        children: [ (0, O9.jsxs)(`strong`, { children: [ `海拓集团`, (0, O9.jsx)(`em`, { children: m.brandBadgeText ?? `SVIP` }) ] }), (0, O9.jsx)(`small`, { children: `当前版本 1.3.8` }) ]
+                        children: [ (0, O9.jsxs)(`strong`, { children: [ `海拓集团`, (0, O9.jsx)(`em`, { children: m.brandBadgeText ?? `SVIP` }) ] }), (0, O9.jsx)(`small`, { children: `当前版本 1.5.0` }) ]
                     }) ]
                 }), (0, O9.jsxs)(`div`, {
                     className: `HaituoPlatformFilters`,
@@ -230564,7 +230564,7 @@ function haituoCachedSignalTranslation(text) {
                     onClick: e => e.stopPropagation(),
                     children: [ (0, O9.jsxs)(`div`, {
                         style: { padding: `9px 11px`, borderRadius: `8px`, background: `#1b160d`, color: `#ffe4a3`, border: `1px solid #765116`, fontSize: `13px`, lineHeight: `1.45` },
-                        children: [ (0, O9.jsx)(`strong`, { children: `基础翻译设置` }), (0, O9.jsx)(`div`, { children: `海拓 1.4.2` }) ]
+                        children: [ (0, O9.jsx)(`strong`, { children: `基础翻译设置` }), (0, O9.jsx)(`div`, { children: `海拓 1.5.0` }) ]
                     }), (0, O9.jsxs)(`label`, {
                         children: [ (0, O9.jsx)(`input`, {
                             type: `checkbox`, checked: !!m.hideTranslationBox,
@@ -235561,6 +235561,33 @@ const haituoSignalChatPreviewInit = (function(){
   const cache = new Map(), pending = new Map();
   const HAN = /[\u3400-\u9fff]/u, LATIN = /[a-z]/iu;
   let popup, active, snapshot, timer, observer, seq = 0;
+  // Cached previews must not survive a provider/model switch, so the cache key
+  // carries a config epoch. The fingerprint keeps only translation-relevant
+  // fields and drops anything that looks like a credential.
+  let configEpoch = 0, configFingerprint = '';
+  const fingerprintConfig = cfg => {
+    try {
+      return JSON.stringify({
+        provider: cfg && cfg.chatTranslationProvider,
+        mode: cfg && cfg.translationMode,
+        pools: cfg && cfg.translationPools
+      }, (key, value) => /key|token|secret|auth|password/iu.test(key) ? undefined : value);
+    } catch { return ''; }
+  };
+  const applyConfig = cfg => {
+    const fp = fingerprintConfig(cfg);
+    if (!fp) return;
+    // The first observed config only establishes the baseline: translations
+    // cached before it arrived were made with those very settings, so they
+    // must stay valid. Only a later *change* invalidates the cache.
+    if (configFingerprint === '') { configFingerprint = fp; return; }
+    if (fp !== configFingerprint) { configFingerprint = fp; configEpoch += 1; }
+  };
+  try {
+    const api = window.SignalContext;
+    if (typeof api?.caishengGetTranslationConfig === 'function') Promise.resolve(api.caishengGetTranslationConfig()).then(applyConfig).catch(() => {});
+    if (typeof api?.caishengOnTranslationConfig === 'function') api.caishengOnTranslationConfig(applyConfig);
+  } catch {}
   function readRow(row) {
     // Typing indicators and unsent drafts render in the same slot as message
     // previews; hovering must never ship those to the translation service.
@@ -235616,25 +235643,28 @@ const haituoSignalChatPreviewInit = (function(){
     if (HAN.test(data.text) && !LATIN.test(data.text)) {
       create(data); popup.__target.textContent = data.text; position(); return;
     }
-    if (cache.has(data.text)) { create(data); popup.__target.textContent = cache.get(data.text); position(); return; }
+    // The epoch makes stale translations unreachable after a config change.
+    const cacheKey = configEpoch + ' ' + data.text;
+    if (cache.has(cacheKey)) { create(data); popup.__target.textContent = cache.get(cacheKey); position(); return; }
     create(data);
     const target = popup.__target;
     try {
       const bridge = window.SignalContext?.caishengTranslate;
       if (typeof bridge !== 'function') throw Error('翻译服务不可用');
-      if (pending.size && !pending.has(data.text)) await Promise.allSettled([...pending.values()]);
+      // Never wait for unrelated in-flight requests: hovering a new message
+      // must start immediately, and a stuck older request must not block it.
       if (!valid(row, data, id)) return;
-      if (!pending.has(data.text)) {
+      if (!pending.has(cacheKey)) {
         const task = Promise.resolve().then(() => bridge({ text: data.text, targetLanguage: 'zh-CN', purpose: 'chat' })).then(result => {
           const text = String(result?.text || '').trim();
           if (!text) throw Error('empty preview');
-          cache.set(data.text, text);
+          cache.set(cacheKey, text);
           if (cache.size > 128) cache.delete(cache.keys().next().value);
           return text;
-        }).finally(() => pending.delete(data.text));
-        pending.set(data.text, task);
+        }).finally(() => pending.delete(cacheKey));
+        pending.set(cacheKey, task);
       }
-      const translated = await pending.get(data.text);
+      const translated = await pending.get(cacheKey);
       if (valid(row, data, id) && target.isConnected) { target.textContent = translated; position(); }
     } catch {
       if (valid(row, data, id) && target.isConnected) { target.textContent = '暂时无法翻译，请移开鼠标后再次悬停重试'; position(); }
