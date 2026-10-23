@@ -29403,7 +29403,7 @@ function Iv() {
         currentBackend: String(c),
         previousBackend: s
     });
-    let u;
+    let u, h = !1;
     if ($u !== `signal-main` && typeof o == `string` && o) try {
         const key = p.safeStorage.decryptString(Buffer.from(o, `hex`));
         if (!key) throw Error(`getSQLKey: safeStorage returned an empty key`);
@@ -29421,13 +29421,13 @@ function Iv() {
             if (!u) throw Error(`getSQLKey: safeStorage returned an empty key`);
         } catch (e) {
             if (typeof r != `string`) throw e;
-            X.warn(`getSQLKey: safeStorage decryption failed; using preserved recovery key`), 
-            u = r;
+            X.warn(`getSQLKey: safeStorage decryption failed; using preserved recovery key`),
+            u = r, h = !0;
         }
-        if (typeof r == `string`) if (u === r) X.info(`getSQLKey: recovery key verified`), 
-        process.platform !== `darwin` && fd(`key`, void 0); else {
+        if (typeof r == `string`) if (u === r) X.info(`getSQLKey: recovery key verified`),
+        !h && process.platform !== `darwin` && fd(`key`, void 0); else {
             if (X.warn(`getSQLKey: decrypted modern key mismatch with legacy key`), Lv() === `quit`) throw new ug;
-            u = r;
+            u = r, h = !0;
         }
         t && s == null && (X.info(`getSQLKey: saving safeStorageBackend: ${c}`), fd(`safeStorageBackend`, c));
     } else typeof r == `string` ? (u = r, e = l, e ? X.info(`getSQLKey: migrating key`) : X.info(`getSQLKey: using legacy key`)) : (X.warn(`getSQLKey: got key from config, but it wasn't a string`), 
@@ -29437,13 +29437,24 @@ function Iv() {
         const blob = p.safeStorage.encryptString(u);
         // Only trust safeStorage after a round-trip check, and never drop the
         // recovery key on unsigned macOS builds: keychain access can break
-        // between builds and would otherwise brick the database forever.
-        if (blob?.length && p.safeStorage.decryptString(blob) === u) {
+        // between builds and would otherwise brick the database forever. The
+        // same applies on Windows whenever this boot already needed the
+        // recovery key (decrypt failed/mismatch): dropping it would brick the
+        // database on the next decryption failure. It is dropped on the next
+        // boot where decryption genuinely succeeds. A round-trip check that
+        // itself throws counts as a failed check, never a crashed boot.
+        let verified = !1;
+        try {
+            verified = !!(blob?.length && p.safeStorage.decryptString(blob) === u);
+        } catch (e) {
+            X.warn(`getSQLKey: safeStorage round-trip check threw; keeping plaintext recovery key`);
+        }
+        if (verified) {
             fd(`encryptedKey`, blob.toString(`hex`));
-            if (process.platform === `darwin`) {
-                X.info(`getSQLKey: keeping plaintext recovery key for unsigned macOS builds`), 
+            if (process.platform === `darwin` || h) {
+                X.info(h ? `getSQLKey: keeping plaintext recovery key after a decryption failure` : `getSQLKey: keeping plaintext recovery key for unsigned macOS builds`),
                 fd(`key`, u);
-            } else X.info(`getSQLKey: dropping plaintext key once the encrypted key is stored`), 
+            } else X.info(`getSQLKey: dropping plaintext key once the encrypted key is stored`),
             fd(`key`, void 0);
             t && c && (X.info(`getSQLKey: saving safeStorageBackend: ${c}`), fd(`safeStorageBackend`, c));
         } else X.warn(`getSQLKey: safeStorage round-trip failed; keeping plaintext recovery key`), 

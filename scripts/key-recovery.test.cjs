@@ -93,6 +93,32 @@ test('windows drops the plaintext key only after a verified round-trip',()=>{
   assert.equal(config2.has('encryptedKey'),false);
 });
 
+test('windows keeps the recovery key after a decryption failure (repeat failure must not brick)',()=>{
+  const storage=goodStorage();
+  storage.decryptString=()=>{throw Error('DPAPI unavailable')};
+  const config=new Map([['key','f'.repeat(64)],['encryptedKey','deadbeef']]);
+  const ctx=makeContext({platform:'win32',config,safeStorage:storage});
+  assert.equal(ctx.Iv(),'f'.repeat(64));
+  assert.equal(config.get('key'),'f'.repeat(64),'boot that used the recovery key must not delete it');
+  const ctx2=makeContext({platform:'win32',config,safeStorage:storage});
+  assert.equal(ctx2.Iv(),'f'.repeat(64),'second boot with decryption still failing must recover again');
+  assert.equal(config.get('key'),'f'.repeat(64));
+});
+
+test('windows drops the plaintext key again once decryption genuinely succeeds',()=>{
+  const config=new Map([['key','f'.repeat(64)]]);
+  const failing=goodStorage();
+  failing.decryptString=()=>{throw Error('DPAPI unavailable')};
+  const ctx=makeContext({platform:'win32',config,safeStorage:failing});
+  assert.equal(ctx.Iv(),'f'.repeat(64));
+  assert.equal(config.get('key'),'f'.repeat(64));
+  // DPAPI healthy again on the next boot: the encrypted key decrypts, so the
+  // plaintext recovery key may be dropped as usual.
+  const healthy=makeContext({platform:'win32',config,safeStorage:goodStorage()});
+  assert.equal(healthy.Iv(),'f'.repeat(64));
+  assert.equal(config.get('key'),undefined);
+});
+
 test('empty ciphertext left by an older build never becomes the database key',()=>{
   const config=new Map([['encryptedKey','']]);
   const ctx=makeContext({config,safeStorage:goodStorage()});
