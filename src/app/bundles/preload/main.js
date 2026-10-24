@@ -21700,7 +21700,7 @@ http://jedwatson.github.io/classnames
             kepplModel: e.kepplModel,
             endpoint: e.provider === `libre` ? e.libreEndpoint : e.compatibleEndpoint,
             model: e.openAIModel,
-            region: e.microsoftRegion,
+            region: e.microsoftRegion || e.region,
             targetLanguage: e.targetLanguage,
             timeoutMs: e.timeoutMs,
             translateShortcut: e.translateShortcut,
@@ -21864,7 +21864,8 @@ http://jedwatson.github.io/classnames
             let t = {
                 ...e,
                 openAIModel: e.model ?? Pve.openAIModel,
-                compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint
+                compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint,
+                microsoftRegion: e.microsoftRegion ?? e.region ?? Pve.microsoftRegion
             };
             delete t.model, delete t.endpoint;
             localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({
@@ -21877,7 +21878,7 @@ http://jedwatson.github.io/classnames
             haituoApplySignalIncomingAppearance(Pve);
         }).catch(() => {}), window.SignalContext.caishengOnTranslationConfig?.(e => {
             if (!e || typeof e !== `object`) return;
-            let t = { ...e, openAIModel: e.model ?? Pve.openAIModel, compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint };
+            let t = { ...e, openAIModel: e.model ?? Pve.openAIModel, compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint, microsoftRegion: e.microsoftRegion ?? e.region ?? Pve.microsoftRegion };
             delete t.model, delete t.endpoint, Pve = { ...Pve, ...t }, localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoApplySignalIncomingAppearance(Pve);
         });
     });
@@ -209576,27 +209577,27 @@ function haituoCachedSignalTranslation(text) {
                     onChange: e => h({
                         groqApiKey: e.target.value
                     })
-                }) : null, a.provider === `openai` ? (0, u6.jsx)(`input`, {
+                }) : null, [ a.inputTranslationProvider, a.chatTranslationProvider ].some(value => [ `openai`, `qwen`, `glm`, `deepseek` ].includes(value)) ? (0, u6.jsx)(`input`, {
                     "aria-label": `OpenAI 模型`,
                     value: a.openAIModel,
                     onChange: e => h({
                         openAIModel: e.target.value
                     })
-                }) : null, a.provider === `libre` ? (0, u6.jsx)(`input`, {
+                }) : null, [ a.inputTranslationProvider, a.chatTranslationProvider ].includes(`libre`) ? (0, u6.jsx)(`input`, {
                     "aria-label": `LibreTranslate 服务地址`,
                     value: a.libreEndpoint,
                     placeholder: `https://你的-libretranslate-服务`,
                     onChange: e => h({
                         libreEndpoint: e.target.value
                     })
-                }) : null, a.provider === `microsoft` ? (0, u6.jsx)(`input`, {
+                }) : null, [ a.inputTranslationProvider, a.chatTranslationProvider ].includes(`microsoft`) ? (0, u6.jsx)(`input`, {
                     "aria-label": `微软翻译区域`,
                     value: a.microsoftRegion,
                     placeholder: `Azure 区域（如 eastasia）`,
                     onChange: e => h({
                         microsoftRegion: e.target.value
                     })
-                }) : null, a.provider === `qwen` || a.provider === `glm` || a.provider === `deepseek` ? (0, 
+                }) : null, [ a.inputTranslationProvider, a.chatTranslationProvider ].some(value => [ `qwen`, `glm`, `deepseek` ].includes(value)) ? (0, 
                 u6.jsx)(`input`, {
                     "aria-label": `OpenAI 兼容 API 地址`,
                     value: a.compatibleEndpoint,

@@ -83,6 +83,7 @@ test('long-message retry reuses successfully completed chunks',async()=>{
     Yp:async(_url,init)=>{const text=JSON.parse(init.body).messages.at(-1).content.split('Message to translate:\n').at(-1);calls.push(text);if(text.startsWith('B')&&fail)throw Error('network');return{choices:[{message:{content:'translated '+text[0]}}]}}};
   vm.createContext(ctx);
   let a=code.indexOf('function haituoSplitTranslationText('),b=code.indexOf('\nfunction haituoNaturalizeFreeTranslation',a);vm.runInContext(code.slice(a,b),ctx);
+  a=code.indexOf('function haituoProviderEndpointValue(');b=code.indexOf('function haituoCompatibleEndpoint(',a);vm.runInContext(code.slice(a,b),ctx);
   a=code.indexOf('async function Xp(');b=code.indexOf('\nlet Zp',a);vm.runInContext(code.slice(a,b),ctx);
   // Xp's provider prompt places the source as the last user message.
   const req={text:'A'.repeat(1800)+'B'.repeat(1800)+'C'.repeat(20),provider:'openai',apiKey:'fixture',targetLanguage:'fr'};

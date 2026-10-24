@@ -24690,6 +24690,14 @@ var Kp = class {
 
 const qp = new Set([ `web.whatsapp.com`, `web.telegram.org` ]);
 
+function haituoIsAppFrame(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === `file:` || parsed.hostname === `localhost` || parsed.hostname === `127.0.0.1`;
+    } catch {
+        return !1;
+    }
+}
 function Jp(e) {
     let t = ``;
     try {
@@ -24705,6 +24713,33 @@ function Jp(e) {
 }
 
 
+function haituoProviderEndpointValue(provider, endpoint) {
+    // Qwen/GLM share the legacy OpenAI address field. A leftover
+    // api.openai.com address would send their key to OpenAI, so treat it as
+    // unset and let the provider's own default apply.
+    if ((provider === `qwen` || provider === `glm`) && /^https:\/\/api\.openai\.com(?:\/|$)/iu.test(String(endpoint || ``))) return ``;
+    return endpoint;
+}
+function haituoProviderDefault(provider, field) {
+    const defaults = {
+        groq: [ `https://api.groq.com/openai/v1`, `openai/gpt-oss-120b` ],
+        deepseek: [ `https://api.deepseek.com/v1`, `deepseek-flash` ],
+        qwen: [ `https://dashscope.aliyuncs.com/compatible-mode/v1`, `qwen-plus` ],
+        glm: [ `https://open.bigmodel.cn/api/paas/v4`, `glm-4.5` ],
+        openai: [ `https://api.openai.com/v1`, `gpt-4.1-mini` ]
+    }[provider] || [ `https://api.openai.com/v1`, `gpt-4.1-mini` ];
+    return field === `model` ? defaults[1] : defaults[0];
+}
+function haituoMyMemoryText(payload) {
+    const status = Number(payload?.responseStatus);
+    const text = String(payload?.responseData?.translatedText ?? ``).trim();
+    if (status === 429 || /MYMEMORY WARNING|QUOTA|INVALID LANGUAGE PAIR|PLEASE SELECT TWO DISTINCT LANGUAGES|IS NOT AVAILABLE/iu.test(text)) {
+        const detail = String(payload?.responseDetails || text || ``).replace(/\s+/gu, ` `).slice(0, 160);
+        throw Error(`MyMemory 免费额度已用完或请求被拒绝${detail ? `：${detail}` : ``}`);
+    }
+    if (status && status !== 200) throw Error(`MyMemory 返回错误状态 ${status}`);
+    return text;
+}
 function haituoCompatibleEndpoint(value,defaultBase,path){
     const base=String(value||defaultBase).trim().replace(/\/+$/u,``).replace(/\/(chat\/completions|audio\/transcriptions|responses)$/u,``);
     const url=new URL(base);
@@ -24816,7 +24851,7 @@ async function Xp(e) {
     } else if (r === `mymemory`) {
         if (!/[\u3400-\u9fff]/u.test(t) && n !== `zh-CN`) throw Error(`MyMemory 仅作为中英翻译备用`);
         let e = /[\u3400-\u9fff]/u.test(t) ? `zh-CN` : `en`, r = new URL(`https://api.mymemory.translated.net/get`);
-        r.searchParams.set(`q`, t), r.searchParams.set(`langpair`, `${e}|${n}`), o = (await Yp(r.href, {}, a))?.responseData?.translatedText?.trim() ?? ``;
+        r.searchParams.set(`q`, t), r.searchParams.set(`langpair`, `${e}|${n}`), o = haituoMyMemoryText(await Yp(r.href, {}, a));
     } else if (r === `libre`) {
         let r = typeof e.endpoint == `string` ? e.endpoint.replace(/\/$/u, ``) : ``;
         if (!r) throw Error(`LibreTranslate 未配置服务地址`);
@@ -24857,14 +24892,14 @@ async function Xp(e) {
     } else if (r === `openai` || r === `qwen` || r === `glm` || r === `deepseek` || r === `groq`) {
         if (typeof e.apiKey != `string` || !e.apiKey) throw Error(`${r} 需要 API Key`);
         const groqHost = /^https:\/\/api\.groq\.com(?:\/|$)/iu;
-        o = (await Yp(haituoCompatibleEndpoint(r === `groq` ? typeof e.groqEndpoint == `string` && e.groqEndpoint.trim() ? e.groqEndpoint : groqHost.test(e.endpoint || ``) ? e.endpoint : `` : e.endpoint,r === `groq` ? `https://api.groq.com/openai/v1` : r === `deepseek` ? `https://api.deepseek.com/v1` : `https://api.openai.com/v1`,`chat/completions`), {
+        o = (await Yp(haituoCompatibleEndpoint(r === `groq` ? typeof e.groqEndpoint == `string` && e.groqEndpoint.trim() ? e.groqEndpoint : groqHost.test(e.endpoint || ``) ? e.endpoint : `` : e.endpoint,haituoProviderDefault(r, `endpoint`),`chat/completions`), {
             method: `POST`,
             headers: {
                 Authorization: `Bearer ${String(e.apiKey).trim().replace(/^Bearer\s+/iu,``)}`,
                 "Content-Type": `application/json`
             },
             body: JSON.stringify({
-                model: (r === `groq` ? typeof e.groqModel == `string` && e.groqModel.trim() ? e.groqModel : groqHost.test(e.endpoint || ``) ? e.model : `` : e.model) || (r === `groq` ? `openai/gpt-oss-120b` : r === `deepseek` ? `deepseek-flash` : `gpt-4.1-mini`),
+                model: (r === `groq` ? typeof e.groqModel == `string` && e.groqModel.trim() ? e.groqModel : groqHost.test(e.endpoint || ``) ? e.model : `` : e.model) || haituoProviderDefault(r, `model`),
                 ...(/^https:\/\/api\.deepseek\.com(?:\/|$)/iu.test(e.endpoint || (r === `deepseek` ? `https://api.deepseek.com` : ``)) ? {thinking:{type:`disabled`}} : {}),
                 temperature: e.forceRefresh || e.provider === `smart-retranslate` ? .35 : .15,
                 messages: [ {
@@ -25633,11 +25668,11 @@ async function haituoTranslateWithMode(config, request) {
                 provider,
                 timeoutMs: HaituoNetwork.translationTimeout(provider, request.text, config.timeoutMs),
                 apiKey: provider === `google-cloud` ? config.googleCloudApiKey : provider === `groq` ? config.groqApiKey : provider === `deepl` ? config.deepLApiKey : [ `google-free`, `mymemory` ].includes(provider) ? `` : route.apiKey,
-                endpoint: provider === `groq` ? `https://api.groq.com/openai/v1` : route.endpoint,
+                endpoint: provider === `groq` ? `https://api.groq.com/openai/v1` : haituoProviderEndpointValue(provider, route.endpoint),
                 model: provider === `groq` ? `openai/gpt-oss-120b` : route.model
             };
             let result;
-            if ([`openai`,`deepseek`,`qwen`,`glm`].includes(provider) && haituoOpenAIProfiles(route).length) {
+            if ([`openai`,`deepseek`].includes(provider) && haituoOpenAIProfiles(route).length) {
                 const profiles = haituoOpenAIProfiles(route), failures = [];
                 // Two attempts on each configured endpoint before moving to the next.
                 for (const profile of profiles) {
@@ -25723,8 +25758,11 @@ async function cachedHaituoTranslate(e, t = !1) {
 
 function $p() {
     if ($u !== `signal-main`) return haituoChildTranslationConfig();
+    // Read first, then migrate. A migration failure must never replace a
+    // successfully read config with defaults: the next save would persist
+    // those defaults over the real settings read from disk.
+    const e = haituoProtectedRead(Qp, {});
     try {
-        let e = haituoProtectedRead(Qp, {});
         let changed = !1;
         if (e.chatTextGradientIndex || e.outgoingBubbleGradientIndex) e.chatTextGradientIndex = 0, e.outgoingBubbleGradientIndex = 0, changed = !0;
         if (typeof e.incomingBubbleLinked !== `boolean`) e.incomingBubbleLinked = !0, changed = !0;
@@ -25742,8 +25780,9 @@ function $p() {
         if(!e._screenshotDefaultsV144){e.screenshotEnabled=false;e.screenshotCopyEnabled=false;e._screenshotDefaultsV144=true;em(e)}
         if(!e.translationPools&&!e._translationPoolsV143){e.translationPools=require('../js/haituo-translation-pools.js').fromLegacy(e);e._translationPoolsV143=true;em(e)}
         return e;
-    } catch {
-        return { chatTextColor: ``, outgoingBubbleColor: ``, incomingBubbleColor: ``, nativeTheme: `dark`, darkTheme: true, _nativeAppearanceV1111: true, translationMode: `normal`, translateShortcut: `triple-space`, blockChineseOutgoing: !0, backTranslationEnabled: !0, groupBackTranslationEnabled: !0, telegramTranslationEnabled: !1, autoTranslateIncoming: !0, inputTranslationProvider: `google-free`, chatTranslationProvider: `google-free`, voiceTranscriptionProvider: `groq`, incomingBubbleLinked: !0, chatTextGradientIndex: 0, outgoingBubbleGradientIndex: 0 };
+    } catch (error) {
+        X.warn(`haituo: settings migration failed; keeping the settings read from disk: ${haituoProtectedDescribeError(error)}`);
+        return e;
     }
 }
 
@@ -25765,7 +25804,7 @@ function em(e) {
     // every later save is refused by the read-back gate. Writes before app
     // ready would also fall back to plaintext (safeStorage unavailable).
     if ($u !== `signal-main` || !haituoAppReady()) return;
-    haituoProtectedWrite(Qp, e);
+    return haituoProtectedWrite(Qp, e);
 }
 
 function tm() {
@@ -28889,6 +28928,21 @@ async function nv() {
         guest.on(`ipc-message`, (e, channel) => {
             channel === `haituo-user-gesture` && (guest.haituoLastGestureAt = Date.now());
         });
+        guest.on(`will-navigate`, (event, url) => {
+            let parsed;
+            try {
+                parsed = new URL(url);
+            } catch {
+                event.preventDefault();
+                return;
+            }
+            if (![ `http:`, `https:` ].includes(parsed.protocol)) return;
+            const host = parsed.hostname;
+            if (host === `web.whatsapp.com` || host === `web.telegram.org` || host.endsWith(`.whatsapp.com`) || host.endsWith(`.telegram.org`)) return;
+            event.preventDefault();
+            X.info(`haituo: blocked webview navigation to ${String(url).slice(0, 200)}; opening externally`);
+            q_(url).catch(() => {});
+        });
     }
     function haituoMediaPermissionCheckHandler(e, permission, requestingOrigin, details) {
         // Same policy as the request handler: the check handler is consulted
@@ -29086,6 +29140,7 @@ function ov(e, t) {
 }
 
 p.ipcMain.handle(`caisheng:login`, async (e, t) => {
+    if (!haituoIsAppFrame(e.senderFrame?.url ?? e.sender?.getURL?.() ?? ``)) throw Error(`不允许的登录请求来源`);
     let n = iv.safeParse(t);
     if (!n.success) return {
         ok: !1,
@@ -29666,6 +29721,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     let n = Yg.get(t);
     return Yg.delete(t), Xg.delete(t), caishengTerminateSignalChild(n);
 }), p.ipcMain.handle(`caisheng:clear-workspace-data`, async (e, t) => {
+    if (!haituoIsAppFrame(e.senderFrame?.url ?? e.sender?.getURL?.() ?? ``)) throw Error(`不允许的清理请求来源`);
     if (typeof t != `string` || !n.W(t)) throw Error(`Invalid Caisheng workspace partition`);
     let r = p.session.fromPartition(t);
     await r.clearStorageData(), await r.clearCache(), await r.closeAllConnections();

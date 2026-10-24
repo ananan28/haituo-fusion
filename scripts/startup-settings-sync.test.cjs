@@ -57,6 +57,8 @@ const childHandlerCode = sliceFn(
   '\nif(process.env.HAITUO_SETTINGS_TEST'
 ).trim();
 const applyCode = sliceBalanced('function haituoApplyTranslationConfig');
+const emCode = sliceFn('function em(e) {', 'function tm() {');
+const settingsReadCode = sliceFn('function $p() {', 'function rmRefresh');
 
 function recorder() {
   const entries = [];
@@ -295,17 +297,19 @@ function makeApplyCtx() {
     Z: null,
     HaituoNetwork: { normalizeBadge: v => String(v ?? 'SVIP').slice(0, 24) },
     p: { nativeTheme: {} },
+    Qp: '/tmp/settings.json',
     require: mod => String(mod).includes('translation-pools')
       ? { sanitize: pools => pools }
       : {},
   };
   ctx.$p = () => ({});
-  ctx.em = cfg => persisted.push(cfg);
+  ctx.haituoAppReady = () => true;
+  ctx.haituoProtectedWrite = (file, cfg) => { persisted.push(cfg); return true; };
   ctx.haituoBroadcastTranslationConfig = cfg => broadcasts.push(cfg);
   ctx.__persisted = persisted;
   ctx.__broadcasts = broadcasts;
   vm.createContext(ctx);
-  vm.runInContext(versionCode + applyCode, ctx);
+  vm.runInContext(versionCode + applyCode + emCode, ctx);
   vm.runInContext(`$u = 'signal-main';`, ctx);
   return ctx;
 }
@@ -331,9 +335,41 @@ test('1.5.7: a successful save reports ok:true', () => {
 
 test('1.5.7: a refused settings write is reported instead of claiming success', () => {
   const ctx = makeApplyCtx();
-  ctx.em = () => false;
+  ctx.haituoProtectedWrite = () => false;
   const result = vm.runInContext(`haituoApplyTranslationConfig({ provider: 'deepl' })`, ctx);
   assert.equal(result.ok, false, 'the caller must be able to tell the user the save did not land');
   assert.match(result.error, /无法写入/u);
   assert.equal(vm.runInContext('Zp.provider', ctx), 'deepl', 'the running config still applies the change');
+});
+
+test('1.5.7 regression: em returns the protected write verdict to apply', () => {
+  const ctx = { console, JSON, Error, Qp: '/tmp/settings.json' };
+  vm.createContext(ctx);
+  vm.runInContext(`$u = 'signal-main'; haituoAppReady = () => true;` + emCode, ctx);
+  ctx.haituoProtectedWrite = () => false;
+  assert.equal(vm.runInContext(`em({provider:'deepl'})`, ctx), false, 'a refused write must not look like success');
+  ctx.haituoProtectedWrite = () => true;
+  assert.equal(vm.runInContext(`em({provider:'deepl'})`, ctx), true);
+  ctx.haituoAppReady = () => false;
+  assert.equal(vm.runInContext(`em({provider:'deepl'})`, ctx), undefined, 'pre-ready writes stay deferred and report nothing');
+});
+
+test('1.5.8: a failed migration keeps the settings read from disk instead of defaults', () => {
+  const warnings = [];
+  const ctx = {
+    console, JSON, RegExp, Object, Array, String, Number, Error,
+    Qp: '/tmp/settings.json',
+    X: { warn: (...args) => warnings.push(args.join(' ')) },
+    haituoProtectedRead: () => ({ apiKey: 'keep-openai', groqApiKey: 'keep-groq', deepLApiKey: 'keep-deepl' }),
+    haituoProtectedDescribeError: error => String(error?.message || error),
+    em: () => true,
+    require: () => { throw Error('translation-pools module unavailable'); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`$u = 'signal-main';` + settingsReadCode, ctx);
+  const result = vm.runInContext(`$p()`, ctx);
+  assert.equal(result.apiKey, 'keep-openai');
+  assert.equal(result.groqApiKey, 'keep-groq');
+  assert.equal(result.deepLApiKey, 'keep-deepl');
+  assert.ok(warnings.some(line => /migration failed/u.test(line)), 'the failure is logged');
 });

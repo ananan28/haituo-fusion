@@ -41,7 +41,7 @@ const splitterCode = sliceFn('function haituoSplitTranslationText', 'function ha
 const joinCode = sliceFn('function haituoJoinTranslatedChunks', 'function haituoNaturalizeFreeTranslation');
 const cacheKeyCode = sliceFn('function haituoTranslationCacheKey', 'function haituoSharedChatCacheKey');
 const profilesCode = sliceFn('function haituoOpenAIProfiles', 'function haituoPumpRequests');
-const compatCode = sliceFn('function haituoCompatibleEndpoint', 'function haituoSplitTranslationText');
+const compatCode = sliceFn('function haituoProviderEndpointValue', 'function haituoSplitTranslationText');
 const xpCode = sliceBalanced('async function Xp(');
 const modeCode = sliceBalanced('async function haituoTranslateWithMode');
 
@@ -62,7 +62,7 @@ function makeModeCtx() {
     ? { run: async () => { ctx.__poolsCalls += 1; return { text: `pools-result`, provider: `pool` }; } }
     : { translationTimeout: () => 1000 };
   vm.createContext(ctx);
-  vm.runInContext(modeCode, ctx);
+  vm.runInContext(compatCode + '\n;\n' + modeCode, ctx);
   return ctx;
 }
 

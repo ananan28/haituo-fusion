@@ -5,7 +5,7 @@
 // delivered inside webviews, so the page reports pointer/key activity too.
 try {
     const haituoGestureIpc = require("electron").ipcRenderer;
-    const haituoReportGesture = () => { try { haituoGestureIpc.send("haituo-user-gesture"); } catch {} };
+    const haituoReportGesture = event => { if (!event?.isTrusted) return; try { haituoGestureIpc.send("haituo-user-gesture"); } catch {} };
     addEventListener("pointerdown", haituoReportGesture, { passive: !0, capture: !0 });
     addEventListener("keydown", haituoReportGesture, { passive: !0, capture: !0 });
 } catch {}
