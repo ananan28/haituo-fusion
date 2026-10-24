@@ -5,6 +5,7 @@ function requestFor(entry,request){const compatible=['openai','deepseek','groq',
 async function run(pools,request,translate,sleep=ms=>new Promise(r=>setTimeout(r,ms))){const errors=[];let primaryProvider=(pools.primary||[])[0]?.provider,lastPrimaryProvider;
  const all=[];
  for(const group of ['primary','backup'])for(const entry of pools[group]||[])all.push([group,entry]);
+ if(!all.length){const failure=Error('翻译池为空（主翻译和备用翻译均未成功）：请先在设置中添加翻译接口');failure.status=422;throw failure}
  let enabled=all.filter(([,entry])=>entry.enabled!==false);
  // Every entry paused must not brick translation: degrade to the free
  // channel instead of failing, so a paused pool still yields text.
@@ -17,6 +18,9 @@ async function run(pools,request,translate,sleep=ms=>new Promise(r=>setTimeout(r
    const startedAt=Date.now();
    try{if(!['google-free','mymemory','libre'].includes(entry.provider)&&!entry.apiKey)throw Error('未填写 API 密钥');const result=await translate(requestFor(entry,request));if(!result?.text?.trim())throw Error('翻译结果为空');return {...result,provider:entry.provider,pool:group,...(group==='backup'?{fallbackFrom:lastPrimaryProvider||primaryProvider,fallbackReason:errors.at(-1)||'主翻译不可用'}:{})}}
    catch(error){if(error&&error.code==='TRANSLATION_BAD_JSON'||/TRANSLATION_BAD_JSON/.test(String(error&&error.message||error)))throw error;errors.push(String(error.message||error));if([400,401,402,403,404,422].includes(error.status)||/未填写|HTTP (400|401|402|403|404|422)\b/.test(String(error.message)))break;
+    // Rate limited: another entry can serve the request right away; retrying
+    // the same one before Retry-After elapses is guaranteed to fail again.
+    if(error.status===429){if(moreRemaining)break;const retryAfterMs=Math.max(0,Number(error.retryAfterMs)||0);if(retryAfterMs>5000)throw error;if(attempt===0)await sleep(Math.max(700,retryAfterMs));continue}
     // Timeout-grade failures burn tens of seconds each; when another entry is
     // still available, fail over immediately instead of retrying in place.
     if(attempt===0&&moreRemaining&&Date.now()-startedAt>=2000)break;

@@ -24,6 +24,14 @@ test('deadline includes a stalled response body and retry remains bounded',async
 test('401 and 429 do not retry or leak credential contents',async()=>{
   for(const status of [401,429]){let calls=0;await assert.rejects(requestJSON(async()=>{calls++;return new Response('{}',{status})},'https://fixture.test/v1/chat/completions',{headers:{Authorization:'Bearer SECRET'}},100,async()=>{}),error=>error.status===status&&!error.message.includes('SECRET'));assert.equal(calls,1);}
 });
+test('429 exposes Retry-After so callers wait instead of retrying blindly',async()=>{
+  let calls=0;
+  await assert.rejects(requestJSON(async()=>{calls++;return new Response('{}',{status:429,headers:{'retry-after':'7'}})},'https://fixture.test',{},100,async()=>{}),error=>error.status===429&&error.retryAfterMs===7000&&/约 7 秒/.test(error.message));
+  assert.equal(calls,1,'requestJSON must not burn the retry before Retry-After elapses');
+  let plain=0;
+  await assert.rejects(requestJSON(async()=>{plain++;return new Response('{}',{status:429})},'https://fixture.test',{},100,async()=>{}),error=>error.status===429&&error.retryAfterMs===0&&/请稍后重试/.test(error.message));
+  assert.equal(plain,1);
+});
 test('temporary 503 retries once; invalid JSON does not trigger duplicate billing',async()=>{
   let calls=0;await requestJSON(async()=>++calls===1?new Response('{}',{status:503}):new Response('{}'),'https://fixture.test',{},100,async()=>{});assert.equal(calls,2);
   calls=0;await assert.rejects(requestJSON(async()=>{calls++;return new Response('invalid')},'https://fixture.test',{},100,async()=>{}),SyntaxError);assert.equal(calls,1);
@@ -47,10 +55,18 @@ test('web login retries only top-level transient failures, keeps cache, and stop
   contents.emit('did-start-loading');contents.emit('did-finish-load');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);
   assert.equal(timers.length,10,'a rendered page is never auto-reloaded by a later navigation failure');
   assert.ok(logs.some(message=>/keeping the current page/.test(message)),'the skipped reload is logged');
-  // A renderer crash clears the rendered state, so recovery arms again.
+  // A renderer crash clears the rendered state and must recover on its own:
+  // Electron shows the crash page instead of firing did-fail-load.
   contents.emit('render-process-gone');
-  contents.emit('did-start-loading');contents.emit('did-fail-load',{},-105,'DNS','https://web.whatsapp.com',true);
-  assert.equal(timers.length,11);assert.equal(timers[10].delay,5000);contents.emit('destroyed');assert.ok(cancelled.has(11));
+  assert.equal(timers.length,11,'a renderer crash schedules recovery immediately');
+  assert.equal(timers[10].delay,5000);
+  timers[10].fn();
+  assert.equal(reloads,11,'the crashed webview is reloaded without user action');
+  assert.ok(logs.some(message=>/renderer crashed/.test(message)),'the crash reload is logged');
+  contents.emit('render-process-gone');
+  assert.equal(timers.length,12,'a second crash keeps backing off instead of reloading in a tight loop');
+  contents.emit('destroyed');
+  assert.ok(cancelled.has(12),'destroy cancels a pending crash reload');
 });
 test('web recovery also serves telegram hosts',()=>{
   const contents=new EventEmitter();let timers=[];contents.reload=()=>{};contents.isDestroyed=()=>false;

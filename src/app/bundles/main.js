@@ -25459,13 +25459,27 @@ function haituoChildTranslationConfig() {
     };
 }
 
+const HaituoTranslationCacheLimit = 2000;
+
+function haituoTrimTranslationCache() {
+    if (!HaituoTranslationCache || typeof HaituoTranslationCache !== `object` || Array.isArray(HaituoTranslationCache)) return;
+    const entries = Object.entries(HaituoTranslationCache);
+    if (entries.length <= HaituoTranslationCacheLimit) return;
+    // Keep the newest translations; every save rewrites and re-encrypts the
+    // whole file, so an unbounded map gets slower and larger forever.
+    entries.sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0));
+    HaituoTranslationCache = Object.fromEntries(entries.slice(0, HaituoTranslationCacheLimit));
+}
+
 function loadHaituoTranslationCache() {
     if (HaituoTranslationCache) return HaituoTranslationCache;
     HaituoTranslationCache = haituoProtectedRead(HaituoTranslationCachePath, {});
+    haituoTrimTranslationCache();
     return HaituoTranslationCache;
 }
 
 function saveHaituoTranslationCache() {
+    haituoTrimTranslationCache();
     haituoProtectedWrite(HaituoTranslationCachePath, HaituoTranslationCache);
 }
 
@@ -25770,6 +25784,7 @@ function tm() {
         n.stop(), n.reload();
         return { ok: !0 };
     }), p.ipcMain.removeHandler(`caisheng:reload-web-contents`), p.ipcMain.handle(`caisheng:reload-web-contents`, async (e, t) => {
+        Jp(e.senderFrame?.url ?? ``);
         const n = p.webContents.fromId(Number(t));
         if (!n || n.isDestroyed() || n.getType() !== `webview`) throw Error(`网页账号不存在或尚未加载`);
         n.reload();
@@ -28172,7 +28187,8 @@ function haituoApplyTranslationConfig(t) {
     Zp.outgoingBubbleColor = /^#[0-9a-f]{6}$/iu.test(t?.outgoingBubbleColor || ``) ? t.outgoingBubbleColor : ``;
     Zp.incomingBubbleColor = Zp.incomingBubbleLinked ? Zp.outgoingBubbleColor : /^#[0-9a-f]{6}$/iu.test(t?.incomingBubbleColor || ``) ? t.incomingBubbleColor : ``;
     Zp.__v = haituoNextConfigVersion();
-    em(Zp), haituoBroadcastTranslationConfig(Zp);
+    const haituoPersisted = em(Zp);
+    haituoBroadcastTranslationConfig(Zp);
     haituoPublishGlobalSettings(Zp);
     Pm(`theme-setting`, Zp.nativeTheme);
     p.nativeTheme.themeSource = Zp.nativeTheme;
@@ -28180,6 +28196,9 @@ function haituoApplyTranslationConfig(t) {
     for (const [profileId, child] of Yg) try {
         child && !child.killed && child.exitCode === null && child.connected && $g(profileId, child);
     } catch {}
+    // A refused protected write used to be swallowed here, so the UI said
+    // "saved" while the change only lived in memory. Report it instead.
+    if (haituoPersisted === !1) return { ok: !1, error: `设置文件当前无法写入（可能损坏、被占用或加密不可用），本次修改只在当前运行期间有效；请重启应用后重试并查看日志` };
     return { ok: !0 };
 }
 
@@ -29442,7 +29461,10 @@ form.onsubmit=e=>{e.preventDefault();send('save')};const close=()=>send('close')
             const parsed = new URL(url), action = parsed.hostname;
             if (action === `close`) return void caishengSettingsWindow?.close();
             const payload = JSON.parse(parsed.searchParams.get(`value`) || `{}`);
-            haituoApplyTranslationConfig(payload);
+            const applied = haituoApplyTranslationConfig(payload);
+            // Keep the window open on a refused write so the status line can
+            // show why; closing it would look like the save succeeded.
+            if (applied?.ok === !1) throw Error(applied.error || `设置保存失败`);
             if (action === 'screenshot') { caishengSettingsWindow?.close(); setTimeout(() => haituoScreenshotController?.start(), 250); }
             if (action === 'save') caishengSettingsWindow?.close();
         } catch (error) { caishengSettingsWindow?.webContents.executeJavaScript(`document.getElementById('status').textContent=${JSON.stringify(String(error.message || error))}`).catch(()=>{}); }
@@ -29556,7 +29578,8 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         if (Yg.get(t) === r && e?.type === `haituo-global-settings-request`) {
             try {
                 if (typeof e.config?.__v == `number` && e.config.__v < HaituoConfigVersion) throw Error(`设置已被其他窗口更新，请重试`);
-                haituoApplyTranslationConfig({ ...$p(), ...e.config });
+                const applied = haituoApplyTranslationConfig({ ...$p(), ...e.config });
+                if (applied?.ok === !1) throw Error(applied.error || `设置保存失败`);
                 caishengSendChild(r, {type:`haituo-global-settings-ack`, requestId:e.requestId, ok:true});
             } catch (error) {
                 caishengSendChild(r, {type:`haituo-global-settings-ack`, requestId:e.requestId, ok:false, error:String(error?.message || error)});

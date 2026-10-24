@@ -322,3 +322,18 @@ test('R3: apply stamps a strictly increasing version on every accepted config', 
   assert.equal(ctx.__persisted[1].__v, second, 'persisted snapshot carries the same stamp');
   assert.equal(ctx.__broadcasts[1].__v, second, 'broadcast snapshot carries the same stamp');
 });
+
+test('1.5.7: a successful save reports ok:true', () => {
+  const ctx = makeApplyCtx();
+  const result = vm.runInContext(`haituoApplyTranslationConfig({ provider: 'deepl' })`, ctx);
+  assert.equal(result.ok, true, 'the renderer may claim the save only on an explicit success');
+});
+
+test('1.5.7: a refused settings write is reported instead of claiming success', () => {
+  const ctx = makeApplyCtx();
+  ctx.em = () => false;
+  const result = vm.runInContext(`haituoApplyTranslationConfig({ provider: 'deepl' })`, ctx);
+  assert.equal(result.ok, false, 'the caller must be able to tell the user the save did not land');
+  assert.match(result.error, /无法写入/u);
+  assert.equal(vm.runInContext('Zp.provider', ctx), 'deepl', 'the running config still applies the change');
+});

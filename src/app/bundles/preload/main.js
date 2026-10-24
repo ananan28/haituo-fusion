@@ -21535,6 +21535,14 @@ http://jedwatson.github.io/classnames
     }
 
     let haituoPoolSaveQueue=Promise.resolve();
+    // Main reports a refused protected write as {ok:false} instead of throwing.
+    // Without this check every caller would treat that as a successful save.
+    function haituoCheckedConfigSet(patch) {
+        return Promise.resolve(window.SignalContext.caishengSetTranslationConfig(patch)).then(result => {
+            if (result && result.ok === !1) throw Error(result.error || `设置保存失败`);
+            return result;
+        });
+    }
     function haituoPoolControls(F,cfg,kind='text'){
         const presets={
           'google-free':{label:'Google 免密钥（非官方）',free:true,endpoint:'https://translate.googleapis.com/translate_a/single',model:''},
@@ -21553,7 +21561,7 @@ http://jedwatson.github.io/classnames
         const selected=cfg.chatTranslationProvider||'google-free';
         const legacyPrimary={provider:presets[selected]?selected:'openai',apiKey:selected==='deepseek'?cfg.deepseekApiKey||'':selected==='google-cloud'?cfg.googleCloudApiKey||'':selected==='groq'?cfg.groqApiKey||'':selected==='deepl'?cfg.deepLApiKey||'':cfg.apiKey||'',endpoint:selected==='deepseek'?cfg.deepseekEndpoint||presets.deepseek.endpoint:cfg.endpoint||cfg.compatibleEndpoint||presets[selected]?.endpoint||'',model:selected==='deepseek'?cfg.deepseekModel||'deepseek-flash':cfg.model||cfg.openAIModel||presets[selected]?.model||''};
         const pools=kind==='image'?{screenshots:Array.isArray(cfg.screenshotApiPool)&&cfg.screenshotApiPool.length?cfg.screenshotApiPool:[{provider:cfg.screenshotTranslationProvider==='google-cloud'?'google-cloud':cfg.screenshotApiKey?'openai':'google-free',apiKey:cfg.screenshotTranslationProvider==='google-cloud'?cfg.googleCloudApiKey||'':cfg.screenshotApiKey||cfg.apiKey||'',endpoint:cfg.screenshotEndpoint||cfg.endpoint||presets.openai.endpoint,model:cfg.screenshotModel||'gpt-4.1-mini'}]}:cfg.translationPools||{primary:[legacyPrimary],backup:(cfg.openaiApiProfiles||[]).map(p=>({...p,provider:presets[p.service]?p.service:'custom'}))};
-        const save=operation=>{haituoPoolSaveQueue=haituoPoolSaveQueue.catch(()=>{}).then(async()=>{const latest=await window.SignalContext.caishengGetTranslationConfig();const current=kind==='image'?{screenshots:Array.isArray(latest.screenshotApiPool)&&latest.screenshotApiPool.length?latest.screenshotApiPool:pools.screenshots}:latest.translationPools||pools;const changed=operation(current);return window.SignalContext.caishengSetTranslationConfig(kind==='image'?{screenshotApiPool:changed.screenshots}:{translationPools:changed,chatTranslationProvider:changed.primary[0]?.provider||'google-free',inputTranslationProvider:changed.primary[0]?.provider||'google-free'})}).catch(error=>alert(String(error.message||error)))};
+        const save=operation=>{haituoPoolSaveQueue=haituoPoolSaveQueue.catch(()=>{}).then(async()=>{const latest=await window.SignalContext.caishengGetTranslationConfig();const current=kind==='image'?{screenshots:Array.isArray(latest.screenshotApiPool)&&latest.screenshotApiPool.length?latest.screenshotApiPool:pools.screenshots}:latest.translationPools||pools;const changed=operation(current);return haituoCheckedConfigSet(kind==='image'?{screenshotApiPool:changed.screenshots}:{translationPools:changed,chatTranslationProvider:changed.primary[0]?.provider||'google-free',inputTranslationProvider:changed.primary[0]?.provider||'google-free'})}).catch(error=>alert(String(error.message||error)))};
         const drawer=name=>{const rows=pools[name]||[],title=name==='primary'?'主翻译':name==='backup'?'备用翻译':'截图翻译接口';return F.jsxs('details',{'data-haituo-pool':name,...(name==='primary'?{'data-haituo-settings-group':'api'}:name==='backup'?{'data-haituo-api-drawer':'true'}:{'data-haituo-shot-api-drawer':'true'}),children:[F.jsx('summary',{children:title+'（'+rows.length+' 条）'}),F.jsx('small',{children:name==='backup'?'只在主池接口重试仍失败后临时调用，聊天、输入与 AI 重译都走同一顺序，下一条新消息仍优先主池；已暂停的条目自动跳过。':name==='primary'?'聊天、输入与 AI 重译共用此池：按顺序尝试，未填写密钥的条目自动跳过，一条成功即停止；主池全部失败才调用备用池；已暂停的条目自动跳过，全部暂停时自动使用 Google 免费翻译。':'可选择 Google 本地识字模式或支持图片的 AI；按顺序重试与切换。'}),...rows.map((entry,index)=>{
          const preset=presets[entry.provider]||presets.custom,edit=delta=>save(current=>({...current,[name]:current[name].map((p,i)=>i===index?{...p,...delta}:p)}));
          const field=(key,label,type='text')=>F.jsxs('label',{children:[F.jsx('span',{children:label}),F.jsx('input',{'aria-label':title+' '+label,'data-haituo-setting':name+'-'+index+'-'+key,type,defaultValue:entry[key]||'',onFocus:e=>{e.target.value.startsWith('__HAITUO_REDACTED__:')&&e.target.select()},onBlur:e=>{if(e.target.value!==(entry[key]||''))edit({[key]:e.target.value})}},name+'-'+index+'-'+key+'-'+(entry[key]||''))]});
@@ -21564,14 +21572,14 @@ http://jedwatson.github.io/classnames
     function haituoShortcutRecorder(F,cfg,settingKey='screenshotShortcut',label='截图翻译快捷键',fallback='CommandOrControl+Alt+O'){
         const original=cfg[settingKey]||fallback;
         const finish=async el=>{if(el.dataset.recording!=='true')return;el.dataset.recording='false';try{await window.SignalContext.caishengShortcutRecording(false)}catch{}if(!el.value)el.value=original};
-        return F.jsxs('label',{style:{display:'flex',flexDirection:'column',gap:'6px',margin:'10px 0'},children:[F.jsx('span',{children:label+'（点击后按组合键）'}),F.jsx('input',{'aria-label':label,'data-haituo-setting':settingKey,readOnly:true,defaultValue:original,style:{width:'100%',boxSizing:'border-box',cursor:'pointer'},onFocus:async e=>{const el=e.currentTarget;try{await window.SignalContext.caishengShortcutRecording(true);if(!el.isConnected||document.activeElement!==el){await window.SignalContext.caishengShortcutRecording(false);return}el.dataset.recording='true';el.value='';el.placeholder='请按组合键，例如 Ctrl + Alt + O；Esc 取消'}catch(error){alert(String(error.message||error))}},onKeyDown:async e=>{e.preventDefault();e.stopPropagation();const el=e.currentTarget;if(el.dataset.recording!=='true')return;if(e.key==='Escape'){el.value=original;await finish(el);el.blur();return}if(['Control','Meta','Alt','Shift'].includes(e.key)||e.repeat)return;let key=e.key;if(key===' ')key='Space';else if(key==='+')key='Plus';else if(key==='-')key='Minus';else if(key.length===1)key=key.toUpperCase();else key=({ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Delete:'Delete',Backspace:'Backspace',Enter:'Return',Tab:'Tab'})[key]||key;const mods=[];if(e.metaKey)mods.push(window.SignalContext.OS?.platform==='darwin'?'Command':'Super');if(e.ctrlKey)mods.push('Control');if(e.altKey)mods.push('Alt');if(e.shiftKey)mods.push('Shift');if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/^F\d{1,2}$/.test(key)){el.placeholder='需要 Ctrl、Command、Alt 组合键，或 F1–F24';return}const accelerator=[...mods,key].join('+');try{await window.SignalContext.caishengSetTranslationConfig({[settingKey]:accelerator});el.value=accelerator;await finish(el);el.blur()}catch(error){el.value=original;await finish(el);el.blur();alert(String(error.message||error))}},onBlur:e=>{finish(e.currentTarget)}})]});
+        return F.jsxs('label',{style:{display:'flex',flexDirection:'column',gap:'6px',margin:'10px 0'},children:[F.jsx('span',{children:label+'（点击后按组合键）'}),F.jsx('input',{'aria-label':label,'data-haituo-setting':settingKey,readOnly:true,defaultValue:original,style:{width:'100%',boxSizing:'border-box',cursor:'pointer'},onFocus:async e=>{const el=e.currentTarget;try{await window.SignalContext.caishengShortcutRecording(true);if(!el.isConnected||document.activeElement!==el){await window.SignalContext.caishengShortcutRecording(false);return}el.dataset.recording='true';el.value='';el.placeholder='请按组合键，例如 Ctrl + Alt + O；Esc 取消'}catch(error){alert(String(error.message||error))}},onKeyDown:async e=>{e.preventDefault();e.stopPropagation();const el=e.currentTarget;if(el.dataset.recording!=='true')return;if(e.key==='Escape'){el.value=original;await finish(el);el.blur();return}if(['Control','Meta','Alt','Shift'].includes(e.key)||e.repeat)return;let key=e.key;if(key===' ')key='Space';else if(key==='+')key='Plus';else if(key==='-')key='Minus';else if(key.length===1)key=key.toUpperCase();else key=({ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Delete:'Delete',Backspace:'Backspace',Enter:'Return',Tab:'Tab'})[key]||key;const mods=[];if(e.metaKey)mods.push(window.SignalContext.OS?.platform==='darwin'?'Command':'Super');if(e.ctrlKey)mods.push('Control');if(e.altKey)mods.push('Alt');if(e.shiftKey)mods.push('Shift');if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/^F\d{1,2}$/.test(key)){el.placeholder='需要 Ctrl、Command、Alt 组合键，或 F1–F24';return}const accelerator=[...mods,key].join('+');try{await haituoCheckedConfigSet({[settingKey]:accelerator});el.value=accelerator;await finish(el);el.blur()}catch(error){el.value=original;await finish(el);el.blur();alert(String(error.message||error))}},onBlur:e=>{finish(e.currentTarget)}})]});
     }
 
     let haituoProfileSaveQueue=Promise.resolve();
     function haituoAdvancedSettingsControls(F, cfg) {
-        const commit = delta => window.SignalContext.caishengSetTranslationConfig(delta).catch(error => alert(String(error.message || error)));
+        const commit = delta => haituoCheckedConfigSet(delta).catch(error => alert(String(error.message || error)));
         const text = (key,label,placeholder='',type='text',value=cfg[key],save=v=>commit({[key]:v})) => F.jsxs('label',{style:{display:'flex',flexDirection:'column',gap:'6px',margin:'10px 0'},children:[F.jsx('span',{children:label}),F.jsx(type==='textarea'?'textarea':'input',{'aria-label':label,'data-haituo-setting':key,type:type==='textarea'?undefined:type,rows:type==='textarea'?4:undefined,defaultValue:value??'',placeholder,onFocus:e=>{e.target.value.startsWith('__HAITUO_REDACTED__:')&&e.target.select()},onBlur:e=>{if(e.target.value!==(value??''))save(e.target.value)},style:{width:'100%',minWidth:0,boxSizing:'border-box'}},key+'-'+String(value??''))]},key);
-        const updateProfiles=operation=>{haituoProfileSaveQueue=haituoProfileSaveQueue.catch(()=>{}).then(async()=>{const current=await window.SignalContext.caishengGetTranslationConfig();return window.SignalContext.caishengSetTranslationConfig({openaiApiProfiles:operation(Array.isArray(current.openaiApiProfiles)?current.openaiApiProfiles:[])})}).catch(error=>alert(String(error.message||error)))};
+        const updateProfiles=operation=>{haituoProfileSaveQueue=haituoProfileSaveQueue.catch(()=>{}).then(async()=>{const current=await window.SignalContext.caishengGetTranslationConfig();return haituoCheckedConfigSet({openaiApiProfiles:operation(Array.isArray(current.openaiApiProfiles)?current.openaiApiProfiles:[])})}).catch(error=>alert(String(error.message||error)))};
         const editProfile=(index,delta)=>updateProfiles(rows=>rows.map((p,i)=>i===index?{...p,...delta}:p));
         const profiles=Array.isArray(cfg.openaiApiProfiles)?cfg.openaiApiProfiles:[];
         const presets={openai:{label:'OpenAI / 兼容接口',endpoint:'https://api.openai.com/v1'},deepseek:{label:'DeepSeek',endpoint:'https://api.deepseek.com/v1'},groq:{label:'Groq',endpoint:'https://api.groq.com/openai/v1'},qwen:{label:'Qwen / 通义千问',endpoint:''},glm:{label:'GLM / 智谱',endpoint:''},openrouter:{label:'OpenRouter',endpoint:''},custom:{label:'自定义 OpenAI 兼容接口',endpoint:''}};
@@ -21678,9 +21686,7 @@ http://jedwatson.github.io/classnames
         }
     }
     function kve(e, changes) {
-        localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(e)));
-        if (changes) return haituoSendConfigPatch(changes, e.__v);
-        haituoSendConfigPatch({
+        const patch = changes || {
             provider: e.provider,
             inputTranslationProvider: e.inputTranslationProvider,
             chatTranslationProvider: e.chatTranslationProvider,
@@ -21720,6 +21726,12 @@ http://jedwatson.github.io/classnames
             translationMode: e.translationMode || `normal`,
             efficiencyMode: e.translationMode === `efficiency`,
             __v: e.__v
+        };
+        return haituoSendConfigPatch(patch, e.__v).then(result => {
+            // Cache only what main accepted: a failed save must not leave the
+            // renderer believing a config is stored when it is not.
+            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(e)));
+            return result;
         });
     }
     // R3: carries the config version the patch was based on. Main rejects a
@@ -21732,7 +21744,7 @@ http://jedwatson.github.io/classnames
         // sentinel string can never reach a send or storage path. Untouched
         // fields simply fall out of the patch and main keeps the stored value.
         patch = haituoUnredactConfigSecrets(patch, haituoCachedTranslationConfig());
-        const send = value => window.SignalContext.caishengSetTranslationConfig(value);
+        const send = value => haituoCheckedConfigSet(value);
         return send(typeof baseVersion == `number` ? { ...patch, __v: baseVersion } : patch).catch(async error => {
             if (!/已被其他窗口更新/u.test(String(error?.message || error))) throw error;
             const fresh = await window.SignalContext.caishengGetTranslationConfig().catch(() => null);
@@ -209305,7 +209317,7 @@ function haituoCachedSignalTranslation(text) {
                 ...a,
                 ...e
             };
-            o(t), kve(t);
+            o(t), kve(t).catch(error => console.error(`翻译设置保存失败`, error));
         }, [ a ]), haituoMainComposerText = (0, l6.useCallback)(() => {
             const el = window.__haituoSignalComposerElement;
             const live = el ? String(el.innerText || el.textContent || ``).trim() : ``;
@@ -230366,18 +230378,18 @@ function haituoCachedSignalTranslation(text) {
                 efficiencyMode: e === `efficiency`
             })), p(e);
             const next = { ...m, translationMode: e, efficiencyMode: e === `efficiency` };
-            h(next), kve(next), _(`翻译模式已同步到所有账号`);
+            h(next), kve(next).then(() => _(`翻译模式已同步到所有账号`)).catch(error => _(`翻译模式保存失败：${error instanceof Error ? error.message : String(error)}`));
         }
         function N(e) {
             let t = {
                 ...m,
                 ...e
             };
-            h(t), kve(t, e), _(`设置已保存`);
+            h(t), kve(t, e).then(() => _(`设置已保存`)).catch(error => _(`设置保存失败：${error instanceof Error ? error.message : String(error)}`));
         }
         function Q(e) {
             const t = { ...x_(), ...m, ...e };
-            h(t), kve(t), _(`设置已保存`);
+            h(t), kve(t).then(() => _(`设置已保存`)).catch(error => _(`设置保存失败：${error instanceof Error ? error.message : String(error)}`));
         }
         async function P() {
             _(`测试中…`);
@@ -230887,7 +230899,7 @@ function haituoCachedSignalTranslation(text) {
                     }), (0, O9.jsx)(`button`, {
                         type: `button`,
                         onClick: () => {
-                            kve(m), _(`设置已保存`);
+                            kve(m).then(() => _(`设置已保存`)).catch(error => _(`设置保存失败：${error instanceof Error ? error.message : String(error)}`));
                         },
                         children: `保存设置`
                     }), (0, O9.jsx)(`button`, {

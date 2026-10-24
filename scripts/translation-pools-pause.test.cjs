@@ -42,7 +42,7 @@ test('every entry paused degrades to the free channel instead of failing',async(
 });
 
 test('an empty pool still fails loudly (fallback only applies to all-paused)',async()=>{
-  await assert.rejects(()=>pools.run({primary:[],backup:[]},{},()=>Promise.resolve({text:'x'})),/主翻译和备用翻译均未成功/);
+  await assert.rejects(()=>pools.run({primary:[],backup:[]},{},()=>Promise.resolve({text:'x'})),error=>error.status===422&&/翻译池为空/.test(error.message)&&/主翻译和备用翻译均未成功/.test(error.message)&&/添加翻译接口/.test(error.message));
 });
 
 test('sanitize persists the paused flag for storage round-trips',()=>{

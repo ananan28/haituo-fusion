@@ -20,7 +20,7 @@ async function requestJSON(fetcher, url, init, timeout, sleep = ms => new Promis
       const response = await fetcher(url, { ...init, signal: controller.signal });
       if (!response.ok) {
         const status = response.status;
-        retryAfter = Math.min(3000, Math.max(0, Number(response.headers?.get('retry-after')) * 1000 || 0));
+        retryAfter = Math.min(status === 429 ? 60000 : 3000, Math.max(0, Number(response.headers?.get('retry-after')) * 1000 || 0));
         let code = '';
         try {
           const body = await response.json();
@@ -30,8 +30,10 @@ async function requestJSON(fetcher, url, init, timeout, sleep = ms => new Promis
         const parsed = new URL(url);
         let model = '';
         try { const raw = JSON.parse(init?.body || '{}').model; if (typeof raw === 'string' && /^[a-zA-Z0-9._:/-]{1,120}$/u.test(raw)) model = raw; } catch {}
-        const error = Error(`HTTP ${status}${status === 401 || status === 403 ? '（认证失败，请核对密钥与地址）' : ''}；地址：${parsed.origin}${parsed.pathname}${model ? '；模型：' + model : ''}${code ? '；服务错误：' + code : ''}`);
+        const note = status === 401 || status === 403 ? '（认证失败，请核对密钥与地址）' : status === 429 ? `（请求过于频繁${retryAfter ? `，请约 ${Math.ceil(retryAfter / 1000)} 秒后重试` : '，请稍后重试'}）` : '';
+        const error = Error(`HTTP ${status}${note}；地址：${parsed.origin}${parsed.pathname}${model ? '；模型：' + model : ''}${code ? '；服务错误：' + code : ''}`);
         error.status = status;
+        error.retryAfterMs = retryAfter;
         throw error;
       }
       // Keep the deadline active while receiving and parsing the response body.
@@ -85,7 +87,21 @@ function installWebRecovery(contents, timers = { setTimeout, clearTimeout }, log
     cancel();
     tries = 0;
   });
-  contents.on('render-process-gone', () => { ready = false; });
+  contents.on('render-process-gone', () => {
+    ready = false;
+    failed = true;
+    // A crashed renderer never fires did-fail-load; without a reload the
+    // chat pane stays on the crash page until the user refreshes manually.
+    if (timer || tries >= delays.length) return;
+    const delay = delays[tries++];
+    timer = timers.setTimeout(() => {
+      timer = undefined;
+      if (!contents.isDestroyed()) {
+        log(`reloading webview after its renderer crashed`);
+        contents.reload();
+      }
+    }, delay);
+  });
   contents.on('did-fail-load', (_event, code, _description, url, mainFrame) => {
     if (!mainFrame || ![-2, -7, -21, -100, -101, -102, -105, -106, -109, -118, -130].includes(code)) return;
     let host;
@@ -121,9 +137,12 @@ async function retryTranslation(work, sleep = ms => new Promise(resolve => setTi
       const message=String(error?.message||error);
       if (error?.code===`TRANSLATION_BAD_JSON`) { const failure=Error(message);failure.code=`TRANSLATION_BAD_JSON`;failure.status=error?.status;throw failure; }
       if ([400,401,402,403,404,422].includes(error?.status) || /HTTP (400|401|402|403|404|422)\b|invalid.api.key|insufficient_quota|认证失败|未配置|请.*填写|不支持图片/i.test(message)) throw error;
+      // A long Retry-After must not stall the UI; tell the user instead.
+      const retryAfterMs = Math.max(0, Number(error?.retryAfterMs) || 0);
+      if (error?.status === 429 && retryAfterMs > 5000) throw error;
       if(attempt===5) { const failure=Error('翻译失败，已自动重试 5 次：'+message);failure.cause=error;throw failure; }
       onRetry(attempt+1,5);
-      await sleep([500,1000,2000,4000,8000][attempt]);
+      await sleep(Math.max([500,1000,2000,4000,8000][attempt], retryAfterMs));
     }
   }
 }

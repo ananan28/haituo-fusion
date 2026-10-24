@@ -89,6 +89,63 @@ test('paused entries are skipped without a request', async () => {
   assert.equal(result.provider, 'glm');
 });
 
+test('a rate-limited entry fails over immediately when another entry remains', async () => {
+  const calls = [];
+  const sleeps = [];
+  const cfg = {
+    primary: [entry('openai', 'key-1', 'one'), entry('deepseek', 'key-2', 'two')],
+    backup: [],
+  };
+  const result = await pools.run(cfg, { text: '你好' }, async req => {
+    calls.push(req.apiKey);
+    if (req.apiKey === 'key-1') {
+      const error = Error('HTTP 429（请求过于频繁，请约 30 秒后重试）');
+      error.status = 429;
+      error.retryAfterMs = 30000;
+      throw error;
+    }
+    return { text: 'hello' };
+  }, async ms => sleeps.push(ms));
+  assert.deepEqual(calls, ['key-1', 'key-2'], 'a paused-fast entry must not retry before Retry-After');
+  assert.deepEqual(sleeps, [], 'failover skips the in-place retry sleep entirely');
+  assert.equal(result.provider, 'deepseek');
+  assert.equal(result.pool, 'primary');
+});
+
+test('a short Retry-After on the last entry is waited out, not replaced by a fixed 500ms', async () => {
+  const calls = [];
+  const sleeps = [];
+  const cfg = { primary: [entry('openai', 'key-1', 'one')], backup: [] };
+  const result = await pools.run(cfg, { text: '你好' }, async () => {
+    calls.push(1);
+    if (calls.length === 1) {
+      const error = Error('HTTP 429（请求过于频繁）');
+      error.status = 429;
+      error.retryAfterMs = 2500;
+      throw error;
+    }
+    return { text: 'hello' };
+  }, async ms => sleeps.push(ms));
+  assert.equal(result.text, 'hello');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(sleeps, [2500], 'the server-requested delay wins over the default ladder');
+});
+
+test('a long Retry-After on the only entry surfaces immediately', async () => {
+  const calls = [];
+  const sleeps = [];
+  const cfg = { primary: [entry('openai', 'key-1', 'one')], backup: [] };
+  await assert.rejects(() => pools.run(cfg, { text: '你好' }, async () => {
+    calls.push(1);
+    const error = Error('HTTP 429（请求过于频繁，请约 60 秒后重试）');
+    error.status = 429;
+    error.retryAfterMs = 60000;
+    throw error;
+  }, async ms => sleeps.push(ms)), error => error.status === 429);
+  assert.equal(calls.length, 1, 'a minute-long wait must not stall every translation');
+  assert.deepEqual(sleeps, []);
+});
+
 test('AI retranslate keeps its request (forceRefresh, purpose) but runs through primary then backup', async () => {
   const calls = [];
   const cfg = {

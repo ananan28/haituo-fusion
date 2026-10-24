@@ -11,22 +11,24 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const bundle=fs.readFileSync(path.join(__dirname,'..','src','app','bundles','main.js'),'utf8');
+const preloadBundle=fs.readFileSync(path.join(__dirname,'..','src','app','bundles','preload','main.js'),'utf8');
 
-function sliceBalanced(marker){
-  const start=bundle.indexOf(marker);
+function sliceBalancedFrom(source,marker){
+  const start=source.indexOf(marker);
   assert.notEqual(start,-1,`missing ${marker}`);
   let depth=0,inString=null,inTemplate=false;
-  for(let i=start;i<bundle.length;i+=1){
-    const ch=bundle[i],prev=bundle[i-1];
+  for(let i=start;i<source.length;i+=1){
+    const ch=source[i],prev=source[i-1];
     if(inString){if(ch===inString&&prev!=='\\')inString=null;continue}
     if(inTemplate){if(ch==='`'&&prev!=='\\')inTemplate=false;continue}
     if(ch==='"'||ch==="'"){inString=ch;continue}
     if(ch==='`'){inTemplate=true;continue}
     if(ch==='{')depth+=1;
-    if(ch==='}'){depth-=1;if(depth===0)return bundle.slice(start,i+1)}
+    if(ch==='}'){depth-=1;if(depth===0)return source.slice(start,i+1)}
   }
   throw Error(`unbalanced ${marker}`);
 }
+function sliceBalanced(marker){return sliceBalancedFrom(bundle,marker)}
 
 const childConfigCode=sliceBalanced('function haituoChildTranslationConfig');
 const pCode=sliceBalanced('function $p');
@@ -103,6 +105,42 @@ test('child pending writes no longer accumulate because em() is a no-op there',(
   const ctx=makeCtx({profile:'haituo-child'});
   for(let i=0;i<20;i+=1)vm.runInContext(`em({pool:${i}})`,ctx);
   assert.equal(ctx.__writes.length,0);
+});
+
+test('1.5.7: a refused write in a child window is reported back as a failure',()=>{
+  const code=sliceBalancedFrom(bundle,'if (Yg.get(t) === r && e?.type === `haituo-global-settings-request`)');
+  function run(applied){
+    const acks=[],r={};
+    const ctx={
+      Error,String,Yg:new Map([['p',r]]),t:'p',r,
+      HaituoConfigVersion:10,
+      e:{type:'haituo-global-settings-request',requestId:'req-1',config:{provider:'deepl'}},
+      $p:()=>({provider:'google-free'}),
+      haituoApplyTranslationConfig:()=>applied,
+      caishengSendChild:(child,payload)=>acks.push(payload),
+    };
+    vm.createContext(ctx);vm.runInContext(`(function(){${code}})()`,ctx);return acks;
+  }
+  const refused=run({ok:false,error:'设置文件当前无法写入（可能损坏、被占用或加密不可用）'});
+  assert.equal(refused.length,1);
+  assert.equal(refused[0].ok,false,'the child window must not show 已保存');
+  assert.match(refused[0].error,/无法写入/u);
+  const saved=run({ok:true});
+  assert.equal(saved[0].ok,true,'a real save still acknowledges success');
+});
+
+test('1.5.7: renderer turns a refused write into a rejection so no caller claims success',async()=>{
+  const checkedSetCode=sliceBalancedFrom(preloadBundle,'function haituoCheckedConfigSet');
+  let reply={ok:false,error:'设置文件当前无法写入（可能损坏、被占用或加密不可用）'};
+  const ctx={console,Promise,Error,window:{SignalContext:{caishengSetTranslationConfig:()=>reply}}};
+  vm.createContext(ctx);
+  vm.runInContext(checkedSetCode,ctx);
+  await assert.rejects(()=>ctx.haituoCheckedConfigSet({a:1}),/无法写入/u,'the UI must surface the failure');
+  reply={ok:true};
+  const ok=await ctx.haituoCheckedConfigSet({a:1});
+  assert.equal(ok.ok,true,'a real success still resolves');
+  reply=undefined;
+  assert.equal(await ctx.haituoCheckedConfigSet({a:1}),undefined,'a legacy handler without a return value stays compatible');
 });
 
 test('a save loop accumulates three primary and two backup entries with keys intact',()=>{

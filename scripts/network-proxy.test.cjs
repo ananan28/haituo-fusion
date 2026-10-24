@@ -28,6 +28,36 @@ test('NET-01: transient network errors are still retried', async () => {
   assert.equal(calls, 3);
 });
 
+test('NET-03: a short Retry-After is honoured instead of the fixed retry ladder', async () => {
+  let calls = 0;
+  const waits = [];
+  const limited = Error('HTTP 429（请求过于频繁）');
+  limited.status = 429;
+  limited.retryAfterMs = 3000;
+  const result = await HaituoNetwork.retryTranslation(async () => {
+    calls += 1;
+    if (calls === 1) throw limited;
+    return { text: 'ok' };
+  }, async ms => waits.push(ms));
+  assert.equal(result.text, 'ok');
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [3000], 'the retry must wait the server-requested delay, not the 500ms ladder');
+});
+
+test('NET-03: a long Retry-After fails fast instead of stalling for a minute', async () => {
+  let calls = 0;
+  const waits = [];
+  const limited = Error('HTTP 429（请求过于频繁）');
+  limited.status = 429;
+  limited.retryAfterMs = 60000;
+  await assert.rejects(
+    () => HaituoNetwork.retryTranslation(async () => { calls += 1; throw limited; }, async ms => waits.push(ms)),
+    error => error === limited
+  );
+  assert.equal(calls, 1, 'a minute-long wait must surface to the user, not block the queued translation');
+  assert.deepEqual(waits, []);
+});
+
 test('NET-01: requestJSON tags unparseable 200 bodies as TRANSLATION_BAD_JSON', async () => {
   const fetcher = async () => ({
     ok: true,
