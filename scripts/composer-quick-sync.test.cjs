@@ -38,9 +38,25 @@ function boot({quickValue = '你好，明天见', composerValue = 'Hello, see yo
       return id === quick.id ? quick : null;
     }
   };
-  const ctx = {console, Error, String, document: documentStub};
+  const timeouts = [];
+  const ctx = {
+    console,
+    Error,
+    String,
+    Date,
+    document: documentStub,
+    setTimeout(fn) {
+      timeouts.push(fn);
+      return timeouts.length;
+    },
+    clearTimeout() {}
+  };
   vm.createContext(ctx);
   vm.runInContext(`let quickComposerSyncLock = 0;
+let activeComposer = null;
+function findComposer() {
+    return null;
+}
 function normalized(value) {
     return String(value || "").replace(/\\s+/gu, " ").trim();
 }
@@ -55,6 +71,7 @@ function hideBackTranslation() {
     __events.push("hide-preview");
 }
 ${slice}`, ctx);
+  ctx.__timeouts = timeouts;
   ctx.__events = events;
   return {
     quick,
@@ -170,7 +187,7 @@ test('a disconnected composer is never touched', () => {
 test('quick listeners call the sync for every edit and the composer listener calls it on input', () => {
   assert.ok(slice.includes('function haituoPairQuickComposer'), 'pairing helper must ship');
   assert.ok(source.includes('quick.addEventListener("input", () => haituoQuickEmptied(quick), !0);'), 'quick box input is wired');
-  assert.ok(source.includes('t && (syncPanel(t), haituoComposerEmptied(t), backTranslationExpectedText'), 'composer input is wired');
+  assert.ok(source.includes('t && (syncPanel(t), haituoComposerEmptied(t), scheduleComposerEmptyCheck(t)'), 'composer input is wired');
   const settleIndex = source.indexOf('await settleComposer(composer, translated, direct)');
   assert.ok(settleIndex > 0, 'runQuick settles the composer');
   const pairIndex = source.indexOf('haituoPairQuickComposer(quick, composer, translated)', settleIndex);
@@ -199,4 +216,31 @@ test('send cleanup drops the pair before clearing the quick box', () => {
   const pairAt = clearFn.indexOf('quick.__haituoPairedComposer = null');
   const clearAt = clearFn.indexOf('quick.value = ""');
   assert.ok(pairAt >= 0 && clearAt > pairAt, 'native send clears the pair first, protecting a new draft');
+});
+
+test('deleting the composer is caught even when WhatsApp defers the DOM update', () => {
+  const app = boot();
+  app.pair();
+  app.composer.value = 'Hello, see you tomorrow';
+  app.ctx.findComposer = () => app.composer;
+  app.ctx.activeComposer = app.composer;
+  app.ctx.scheduleComposerEmptyCheck(app.composer);
+  assert.ok(app.ctx.__timeouts.length >= 1, 'a follow-up check is scheduled while the composer still holds text');
+  app.composer.value = '';
+  let ran = 0;
+  while (app.ctx.__timeouts.length && ran < 20) {
+    app.ctx.__timeouts.shift()();
+    ran += 1;
+  }
+  assert.equal(app.quick.value, '', 'the delayed check clears the quick box once the composer is truly empty');
+  assert.equal(app.quick.__haituoPairedComposer, null);
+});
+
+test('delete/cut keys and delayed checks are wired to the composer sync', () => {
+  assert.ok(source.includes('scheduleComposerEmptyCheck(t)'), 'delayed check helper is referenced');
+  assert.ok(source.includes('/^delete/u.test(String(e.inputType || "")) && scheduleComposerEmptyCheck(t)'), 'beforeinput delete schedules a check');
+  assert.ok(source.includes('"keyup", e => {'), 'keyup is listened');
+  assert.ok(source.includes('"cut", e => {'), 'cut is listened');
+  assert.ok(source.includes('("Backspace" === e.key || "Delete" === e.key) && t && scheduleComposerEmptyCheck(t)'), 'backspace/delete keydown schedules a check');
+  assert.ok(source.includes('syncPanel(t), haituoComposerEmptied(t), scheduleComposerEmptyCheck(t)'), 'input also schedules a follow-up check');
 });

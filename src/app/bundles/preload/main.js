@@ -209320,7 +209320,7 @@ function haituoCachedSignalTranslation(text) {
     });
     function aor({disabled: e, text: t, onApplyTranslation: n, onSendTranslation: r}) {
         let [a, o] = (0, l6.useState)(x_), [s, c] = (0, l6.useState)(!1), [l, u] = (0, l6.useState)(!1), [d, f] = (0, 
-        l6.useState)(``), [p, m] = (0, l6.useState)(!1), [v, y] = (0, l6.useState)(``), [haituoQuickText, haituoSetQuickText] = (0, l6.useState)(``), haituoQuickInputRef = (0, l6.useRef)(null), haituoQuickSpaceRef = (0, l6.useRef)({ count: 0, at: 0 });
+        l6.useState)(``), [p, m] = (0, l6.useState)(!1), [v, y] = (0, l6.useState)(``), [haituoQuickText, haituoSetQuickText] = (0, l6.useState)(``), haituoQuickInputRef = (0, l6.useRef)(null), haituoQuickSpaceRef = (0, l6.useRef)({ count: 0, at: 0 }), haituoQuickPairRef = (0, l6.useRef)(null);
         (0,l6.useEffect)(()=>{
             window.SignalContext.caishengSettingsVisibility?.(s,'composer');
             if(!s)return;
@@ -209338,6 +209338,28 @@ function haituoCachedSignalTranslation(text) {
         }), []), (0, l6.useEffect)(() => {
             t.trim() || (m(!1), y(``), document.getElementById(`haituo-signal-backtranslation-preview`)?.style && (document.getElementById(`haituo-signal-backtranslation-preview`).style.display = `none`));
         }, [ t ]);
+        const haituoQuickNormalized = value => String(value || ``).replace(/\s+/gu, ` `).trim();
+        (0, l6.useEffect)(() => {
+            const pair = haituoQuickPairRef.current;
+            if (!pair) return;
+            const quickNow = String(haituoQuickText || ``).trim();
+            const composerNow = haituoQuickNormalized(t);
+            if (!composerNow) {
+                haituoQuickPairRef.current = null;
+                quickNow && haituoSetQuickText(``);
+                return;
+            }
+            if (!quickNow) {
+                haituoQuickPairRef.current = null;
+                if (composerNow === pair.text) {
+                    const keepFocus = document.activeElement === haituoQuickInputRef.current;
+                    n(``);
+                    keepFocus && requestAnimationFrame(() => haituoQuickInputRef.current?.focus({ preventScroll: !0 }));
+                }
+                return;
+            }
+            composerNow !== pair.text && (haituoQuickPairRef.current = null);
+        }, [ haituoQuickText, t ]);
         let h = (0, l6.useCallback)(e => {
             let t = {
                 ...a,
@@ -209396,10 +209418,10 @@ function haituoCachedSignalTranslation(text) {
                 if (!translated) throw Error(`翻译服务未返回结果`);
                 const keepQuickFocus = document.activeElement === haituoQuickInputRef.current;
                 if (sendAfter) {
-                    r(translated), haituoSetQuickText(``), m(!1), y(`已翻译并发送`), setTimeout(() => y(``), 2500);
+                    r(translated), haituoQuickPairRef.current = null, haituoSetQuickText(``), m(!1), y(`已翻译并发送`), setTimeout(() => y(``), 2500);
                     return;
                 }
-                n(translated), m(!0), y(a.backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`);
+                haituoQuickPairRef.current = { text: haituoQuickNormalized(translated) }, n(translated), m(!0), y(a.backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`);
                 if (keepQuickFocus) {
                     const restoreQuickFocus = () => {
                         const input = haituoQuickInputRef.current, active = document.activeElement;
@@ -209424,7 +209446,7 @@ function haituoCachedSignalTranslation(text) {
                 void g(!0);
                 return;
             }
-            r(current), haituoSetQuickText(``), m(!1), y(``), f(``);
+            r(current), haituoQuickPairRef.current = null, haituoSetQuickText(``), m(!1), y(``), f(``);
         }, [ t, l, g, r ]);
         (0, l6.useEffect)(() => {
             const onEnter = event => {

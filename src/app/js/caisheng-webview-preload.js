@@ -287,9 +287,26 @@ function isTelegramGroupChat() {
     return /(?:成员|members?|订阅者|subscribers?)/iu.test(String(status?.textContent || ""));
 }
 
+function isWhatsAppGroupConversation() {
+    const metas = document.querySelectorAll('#main [data-pre-plain-text]');
+    for (let i = metas.length - 1; i >= 0 && i >= metas.length - 40; i -= 1) {
+        const meta = metas[i];
+        if (meta.closest('.message-out')) continue;
+        const body = meta.querySelector('.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"]');
+        if (!body) continue;
+        const author = [ ...meta.querySelectorAll('span[dir="auto"]') ].find(span => {
+            if (span.closest('.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="quoted-message"]')) return !1;
+            if (span.closest('[data-testid*="forward" i],[data-icon*="forward" i]')) return !1;
+            return !!String(span.textContent || "").trim();
+        });
+        if (author) return !0;
+    }
+    return !1;
+}
+
 function isGroupConversation() {
     if (isTelegram()) return isTelegramGroupChat();
-    if (isWhatsApp()) return !!document.querySelector('#main [data-pre-plain-text]');
+    if (isWhatsApp()) return isWhatsAppGroupConversation();
     return !1;
 }
 
@@ -659,6 +676,18 @@ function haituoWithoutQuickComposerSync(action) {
     } finally {
         quickComposerSyncLock -= 1;
     }
+}
+
+let haituoComposerEmptyCheckTimer = 0;
+function scheduleComposerEmptyCheck(composer) {
+    const deadline = Date.now() + 280;
+    clearTimeout(haituoComposerEmptyCheckTimer);
+    const tick = () => {
+        const current = composer?.isConnected ? composer : findComposer() || activeComposer;
+        if (!current || haituoComposerEmptied(current)) return;
+        Date.now() < deadline && (haituoComposerEmptyCheckTimer = setTimeout(tick, 40));
+    };
+    tick();
 }
 
 function countMatchingOutgoingMessages(expected) {
@@ -1226,12 +1255,21 @@ function blockChinese(e, t) {
 document.addEventListener("beforeinput", e => {
     const t = composerFrom(e.target);
     if (t && "insertParagraph" === e.inputType && HAN.test(read(t))) blockChinese(e, t);
+    t && /^delete/u.test(String(e.inputType || "")) && scheduleComposerEmptyCheck(t);
 }, !0), document.addEventListener("focusin", e => {
     const t = composerFrom(e.target);
     t && syncPanel(t);
 }, !0), document.addEventListener("input", e => {
     const t = composerFrom(e.target);
-    t && (syncPanel(t), haituoComposerEmptied(t), backTranslationExpectedText && normalized(read(t)) !== normalized(backTranslationExpectedText) ? hideBackTranslation() : read(t).trim() || hideBackTranslation());
+    t && (syncPanel(t), haituoComposerEmptied(t), scheduleComposerEmptyCheck(t), backTranslationExpectedText && normalized(read(t)) !== normalized(backTranslationExpectedText) ? hideBackTranslation() : read(t).trim() || hideBackTranslation());
+}, !0), document.addEventListener("keyup", e => {
+    if ("Backspace" === e.key || "Delete" === e.key) {
+        const t = composerFrom(e.target);
+        t && scheduleComposerEmptyCheck(t);
+    }
+}, !0), document.addEventListener("cut", e => {
+    const t = composerFrom(e.target);
+    t && scheduleComposerEmptyCheck(t);
 }, !0), document.addEventListener("click", e => {
     if (!(webTranslationActive() && e.target instanceof Element)) return;
     if (e.target.closest('[data-testid="media-editor"],[role="dialog"]')) return;
@@ -1247,6 +1285,7 @@ document.addEventListener("beforeinput", e => {
     }
 }, !0), document.addEventListener("keydown", e => {
     const t = composerFrom(e.target);
+    ("Backspace" === e.key || "Delete" === e.key) && t && scheduleComposerEmptyCheck(t);
     if ("Enter" === e.key && !e.shiftKey) {
         const n = mediaSendButton();
         if (n) return;
