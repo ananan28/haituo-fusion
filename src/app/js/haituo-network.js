@@ -30,7 +30,7 @@ async function requestJSON(fetcher, url, init, timeout, sleep = ms => new Promis
         const parsed = new URL(url);
         let model = '';
         try { const raw = JSON.parse(init?.body || '{}').model; if (typeof raw === 'string' && /^[a-zA-Z0-9._:/-]{1,120}$/u.test(raw)) model = raw; } catch {}
-        const note = status === 401 || status === 403 ? '（认证失败，请核对密钥与地址）' : status === 429 ? `（请求过于频繁${retryAfter ? `，请约 ${Math.ceil(retryAfter / 1000)} 秒后重试` : '，请稍后重试'}）` : '';
+        const note = status === 401 || status === 403 ? '（认证失败，请核对密钥与地址）' : status === 402 ? '（账户余额不足或该接口未开通）' : status === 429 ? `（请求过于频繁${retryAfter ? `，请约 ${Math.ceil(retryAfter / 1000)} 秒后重试` : '，请稍后重试'}）` : '';
         const error = Error(`HTTP ${status}${note}；地址：${parsed.origin}${parsed.pathname}${model ? '；模型：' + model : ''}${code ? '；服务错误：' + code : ''}`);
         error.status = status;
         error.retryAfterMs = retryAfter;

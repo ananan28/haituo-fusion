@@ -5,7 +5,11 @@
 // too, and degrade to the free channel when every entry is paused.
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
 const pools=require('../src/app/js/haituo-translation-pools.js');
+const preload=fs.readFileSync(path.join(__dirname,'..','src','app','bundles','preload','main.js'),'utf8');
 
 const entry=(over={})=>({provider:'openai',apiKey:'sk-x',endpoint:'https://api.example.test/v1',model:'m',region:'',enabled:true,...over});
 
@@ -50,4 +54,42 @@ test('sanitize persists the paused flag for storage round-trips',()=>{
   assert.equal(out.primary[0].enabled,false);
   assert.equal(out.primary[1].enabled,true);
   assert.equal(out.backup[0].enabled,false);
+});
+
+test('pool save selects the first enabled service and never a paused one',()=>{
+  const start=preload.indexOf('function haituoActivePoolProvider');
+  const end=preload.indexOf('let haituoPoolSaveQueue',start);
+  assert.ok(start>=0&&end>start,'haituoActivePoolProvider must exist');
+  const ctx={};vm.createContext(ctx);vm.runInContext(preload.slice(start,end),ctx);
+  assert.equal(ctx.haituoActivePoolProvider({primary:[{provider:'google-cloud',enabled:false},{provider:'deepseek',enabled:true}]}),'deepseek','a paused first entry must not become the selected service');
+  assert.equal(ctx.haituoActivePoolProvider({primary:[{provider:'openai',enabled:false}]}),undefined,'all paused must leave the previous selection untouched');
+  assert.equal(ctx.haituoActivePoolProvider({primary:[]}),undefined);
+  assert.equal(ctx.haituoActivePoolProvider(undefined),undefined);
+  assert.match(preload,/haituoActivePoolProvider\(changed\)/u);
+  assert.match(preload,/activePrimary \? \{ chatTranslationProvider: activePrimary, inputTranslationProvider: activePrimary \}/u);
+  assert.doesNotMatch(preload,/chatTranslationProvider:changed\.primary\[0\]/u);
+});
+
+test('pool saves carry the config version and reapply the edit after another window wins',async()=>{
+  const start=preload.indexOf('function haituoActivePoolProvider');
+  const end=preload.indexOf('function haituoCheckedConfigSet',start);
+  assert.ok(start>=0&&end>start,'the pool save helper must exist');
+  const reads=[
+    {__v:5,translationPools:{primary:[{provider:'openai',enabled:true}],backup:[]}},
+    {__v:6,translationPools:{primary:[{provider:'openai',enabled:true},{provider:'deepseek',enabled:true}],backup:[]}},
+  ];
+  const patches=[];let attempts=0;
+  const ctx={
+    window:{SignalContext:{caishengGetTranslationConfig:async()=>reads[Math.min(attempts,reads.length-1)]}},
+    haituoCheckedConfigSet:async patch=>{patches.push(JSON.parse(JSON.stringify(patch)));attempts+=1;if(attempts===1)throw Error('设置已被其他窗口更新，请重试');return {ok:true}},
+  };
+  vm.createContext(ctx);vm.runInContext(preload.slice(start,end),ctx);
+  const result=await ctx.haituoSavePoolChange('translation',{},current=>({...current,primary:[...current.primary,{provider:'glm',enabled:true}]}));
+  assert.equal(result.ok,true);
+  assert.equal(patches.length,2,'a stale write is retried exactly once');
+  assert.equal(patches[0].__v,5);
+  assert.equal(patches[1].__v,6,'the retry must be based on the newer version');
+  assert.equal(patches[1].translationPools.primary.length,3,'the retry must apply this edit to the fresh pool');
+  assert.equal(patches[1].chatTranslationProvider,'openai');
+  assert.equal(patches[1].inputTranslationProvider,'openai');
 });

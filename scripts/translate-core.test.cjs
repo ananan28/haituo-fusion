@@ -151,6 +151,63 @@ test('TEXT-02: finish_reason=length is rejected, stop is accepted', async () => 
   assert.equal(JSON.parse(JSON.stringify(ok)).text, '完整译文');
 });
 
+test('POOL-04: a dead pool falls through to the selected provider', async () => {
+  const ctx = makeModeCtx();
+  let poolCalls = 0;
+  ctx.require = mod => String(mod).includes(`translation-pools`)
+    ? { run: async () => { poolCalls += 1; throw new Error(`主翻译和备用翻译均未成功：HTTP 402`); } }
+    : { translationTimeout: () => 1000 };
+  const result = await vm.runInContext(
+    `haituoTranslateWithMode({ translationPools: [{ provider: 'deepseek', apiKey: 'bad' }], provider: 'google-cloud', apiKey: 'k', googleCloudApiKey: 'g' },
+      { provider: 'google-cloud', purpose: 'chat', text: 'hi', targetLanguage: 'en' })`, ctx);
+  assert.equal(poolCalls, 1, 'the pool is attempted first');
+  assert.equal(JSON.parse(JSON.stringify(result)).text, 'local:google-cloud', 'the selected provider still serves the request');
+  assert.equal(JSON.parse(JSON.stringify(result)).provider, 'google-cloud');
+});
+
+test('POOL-05: when the pool and every fallback fail, the pool reason is included', async () => {
+  const ctx = makeModeCtx();
+  ctx.require = mod => String(mod).includes(`translation-pools`)
+    ? { run: async () => { throw new Error(`主翻译和备用翻译均未成功：HTTP 402`); } }
+    : { translationTimeout: () => 1000 };
+  ctx.cachedHaituoTranslate = async () => { throw new Error(`selected provider failed`); };
+  await assert.rejects(
+    () => vm.runInContext(
+      `haituoTranslateWithMode({ translationPools: [{ provider: 'deepseek', apiKey: 'bad' }], provider: 'google-cloud', googleCloudApiKey: 'g' },
+        { provider: 'google-cloud', purpose: 'chat', text: 'hi', targetLanguage: 'en' })`, ctx),
+    error => /翻译池：主翻译和备用翻译均未成功：HTTP 402/u.test(error.message)
+      && /selected provider failed/u.test(error.message));
+});
+
+test('POOL-06: AI re-translate falls back to the selected provider after the pool dies', async () => {
+  const ctx = makeModeCtx();
+  let poolCalls = 0;
+  ctx.require = mod => String(mod).includes(`translation-pools`)
+    ? { run: async () => { poolCalls += 1; throw new Error(`主翻译和备用翻译均未成功：HTTP 402`); } }
+    : { translationTimeout: () => 1000 };
+  const result = await vm.runInContext(
+    `haituoTranslateWithMode({ translationPools: [{ provider: 'deepseek', apiKey: 'bad' }], chatTranslationProvider: 'google-cloud', inputTranslationProvider: 'google-cloud', googleCloudApiKey: 'g' },
+      { provider: 'smart-retranslate', purpose: 'chat', text: 'hi', targetLanguage: 'en', forceRefresh: true })`, ctx);
+  assert.equal(poolCalls, 1, 'the pool is attempted first');
+  assert.equal(JSON.parse(JSON.stringify(result)).text, 'local:google-cloud', 'the selected service must still work after a dead pool');
+  assert.equal(JSON.parse(JSON.stringify(result)).provider, 'google-cloud');
+});
+
+test('POOL-07: AI re-translate uses a configured DeepSeek key even when it is not the selected service', async () => {
+  const ctx = makeModeCtx();
+  ctx.require = mod => String(mod).includes(`translation-pools`)
+    ? { run: async () => { throw new Error(`主翻译和备用翻译均未成功：HTTP 402`); } }
+    : { translationTimeout: () => 1000 };
+  ctx.cachedHaituoTranslate = async e => {
+    if ([`google-free`, `mymemory`].includes(e.provider)) throw new Error(`free blocked`);
+    return { text: `local:` + e.provider, provider: e.provider };
+  };
+  const result = await vm.runInContext(
+    `haituoTranslateWithMode({ translationPools: [{ provider: 'deepseek', apiKey: 'bad' }], chatTranslationProvider: 'google-free', deepseekApiKey: 'd-key' },
+      { provider: 'smart-retranslate', purpose: 'chat', text: 'hi', targetLanguage: 'en', forceRefresh: true })`, ctx);
+  assert.equal(JSON.parse(JSON.stringify(result)).text, 'local:deepseek', 'configured paid services join the fallback list');
+});
+
 test('ROUTE-02: groq ignores generic endpoint/model and uses groq defaults', async () => {
   const ctx = makeCtx();
   let seen = null;

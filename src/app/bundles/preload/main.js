@@ -21534,7 +21534,32 @@ http://jedwatson.github.io/classnames
         const {haituoConfig,...domProps}=props;return F.jsxs('div',{...domProps,children:[...rest,drawer('backtranslation','输入框与回译'),configured,drawer('shortcuts','其他快捷键'),drawer('appearance','聊天外观与颜色'),...actions,saveButton]});
     }
 
+    function haituoActivePoolProvider(pools) {
+        return (pools?.primary || []).find(entry => entry.enabled !== false)?.provider;
+    }
+
     let haituoPoolSaveQueue=Promise.resolve();
+    async function haituoSavePoolChange(kind,pools,operation) {
+        const apply = async () => {
+            const latest = await window.SignalContext.caishengGetTranslationConfig();
+            const current = kind === 'image'
+                ? { screenshots: Array.isArray(latest.screenshotApiPool) && latest.screenshotApiPool.length ? latest.screenshotApiPool : pools.screenshots }
+                : latest.translationPools || pools;
+            const changed = operation(current);
+            const activePrimary = kind === 'image' ? void 0 : haituoActivePoolProvider(changed);
+            const patch = kind === 'image'
+                ? { screenshotApiPool: changed.screenshots }
+                : { translationPools: changed, ...(activePrimary ? { chatTranslationProvider: activePrimary, inputTranslationProvider: activePrimary } : {}) };
+            if (typeof latest.__v === 'number') patch.__v = latest.__v;
+            return haituoCheckedConfigSet(patch);
+        };
+        return apply().catch(async error => {
+            // Another window saved first: re-read and reapply this edit on top
+            // of the newer config instead of losing either change.
+            if (!/已被其他窗口更新/u.test(String(error?.message || error))) throw error;
+            return apply();
+        });
+    }
     // Main reports a refused protected write as {ok:false} instead of throwing.
     // Without this check every caller would treat that as a successful save.
     function haituoCheckedConfigSet(patch) {
@@ -21561,8 +21586,8 @@ http://jedwatson.github.io/classnames
         const selected=cfg.chatTranslationProvider||'google-free';
         const legacyPrimary={provider:presets[selected]?selected:'openai',apiKey:selected==='deepseek'?cfg.deepseekApiKey||'':selected==='google-cloud'?cfg.googleCloudApiKey||'':selected==='groq'?cfg.groqApiKey||'':selected==='deepl'?cfg.deepLApiKey||'':cfg.apiKey||'',endpoint:selected==='deepseek'?cfg.deepseekEndpoint||presets.deepseek.endpoint:cfg.endpoint||cfg.compatibleEndpoint||presets[selected]?.endpoint||'',model:selected==='deepseek'?cfg.deepseekModel||'deepseek-flash':cfg.model||cfg.openAIModel||presets[selected]?.model||''};
         const pools=kind==='image'?{screenshots:Array.isArray(cfg.screenshotApiPool)&&cfg.screenshotApiPool.length?cfg.screenshotApiPool:[{provider:cfg.screenshotTranslationProvider==='google-cloud'?'google-cloud':cfg.screenshotApiKey?'openai':'google-free',apiKey:cfg.screenshotTranslationProvider==='google-cloud'?cfg.googleCloudApiKey||'':cfg.screenshotApiKey||cfg.apiKey||'',endpoint:cfg.screenshotEndpoint||cfg.endpoint||presets.openai.endpoint,model:cfg.screenshotModel||'gpt-4.1-mini'}]}:cfg.translationPools||{primary:[legacyPrimary],backup:(cfg.openaiApiProfiles||[]).map(p=>({...p,provider:presets[p.service]?p.service:'custom'}))};
-        const save=operation=>{haituoPoolSaveQueue=haituoPoolSaveQueue.catch(()=>{}).then(async()=>{const latest=await window.SignalContext.caishengGetTranslationConfig();const current=kind==='image'?{screenshots:Array.isArray(latest.screenshotApiPool)&&latest.screenshotApiPool.length?latest.screenshotApiPool:pools.screenshots}:latest.translationPools||pools;const changed=operation(current);return haituoCheckedConfigSet(kind==='image'?{screenshotApiPool:changed.screenshots}:{translationPools:changed,chatTranslationProvider:changed.primary[0]?.provider||'google-free',inputTranslationProvider:changed.primary[0]?.provider||'google-free'})}).catch(error=>alert(String(error.message||error)))};
-        const drawer=name=>{const rows=pools[name]||[],title=name==='primary'?'主翻译':name==='backup'?'备用翻译':'截图翻译接口';return F.jsxs('details',{'data-haituo-pool':name,...(name==='primary'?{'data-haituo-settings-group':'api'}:name==='backup'?{'data-haituo-api-drawer':'true'}:{'data-haituo-shot-api-drawer':'true'}),children:[F.jsx('summary',{children:title+'（'+rows.length+' 条）'}),F.jsx('small',{children:name==='backup'?'只在主池接口重试仍失败后临时调用，聊天、输入与 AI 重译都走同一顺序，下一条新消息仍优先主池；已暂停的条目自动跳过。':name==='primary'?'聊天、输入与 AI 重译共用此池：按顺序尝试，未填写密钥的条目自动跳过，一条成功即停止；主池全部失败才调用备用池；已暂停的条目自动跳过，全部暂停时自动使用 Google 免费翻译。':'可选择 Google 本地识字模式或支持图片的 AI；按顺序重试与切换。'}),...rows.map((entry,index)=>{
+        const save=operation=>{haituoPoolSaveQueue=haituoPoolSaveQueue.catch(()=>{}).then(()=>haituoSavePoolChange(kind,pools,operation)).catch(error=>alert(String(error.message||error)))};
+        const drawer=name=>{const rows=pools[name]||[],title=name==='primary'?'主翻译':name==='backup'?'备用翻译':'截图翻译接口';return F.jsxs('details',{'data-haituo-pool':name,...(name==='primary'?{'data-haituo-settings-group':'api'}:name==='backup'?{'data-haituo-api-drawer':'true'}:{'data-haituo-shot-api-drawer':'true'}),children:[F.jsx('summary',{children:title+'（'+rows.length+' 条）'}),F.jsx('small',{children:name==='backup'?'只在主池接口全部失败后临时调用；下一条新消息或重译仍优先主池，已暂停的条目自动跳过。':name==='primary'?'聊天、输入与 AI 重译共用此池：首次翻译从主接口 1 开始，重复 AI 重译依次使用下一条主接口并循环；未填写密钥或已暂停的条目立即跳过，一条成功即停止；主池全部失败才调用备用池；全部暂停时自动使用 Google 免费翻译。':'可选择 Google 本地识字模式或支持图片的 AI；按顺序重试与切换。'}),...rows.map((entry,index)=>{
          const preset=presets[entry.provider]||presets.custom,edit=delta=>save(current=>({...current,[name]:current[name].map((p,i)=>i===index?{...p,...delta}:p)}));
          const field=(key,label,type='text')=>F.jsxs('label',{children:[F.jsx('span',{children:label}),F.jsx('input',{'aria-label':title+' '+label,'data-haituo-setting':name+'-'+index+'-'+key,type,defaultValue:entry[key]||'',onFocus:e=>{e.target.value.startsWith('__HAITUO_REDACTED__:')&&e.target.select()},onBlur:e=>{if(e.target.value!==(entry[key]||''))edit({[key]:e.target.value})}},name+'-'+index+'-'+key+'-'+(entry[key]||''))]});
          return F.jsxs('fieldset',{...(entry.enabled===false?{style:{opacity:.55}}:{}),children:[F.jsx('legend',{children:title+' '+(index+1)+(entry.enabled===false?'（已暂停）':'')}),F.jsxs('label',{children:[F.jsx('span',{children:'翻译服务'}),F.jsxs('select',{'aria-label':title+'服务商',value:entry.provider,onChange:e=>{const provider=e.target.value;edit({provider,...presets[provider],apiKey:'',vision:kind==='image'})},children:options.map(provider=>F.jsx('option',{value:provider,children:presets[provider].label},provider))})]}),...(preset.free?[F.jsx('small',{children:'免密钥，无需填写 API；网络或服务限流时可能不可用。'})]:[field('apiKey','API 密钥','password'),field('endpoint','API 地址'),...(preset.model||entry.provider==='custom'?[field('model','模型')]:[])]),F.jsx('button',{type:'button','data-haituo-pool-toggle':entry.enabled===false?'resume':'pause',onClick:()=>edit({enabled:entry.enabled===false}),children:entry.enabled===false?'恢复此模型':'暂停此模型'}),F.jsx('button',{type:'button',onClick:()=>save(current=>({...current,[name]:current[name].filter((_,i)=>i!==index)})),children:'删除此配置'})]},name+'-'+index)}),...(kind==='image'?[F.jsx('button',{type:'button',disabled:rows.length>=12,onClick:()=>save(current=>({...current,[name]:[...current[name],{provider:'google-free',apiKey:'',...presets['google-free']}]})),children:'＋ 添加免费 Google 截图翻译（无需 API）'})]:[]),F.jsx('button',{type:'button',disabled:rows.length>=12,'data-haituo-add-pool':name,onClick:()=>save(current=>({...current,[name]:[...current[name],{provider:'openai',apiKey:'',...presets.openai,vision:kind==='image'}]})),children:'＋ 添加'+title+' API'})]})};

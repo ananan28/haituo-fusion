@@ -70,6 +70,12 @@ function providerOf(call) {
   return typeof value === 'string' ? value : undefined;
 }
 
+function routedProviderOf(call) {
+  const request = call[1];
+  assert.ok(request && typeof request === 'object', `missing request arg in ${JSON.stringify(call).slice(0, 200)}`);
+  return typeof request.provider === 'string' ? request.provider : undefined;
+}
+
 async function dispatch(ctx, channel, payload) {
   const handler = ctx.__handled[channel];
   assert.ok(handler, `handler ${channel} registered`);
@@ -118,6 +124,21 @@ test('P0-03: input translation with auto routes to the configured input provider
   await dispatch(ctx, 'caisheng:translate', { provider: 'auto', purpose: 'input', text: 'hi', targetLanguage: 'zh-CN' });
   assert.equal(strictProviderOf(ctx.__calls[0]), false);
   assert.equal(providerOf(ctx.__calls[0]), 'google-free', 'auto+input falls back to inputTranslationProvider');
+  assert.equal(routedProviderOf(ctx.__calls[0]), 'google-free', 'the resolved service must reach the routing request, not only the config');
+});
+
+test('1.5.9: a provider-less chat request routes the configured chat service on the request', async () => {
+  const ctx = makeCtx({ chatTranslationProvider: 'google-cloud', inputTranslationProvider: 'deepl', googleCloudApiKey: 'g' });
+  await dispatch(ctx, 'caisheng:translate', { purpose: 'chat', text: 'hi', targetLanguage: 'zh-CN' });
+  assert.equal(strictProviderOf(ctx.__calls[0]), false);
+  assert.equal(routedProviderOf(ctx.__calls[0]), 'google-cloud', 'routing must not fall back to free when the configured chat service is unavailable by omission');
+});
+
+test('1.5.9: webview input with auto and no pool routes the input service and stays non-strict', async () => {
+  const ctx = makeCtx({ chatTranslationProvider: 'google-cloud', inputTranslationProvider: 'deepl', googleCloudApiKey: 'g', deepLApiKey: 'd' });
+  await dispatch(ctx, 'caisheng:webview-translate', { purpose: 'input', provider: 'auto', text: 'hi', targetLanguage: 'zh-CN' });
+  assert.equal(strictProviderOf(ctx.__calls[0]), false);
+  assert.equal(routedProviderOf(ctx.__calls[0]), 'deepl', 'auto + input uses inputTranslationProvider for both config and routing');
 });
 
 test('P0-03: connection test purpose never bypasses pools', async () => {

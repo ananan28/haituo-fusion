@@ -11,7 +11,7 @@ function profilesForConfig(cfg){
  if(cfg.deepseekApiKey&&(!cfg.deepseekModel||/flash/i.test(cfg.deepseekModel)))candidates.push({apiKey:cfg.deepseekApiKey,endpoint:cfg.deepseekEndpoint||'https://api.deepseek.com/v1',model:cfg.deepseekModel||'deepseek-flash'});
  return [...new Map(candidates.filter(p=>p.apiKey&&p.model).map(p=>[String(p.endpoint||'')+'\0'+p.apiKey+'\0'+p.model,p])).values()];
 }
-function screenshotRoutes(cfg){const free=[{provider:'google-free',apiKey:''}];if(Array.isArray(cfg.screenshotApiPool))return cfg.screenshotApiPool.length?cfg.screenshotApiPool.filter(p=>p.enabled!==false):free;if(['google-free','google-cloud'].includes(cfg.screenshotTranslationProvider))return[{provider:cfg.screenshotTranslationProvider,apiKey:cfg.googleCloudApiKey||''}];if(!cfg.screenshotApiKey)return free;const legacy=profilesForConfig(cfg).map(p=>({...p,provider:'openai'}));return legacy.length?legacy:free}
+function screenshotRoutes(cfg){const free=[{provider:'google-free',apiKey:''}];if(Array.isArray(cfg.screenshotApiPool)){const enabled=cfg.screenshotApiPool.filter(p=>p.enabled!==false);return enabled.length?enabled:free}if(['google-free','google-cloud'].includes(cfg.screenshotTranslationProvider))return[{provider:cfg.screenshotTranslationProvider,apiKey:cfg.googleCloudApiKey||''}];if(!cfg.screenshotApiKey)return free;const legacy=profilesForConfig(cfg).map(p=>({...p,provider:'openai'}));return legacy.length?legacy:free}
 function pickScreenSource(sources,displayId){
  // Exact display-id match only. Source order is NOT guaranteed to follow the
  // display list, so index-based pairing and "any non-empty thumbnail" picks can

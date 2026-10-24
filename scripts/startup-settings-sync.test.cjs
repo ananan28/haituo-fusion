@@ -56,6 +56,7 @@ const childHandlerCode = sliceFn(
   'if ($u !== `signal-main`) process.on(`message`, value => {',
   '\nif(process.env.HAITUO_SETTINGS_TEST'
 ).trim();
+const shortcutConfigCode = sliceBalanced('function haituoShortcutConfig');
 const applyCode = sliceBalanced('function haituoApplyTranslationConfig');
 const emCode = sliceFn('function em(e) {', 'function tm() {');
 const settingsReadCode = sliceFn('function $p() {', 'function rmRefresh');
@@ -309,7 +310,7 @@ function makeApplyCtx() {
   ctx.__persisted = persisted;
   ctx.__broadcasts = broadcasts;
   vm.createContext(ctx);
-  vm.runInContext(versionCode + applyCode + emCode, ctx);
+  vm.runInContext(versionCode + shortcutConfigCode + applyCode + emCode, ctx);
   vm.runInContext(`$u = 'signal-main';`, ctx);
   return ctx;
 }
@@ -331,6 +332,30 @@ test('1.5.7: a successful save reports ok:true', () => {
   const ctx = makeApplyCtx();
   const result = vm.runInContext(`haituoApplyTranslationConfig({ provider: 'deepl' })`, ctx);
   assert.equal(result.ok, true, 'the renderer may claim the save only on an explicit success');
+});
+
+test('1.5.9: an occupied screenshot shortcut never blocks unrelated settings saves', () => {
+  const ctx = makeApplyCtx();
+  let configureCalls = 0;
+  ctx.haituoScreenshotController = {
+    configure() {
+      configureCalls += 1;
+      throw Error('截图快捷键不可用或已被占用，请换一组按键');
+    },
+  };
+  const result = vm.runInContext(`haituoApplyTranslationConfig({ provider: 'deepl', targetLanguage: 'fr' })`, ctx);
+  assert.equal(configureCalls, 0, 'unchanged shortcuts must not be re-registered on every save');
+  assert.equal(result.ok, true, 'an unrelated save succeeds even when the shortcut is occupied');
+  assert.equal(ctx.__persisted.at(-1).provider, 'deepl');
+  assert.throws(
+    () => vm.runInContext(`haituoApplyTranslationConfig({ screenshotEnabled: true, screenshotShortcut: 'Control+Alt+P' })`, ctx),
+    /不可用|占用/u,
+    'changing the shortcut itself still surfaces the registration failure'
+  );
+  assert.equal(configureCalls, 1);
+  const retry = vm.runInContext(`haituoApplyTranslationConfig({ chatTranslationProvider: 'google-cloud' })`, ctx);
+  assert.equal(retry.ok, true, 'a failed shortcut attempt must not poison later unrelated saves');
+  assert.equal(ctx.__persisted.at(-1).chatTranslationProvider, 'google-cloud');
 });
 
 test('1.5.7: a refused settings write is reported instead of claiming success', () => {
@@ -372,4 +397,54 @@ test('1.5.8: a failed migration keeps the settings read from disk instead of def
   assert.equal(result.groqApiKey, 'keep-groq');
   assert.equal(result.deepLApiKey, 'keep-deepl');
   assert.ok(warnings.some(line => /migration failed/u.test(line)), 'the failure is logged');
+});
+
+test('1.5.9: opening settings never registers a system-wide Escape shortcut', () => {
+  const visibilityCode = sliceBalanced('function haituoSettingsVisibility');
+  const closeCode = sliceBalanced('function haituoCloseAllSettings');
+  const shortcutCalls = [];
+  const ctx = {
+    console, Set,
+    $u: 'signal-main',
+    haituoSettingsOwners: new Set(),
+    caishengSettingsWindow: null,
+    Z: null,
+    Yg: new Map(),
+    caishengSendChild: () => {},
+    process: { send() {} },
+    p: { globalShortcut: {
+      register: name => { shortcutCalls.push(['register', name]); return true; },
+      unregister: name => shortcutCalls.push(['unregister', name]),
+      isRegistered: () => false,
+    } },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(visibilityCode + '\n' + closeCode, ctx);
+  vm.runInContext('haituoSettingsVisibility(true, "inline"); haituoSettingsVisibility(true, "native"); haituoCloseAllSettings();', ctx);
+  assert.deepEqual(shortcutCalls, [], 'settings must not touch global shortcuts');
+  assert.doesNotMatch(bundle, /globalShortcut\.register\(['"]Escape['"]/u,
+    'Escape must stay a window-local shortcut');
+});
+
+test('1.5.9: Escape still closes settings from Haituo; child windows forward the close', () => {
+  const refreshCode = sliceBalanced('function rmRefresh');
+  let closed = 0;
+  const childMessages = [];
+  const ctx = {
+    console, String,
+    $u: 'signal-main',
+    haituoShortcutRecording: false,
+    haituoCloseAllSettings: () => { closed += 1; },
+    $p: () => ({ refreshShortcut: 'ctrl-r' }),
+    Z: { webContents: { send() {} } },
+    caishengSoftRefreshWindow: () => {},
+    process: { send: message => childMessages.push(message) },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(refreshCode, ctx);
+  ctx.rmRefresh({ preventDefault() {} }, { type: 'keyDown', key: 'Escape' });
+  assert.equal(closed, 1, 'focused Haituo window still closes settings on Escape');
+  ctx.$u = 'haituo-child';
+  ctx.rmRefresh({ preventDefault() {} }, { type: 'keyDown', key: 'Escape' });
+  assert.equal(childMessages.at(-1).type, 'haituo-close-settings', 'child windows forward Escape instead of registering globally');
 });

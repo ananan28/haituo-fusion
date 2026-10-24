@@ -24,6 +24,9 @@ test('deadline includes a stalled response body and retry remains bounded',async
 test('401 and 429 do not retry or leak credential contents',async()=>{
   for(const status of [401,429]){let calls=0;await assert.rejects(requestJSON(async()=>{calls++;return new Response('{}',{status})},'https://fixture.test/v1/chat/completions',{headers:{Authorization:'Bearer SECRET'}},100,async()=>{}),error=>error.status===status&&!error.message.includes('SECRET'));assert.equal(calls,1);}
 });
+test('402 explains insufficient balance instead of a bare status',async()=>{
+  await assert.rejects(requestJSON(async()=>new Response('{}',{status:402}),'https://fixture.test/v1/chat/completions',{},100,async()=>{}),error=>error.status===402&&/余额不足/.test(error.message));
+});
 test('429 exposes Retry-After so callers wait instead of retrying blindly',async()=>{
   let calls=0;
   await assert.rejects(requestJSON(async()=>{calls++;return new Response('{}',{status:429,headers:{'retry-after':'7'}})},'https://fixture.test',{},100,async()=>{}),error=>error.status===429&&error.retryAfterMs===7000&&/约 7 秒/.test(error.message));

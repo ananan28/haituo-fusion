@@ -25622,9 +25622,13 @@ function haituoOpenAIProfiles(config) {
 }
 
 function haituoPumpRequests() {
-    while (HaituoActiveRequests < 2 && HaituoRequestQueue.length) {
-        const urgent = HaituoRequestQueue[0].queuedAt + 30000 < Date.now() ? 0 : HaituoRequestQueue.findIndex(item => item.priority);
-        const e = HaituoRequestQueue.splice(urgent < 0 ? 0 : urgent, 1)[0];
+    while (HaituoRequestQueue.length) {
+        const priority = HaituoRequestQueue.findIndex(item => item.priority), staleHead = HaituoRequestQueue[0].queuedAt + 30000 < Date.now();
+        const index = priority >= 0 && !staleHead ? priority : 0, e = HaituoRequestQueue[index];
+        // User-typed input and connection tests may use one extra slot, so two
+        // slow background chunks can never leave the composer untranslated.
+        if (HaituoActiveRequests >= (e.priority ? 3 : 2)) break;
+        HaituoRequestQueue.splice(index, 1);
         HaituoActiveRequests += 1, Promise.resolve().then(e.task).then(e.resolve, e.reject).finally(() => {
             HaituoActiveRequests -= 1, haituoPumpRequests();
         });
@@ -25649,15 +25653,24 @@ function haituoRunProvider(e) {
 
 
 async function haituoTranslateWithMode(config, request) {
-    if(config.translationPools&&!request.strictProvider)return require('../js/haituo-translation-pools.js').run(config.translationPools,request,entry=>cachedHaituoTranslate(entry,!!request.forceRefresh));
+    let poolFailure = ``;
+    if (config.translationPools && !request.strictProvider && !request.__haituoPoolFailed) try {
+        return await require('../js/haituo-translation-pools.js').run(config.translationPools, request, entry => cachedHaituoTranslate(entry, !!request.forceRefresh));
+    } catch (error) {
+        // A dead pool must not block the service the user selected. Keep the
+        // failure for the final error, then continue through the normal chain.
+        poolFailure = error instanceof Error ? error.message : String(error);
+    }
     const previous = haituoExistingChatTranslation(request);
     if (previous) return previous;
     if (!request.__haituoLine && request.purpose === `chat` && String(request.text || ``).split(/\r?\n/u).length >= 8) {
-        const result = await haituoTranslateLongMessage(config, request);
+        // The pool already failed for this message; do not make every segment
+        // wait on the same dead entries again.
+        const result = await haituoTranslateLongMessage(config, { ...request, __haituoPoolFailed: !!poolFailure });
         haituoRememberChatTranslation(request, result);
         return result;
     }
-    const errors = [], local = async provider => {
+    const errors = poolFailure ? [ `翻译池：${poolFailure}` ] : [], local = async provider => {
         try {
             const route = provider === 'deepseek' ? {...config,
                 apiKey:config.deepseekApiKey || config.apiKey, endpoint:config.deepseekEndpoint || 'https://api.deepseek.com/v1',model:config.deepseekModel || 'deepseek-flash',
@@ -25708,7 +25721,22 @@ async function haituoTranslateWithMode(config, request) {
         throw Error(errors.join(`；`) || `没有可用翻译服务`);
     }
     if (request.provider === `smart-retranslate`) {
-        for (const provider of [ ...new Set([ ...haituoFallbackProviders(config), `google-free`, `mymemory` ]) ]) {
+        const selected = request.purpose === `input` ? config.inputTranslationProvider : config.chatTranslationProvider;
+        const configured = provider => {
+            if ([`google-free`, `mymemory`].includes(provider)) return true;
+            if (provider === `google-cloud`) return !!String(config.googleCloudApiKey || ``).trim();
+            if (provider === `deepseek`) return !!String(config.deepseekApiKey || config.deepseekApiKeys || ``).trim();
+            if (provider === `groq`) return !!String(config.groqApiKey || ``).trim();
+            if (provider === `deepl`) return !!String(config.deepLApiKey || ``).trim();
+            if (provider === `libre`) return !!String(config.libreEndpoint || ``).trim();
+            if (provider === `openai`) return !!String(config.apiKey || ``).trim() || haituoOpenAIProfiles(config).length > 0;
+            return !!String(config.apiKey || ``).trim();
+        };
+        // A failed pool must not hide the service the user selected, nor an
+        // already configured Google Cloud / DeepSeek key.
+        const candidates = [ ...new Set([ selected, ...haituoFallbackProviders(config), `google-cloud`, `deepseek`, `google-free`, `mymemory` ]) ]
+            .filter(provider => provider && provider !== `smart-retranslate` && provider !== `auto` && configured(provider));
+        for (const provider of candidates) {
             const fallback = await tryOne(() => local(provider));
             if (fallback) return fallback;
         }
@@ -25870,10 +25898,14 @@ function tm() {
         r.strictProvider = !n.translationPools && r.purpose === `input` && typeof r.provider == `string` && !!r.provider.trim() && r.provider !== `auto`;
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `input` && (selectedProvider = n.inputTranslationProvider || `google-free`);
         (!selectedProvider || selectedProvider === `auto`) && r.purpose === `chat` && (selectedProvider = n.chatTranslationProvider || `google-free`);
+        // The resolved service must be on the request too: routing reads
+        // request.provider, so leaving "auto" here sent chat/input to the
+        // free-only branch and ignored the provider the user configured.
+        r.provider = typeof selectedProvider == `string` && selectedProvider && selectedProvider !== `auto` ? selectedProvider : `google-free`;
         let a = {
             ...n,
             ...r,
-            provider: typeof selectedProvider == `string` && selectedProvider ? selectedProvider : `google-free`,
+            provider: r.provider,
             apiKey: typeof r.apiKey == `string` && r.apiKey.trim() ? r.apiKey : n.apiKey,
             endpoint: typeof r.endpoint == `string` && r.endpoint.trim() ? r.endpoint : n.endpoint,
             model: typeof r.model == `string` && r.model.trim() ? r.model : n.model
@@ -25889,16 +25921,19 @@ function tm() {
         return haituoRecordTranslationStatus(result, startedAt), result;
     }), p.ipcMain.removeHandler(`caisheng:webview-translate`), p.ipcMain.handle(`caisheng:webview-translate`, async (e, t, n, i) => {
         Jp(e.senderFrame?.url ?? ``);
-        const stored = $p();
+        const stored = $p(), purpose = typeof i?.purpose == `string` ? i.purpose : `chat`;
+        const configured = purpose === `input` ? stored.inputTranslationProvider : stored.chatTranslationProvider;
+        const requested = typeof i?.provider == `string` ? i.provider.trim() : ``;
+        const provider = !requested || requested === `auto` ? configured || `google-free` : requested;
         let r = {
             ...Zp,
             ...stored,
             text: t,
             targetLanguage: n,
             context: typeof i == `string` ? i.slice(-6000) : typeof i?.context == `string` ? i.context.slice(-6000) : ``,
-            purpose: typeof i?.purpose == `string` ? i.purpose : `chat`,
-            provider: typeof i?.provider == `string` ? i.provider : stored.chatTranslationProvider || `google-free`,
-            strictProvider: !stored.translationPools && typeof i?.purpose == `string` && i.purpose === `input` && typeof i?.provider == `string` && !!i.provider.trim() && i.provider !== `auto`
+            purpose,
+            provider,
+            strictProvider: !stored.translationPools && typeof i?.purpose == `string` && i.purpose === `input` && !!requested && requested !== `auto`
         };
         const startedAt = Date.now();
         const result = r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r));
@@ -28156,10 +28191,24 @@ const Yg = new Map, Xg = new Set, caishengFocusedSignals = new Set, caishengLast
 let caishengLabelRequestSequence = 0;
 
 let haituoScreenshotController;
+function haituoShortcutConfig(source) {
+    return {
+        screenshotEnabled: source?.screenshotEnabled === true,
+        screenshotShortcut: String(source?.screenshotShortcut || 'CommandOrControl+Alt+O').trim(),
+        screenshotCopyEnabled: source?.screenshotCopyEnabled === true,
+        screenshotCopyShortcut: String(source?.screenshotCopyShortcut || 'CommandOrControl+Alt+S').trim()
+    };
+}
 function haituoApplyTranslationConfig(t) {
     t = haituoUnredactConfigPatch(t);
     if ($u !== `signal-main` && process.connected) return haituoRequestGlobalSettings(t);
-    if (haituoScreenshotController) haituoScreenshotController.configure({...$p(), ...t});
+    if (haituoScreenshotController) {
+        // Re-registering on every save made an occupied screenshot shortcut
+        // reject unrelated changes (a model pause, theme, API key). Only a
+        // change to the shortcut settings themselves may fail the save.
+        const current = $p(), previous = haituoShortcutConfig(current), next = haituoShortcutConfig({ ...current, ...t });
+        if (Object.keys(next).some(key => next[key] !== previous[key])) haituoScreenshotController.configure({ ...current, ...t });
+    }
     Zp = {
         deepseekApiKey: String(t?.deepseekApiKey ?? $p().deepseekApiKey ?? '').trim(),
         deepseekApiKeys: String(t?.deepseekApiKeys ?? $p().deepseekApiKeys ?? '').trim(),
@@ -29335,11 +29384,11 @@ p.ipcMain.handle(`caisheng:edit-account-label`, async (e, t) => {
 
 let caishengSettingsWindow;
 const haituoSettingsOwners=new Set();
-let haituoOwnEscape=false, haituoShortcutRecording=false, haituoShortcutRecordingTimer;
+let haituoShortcutRecording=false, haituoShortcutRecordingTimer;
 function haituoSetShortcutRecording(active){
     if($u!=='signal-main'){haituoShortcutRecording=!!active;process.send?.({type:'haituo-shortcut-recording',active});return}
     clearTimeout(haituoShortcutRecordingTimer);haituoShortcutRecording=!!active;
-    if(active){if(haituoOwnEscape){p.globalShortcut.unregister('Escape');haituoOwnEscape=false}haituoScreenshotController?.pauseShortcut();haituoShortcutRecordingTimer=setTimeout(()=>haituoSetShortcutRecording(false),30000)}
+    if(active){haituoScreenshotController?.pauseShortcut();haituoShortcutRecordingTimer=setTimeout(()=>haituoSetShortcutRecording(false),30000)}
     else{haituoScreenshotController?.resumeShortcut();if(haituoSettingsOwners.size)haituoSettingsVisibility(true,[...haituoSettingsOwners][0])}
 }
 p.ipcMain.handle('haituo:shortcut-recording',(event,active)=>{Jp(event.senderFrame?.url||'');haituoSetShortcutRecording(active);return{ok:true}});
@@ -29348,13 +29397,13 @@ function haituoCloseAllSettings(){
     Z?.webContents?.send('haituo:close-settings');
     haituoSettingsOwners.clear();
     for(const child of Yg.values())caishengSendChild(child,{type:'haituo-close-settings-view'});
-    if(haituoOwnEscape){p.globalShortcut.unregister('Escape');haituoOwnEscape=false}
 }
 function haituoSettingsVisibility(open,owner='main'){
     if($u!=='signal-main'){process.send?.({type:'haituo-settings-visibility',open,owner});return}
+    // Escape is handled by before-input-event inside our own windows. Never
+    // register a system-wide Escape shortcut: while settings are open it
+    // would also close them when the user presses Escape in another app.
     if(open)haituoSettingsOwners.add(owner);else haituoSettingsOwners.delete(owner);
-    if(open&&!haituoShortcutRecording&&!haituoOwnEscape&&!p.globalShortcut.isRegistered('Escape'))try{haituoOwnEscape=p.globalShortcut.register('Escape',haituoCloseAllSettings)}catch{}
-    if(!haituoSettingsOwners.size&&haituoOwnEscape){p.globalShortcut.unregister('Escape');haituoOwnEscape=false}
 }
 p.ipcMain.on('haituo:settings-visibility',(event,open,owner)=>{try{Jp(event.senderFrame?.url||event.sender?.getURL()||'');haituoSettingsVisibility(open,owner==='composer'?'composer':'inline')}catch{}});
 p.ipcMain.handle('haituo:uninstall',async event=>{
@@ -29372,7 +29421,6 @@ p.ipcMain.handle('haituo:uninstall',async event=>{
  setTimeout(()=>p.app.quit(),250);return{ok:true};
 });
 p.ipcMain.handle('haituo:start-screenshot',(event,mode)=>{Jp(event.senderFrame?.url||'');if($u!=='signal-main'){process.send?.({type:'haituo-start-screenshot',mode:mode==='capture'?'capture':'translate'});return{ok:true}}haituoCloseAllSettings();setTimeout(()=>haituoScreenshotController?.start({mode:mode==='capture'?'capture':'translate'}),250);return{ok:true}});
-p.app.on('will-quit',()=>{if(haituoOwnEscape)p.globalShortcut.unregister('Escape')});
 
 async function haituoShowSettingsWindow() {
     if(process.platform===`darwin`){
@@ -31535,7 +31583,7 @@ async function haituoTestSettingsSync() {
             haituoApplyTranslationConfig({...$p(),screenshotShortcut:original.screenshotShortcut||'CommandOrControl+Alt+O',translationPools:original.translationPools||null,screenshotApiPool:original.screenshotApiPool||null,openaiApiProfiles:original.openaiApiProfiles||[]});
             rmRefresh({preventDefault(){}},{type:'keyDown',key:'Escape'});await delay(250);
             check(!await Z.webContents.executeJavaScript(`!!document.querySelector('.CaishengPlatformShell__settings')`),'Escape from main input did not close inline settings');
-            check(!haituoOwnEscape,'Temporary Escape shortcut was not released');
+            check(!p.globalShortcut.isRegistered('Escape'),'Escape must never be registered as a system-wide shortcut');
             stages.push({source:'actual-inline-settings-controls-save-and-escape',fields,ok:true});
         } finally { await new Promise(resolve=>server.close(resolve)); }
         const launch=p.ipcMain._invokeHandlers.get('caisheng:launch-signal-profile');
