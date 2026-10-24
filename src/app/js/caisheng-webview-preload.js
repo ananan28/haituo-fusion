@@ -96,7 +96,7 @@ if (haituoProfileArg && (location.hostname === 'web.whatsapp.com' || (process.ar
 
 const {ipcRenderer: ipcRenderer, webFrame: webFrame} = require("electron"), HAN = /[\u3400-\u9fff]/u, busy = new WeakSet, recentSends = new WeakMap, voiceProcessed = new WeakSet;
 
-let panel, settingsPanel, translatorFooter, backTranslationPreview, backTranslationTimer, backTranslationWatchdog, quickClearTimer, panelPreferencePendingUntil = 0, localPanelPreference = null, backTranslationGeneration = 0, backTranslationExpectedText = "", backTranslationOutgoingMatches = 0, backTranslationComposer = null, activeComposer, chineseConfirmBypassUntil = 0, recentAction = {
+let panel, settingsPanel, translatorFooter, backTranslationPreview, backTranslationTimer, backTranslationWatchdog, quickClearTimer, panelPreferencePendingUntil = 0, localPanelPreference = null, backTranslationGeneration = 0, backTranslationExpectedText = "", backTranslationOutgoingMatches = 0, backTranslationComposer = null, activeComposer, quickComposerSyncLock = 0, chineseConfirmBypassUntil = 0, recentAction = {
     key: "",
     at: 0
 }, settings = {
@@ -620,6 +620,47 @@ function hideBackTranslation() {
     backTranslationGeneration += 1, backTranslationExpectedText = "", backTranslationOutgoingMatches = 0, backTranslationComposer = null, clearTimeout(backTranslationTimer), clearInterval(backTranslationWatchdog), backTranslationTimer = null, backTranslationWatchdog = null, backTranslationPreview?.remove(), backTranslationPreview = null;
 }
 
+function haituoPairQuickComposer(quick, composer, translation) {
+    quick && (quick.__haituoPairedComposer = composer ? {
+        composer,
+        translation: normalized(translation || "")
+    } : null);
+}
+
+function haituoQuickEmptied(quick) {
+    const pair = quick?.__haituoPairedComposer;
+    if (quickComposerSyncLock || !pair || String(quick.value || "").trim()) return !1;
+    quick.__haituoPairedComposer = null, hideBackTranslation();
+    const composer = pair.composer;
+    if (!composer?.isConnected) return !1;
+    const current = normalized(read(composer));
+    if (!current) return !0;
+    if (current !== pair.translation) return !1;
+    const refocusQuick = document.activeElement === quick;
+    haituoWithoutQuickComposerSync(() => clearComposer(composer));
+    refocusQuick && quick.isConnected && quick.focus({
+        preventScroll: !0
+    });
+    return !0;
+}
+
+function haituoComposerEmptied(composer) {
+    if (quickComposerSyncLock || !composer?.isConnected || normalized(read(composer))) return !1;
+    const quick = document.getElementById("haituo-whatsapp-quick-input");
+    if (!quick || quick.__haituoPairedComposer?.composer !== composer || !String(quick.value || "").trim()) return !1;
+    quick.__haituoPairedComposer = null, hideBackTranslation(), quick.value = "";
+    return !0;
+}
+
+function haituoWithoutQuickComposerSync(action) {
+    quickComposerSyncLock += 1;
+    try {
+        return action();
+    } finally {
+        quickComposerSyncLock -= 1;
+    }
+}
+
 function countMatchingOutgoingMessages(expected) {
     expected = normalized(expected || "");
     if (!expected) return 0;
@@ -712,7 +753,9 @@ async function settleComposer(e, t, allowChinese = !1) {
         await new Promise(e => setTimeout(e, 25));
         const o = findComposer() || e, a = read(o).trim();
         if ((allowChinese || !HAN.test(a)) && normalized(a) === normalized(t)) return o;
-        8 !== n && 20 !== n || (clearComposer(o), write(o, t));
+        8 !== n && 20 !== n || haituoWithoutQuickComposerSync(() => {
+            clearComposer(o), write(o, t);
+        });
     }
     throw new Error("输入状态同步失败，未发送");
 }
@@ -748,7 +791,9 @@ async function run(e, t = null) {
             const o = direct ? n : await translate(n);
             if (!direct && HAN.test(o)) throw new Error("译文仍含中文，已禁止发送");
             if (!t.isConnected || findComposer() !== t || read(t).trim() !== n || e && outgoingMode !== !!settings.blockChineseOutgoing) throw new Error("消息框已变化，未覆盖或发送；请重试");
-            clearComposer(t), write(t, o), await new Promise(e => setTimeout(e, 40)), t = await settleComposer(t, o, direct);
+            haituoWithoutQuickComposerSync(() => {
+                clearComposer(t), write(t, o);
+            }), await new Promise(e => setTimeout(e, 40)), t = await settleComposer(t, o, direct);
             if (e && !direct && HAN.test(read(t))) throw new Error("原中文未清除，已停止发送");
             e || void (settings.backTranslationEnabled !== !1 && updateBackTranslation(o, t));
             if (e && !await sendOnce(t, o, outgoingMode)) return;
@@ -1060,6 +1105,7 @@ function showPanel(e) {
     const quickRow = document.createElement("div"), quick = document.createElement("textarea"), quickTranslate = document.createElement("button"), quickRetranslate = document.createElement("button");
     quick.id = "haituo-whatsapp-quick-input";
     Object.assign(quickRow.style, { display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto", gap: "7px", width: "100%" }), Object.assign(quick.style, { minHeight: "42px", maxHeight: "92px", resize: "vertical", borderRadius: "8px", padding: "8px 10px", boxSizing: "border-box" }), quick.placeholder = settings.translateShortcut === "triple-space" ? "输入中文后按 Enter 翻译并填入，确认后回车发送；Shift+Enter 换行；连续三次空格仅翻译" : "输入中文后按 Enter 翻译并填入，确认后回车发送；Shift+Enter 换行";
+    quick.addEventListener("input", () => haituoQuickEmptied(quick), !0);
     let quickSpaceCount = 0, quickSpaceAt = 0;
     let quickActionPending = !1;
     const runQuick = async (forceAi, sendAfter = !1) => {
@@ -1072,7 +1118,9 @@ function showPanel(e) {
             const context = recentMessageNodes().slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), result = direct ? { text: source } : forceAi ? await ipcRenderer.invoke("caisheng:translate", { text: source, targetLanguage: settings.targetLanguage || "en", provider: "smart-retranslate", purpose: "input", apiKey: settings.apiKey, groqApiKey: settings.groqApiKey, deepLApiKey: settings.deepLApiKey, context, forceRefresh: !0 }) : { text: await translate(source) }, translated = String(result?.text || "").trim();
             if (!translated || !direct && HAN.test(translated)) throw new Error("译文仍含中文，未填入消息框");
             if (!composer.isConnected || findComposer() !== composer || read(composer) !== nativeBefore || sendAfter && outgoingMode !== !!settings.blockChineseOutgoing) throw new Error("消息框已变化，未覆盖或发送；请重试");
-            clearComposer(composer), write(composer, translated), await settleComposer(composer, translated, direct);
+            haituoWithoutQuickComposerSync(() => {
+                clearComposer(composer), write(composer, translated);
+            }), await settleComposer(composer, translated, direct), haituoPairQuickComposer(quick, composer, translated);
             if (sendAfter) {
                 if (!await sendOnce(composer, translated, outgoingMode)) throw new Error("发送操作过快，请稍候再试");
                 let sent = !1;
@@ -1086,7 +1134,7 @@ function showPanel(e) {
                 }
                 if (!sent) throw new Error("未确认发送，请点击发送按钮重试");
                 const currentQuick = document.getElementById("haituo-whatsapp-quick-input");
-                currentQuick && (currentQuick.value = "", currentQuick.dispatchEvent(new Event("input", {
+                currentQuick && (currentQuick.__haituoPairedComposer = null, currentQuick.value = "", currentQuick.dispatchEvent(new Event("input", {
                     bubbles: !0,
                     composed: !0
                 }))), hideBackTranslation(), toast(direct ? "已发送原文" : "已翻译并发送");
@@ -1132,7 +1180,9 @@ window.addEventListener("resize", () => positionTranslator(findComposer()));
 
 function clearQuickTranslatorAfterSend() {
     const quick = document.getElementById("haituo-whatsapp-quick-input");
-    if (!(quick instanceof HTMLTextAreaElement) || !quick.value) return;
+    if (!(quick instanceof HTMLTextAreaElement)) return;
+    quick.__haituoPairedComposer = null;
+    if (!quick.value) return;
     quick.value = "", quick.dispatchEvent(new InputEvent("input", {
         bubbles: !0,
         composed: !0,
@@ -1181,7 +1231,7 @@ document.addEventListener("beforeinput", e => {
     t && syncPanel(t);
 }, !0), document.addEventListener("input", e => {
     const t = composerFrom(e.target);
-    t && (syncPanel(t), backTranslationExpectedText && normalized(read(t)) !== normalized(backTranslationExpectedText) ? hideBackTranslation() : read(t).trim() || hideBackTranslation());
+    t && (syncPanel(t), haituoComposerEmptied(t), backTranslationExpectedText && normalized(read(t)) !== normalized(backTranslationExpectedText) ? hideBackTranslation() : read(t).trim() || hideBackTranslation());
 }, !0), document.addEventListener("click", e => {
     if (!(webTranslationActive() && e.target instanceof Element)) return;
     if (e.target.closest('[data-testid="media-editor"],[role="dialog"]')) return;
