@@ -31392,6 +31392,31 @@ async function haituoTestMessageScanning() {
         mark('toggle-preserves-draft');
         await win.webContents.executeJavaScript(`(()=>{document.getElementById('haituo-whatsapp-quick-input').value='切换保留草稿';const c=document.querySelector('[data-haituo-block-chinese]');c.click();c.click()})()`);await delay(400);
         sent=await sendSnapshot();check(sent.quick==='切换保留草稿','Settings toggle discarded draft');sendingChecks.push({stage:'toggle-preserves-draft'});
+        mark('sync-delete-composer');
+        await setBlock(true);
+        await win.webContents.executeJavaScript(`(()=>{document.getElementById('fixture-composer').textContent='';const q=document.getElementById('haituo-whatsapp-quick-input');q.value='删除同步测试';q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})()`);
+        await delay(1600);sent=await sendSnapshot();
+        check(sent.composer==='English translation','Sync: quick translation must fill the composer');
+        await win.webContents.executeJavaScript(`(()=>{const c=document.getElementById('fixture-composer');c.textContent='';c.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+        await delay(600);sent=await sendSnapshot();
+        check(sent.composer===''&&sent.quick==='','Sync: deleting the translation must clear the quick box');sendingChecks.push({stage:'sync-delete-composer'});
+        mark('sync-delete-quick');
+        await win.webContents.executeJavaScript(`(()=>{document.getElementById('fixture-composer').textContent='';const q=document.getElementById('haituo-whatsapp-quick-input');q.value='删除同步测试二';q.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})()`);
+        await delay(1600);sent=await sendSnapshot();
+        check(sent.composer==='English translation','Sync: second fill must land in the composer');
+        await win.webContents.executeJavaScript(`(()=>{const q=document.getElementById('haituo-whatsapp-quick-input');q.value='';q.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+        await delay(400);sent=await sendSnapshot();
+        check(sent.composer===''&&sent.quick==='','Sync: deleting the source must clear the composer');sendingChecks.push({stage:'sync-delete-quick'});
+        mark('group-detection');
+        fixtureConfig={hideTranslationBox:false,blockChineseOutgoing:false,groupBackTranslationEnabled:false,autoTranslateIncoming:true};win.webContents.send('caisheng:translation-config-changed',fixtureConfig);await delay(400);
+        await win.webContents.executeJavaScript(`(()=>{document.getElementById('main').innerHTML='<div class="message-in" id="grp-dm"><div data-pre-plain-text="[10:00, 10/24/2026] Alice: "><span class="selectable-text">DM hello while group off</span></div></div>';})()`);
+        await delay(2600);
+        const dmTranslated=await win.webContents.executeJavaScript(`!!document.querySelector('#grp-dm .haituo-wa-message-translation')`);
+        check(dmTranslated===true,'Group toggle off must keep 1:1 chats translating');sendingChecks.push({stage:'group-detection-dm'});
+        await win.webContents.executeJavaScript(`(()=>{document.getElementById('main').innerHTML='<div class="message-in" id="grp-group"><div data-pre-plain-text="[10:00, 10/24/2026] Bob: "><span dir="auto">Bob</span><span class="selectable-text">Group hello while group off</span></div></div>';})()`);
+        await delay(2600);
+        const groupTranslated=await win.webContents.executeJavaScript(`!!document.querySelector('#grp-group .haituo-wa-message-translation')`);
+        check(groupTranslated===false,'Group toggle off must stop group chats translating');sendingChecks.push({stage:'group-detection-group'});
         mark('hover-preview');
         const hoverHTML=`<html><body><style>body{margin:0;background:#111b21;color:#fff}#pane-side{width:360px}#pane-side [role=row]{height:75px;padding:12px;box-sizing:border-box}#main{position:absolute;left:400px;top:0}</style><div id="pane-side">
             <div role="row" id="hover-a" onclick="window.openedChats++;this.querySelector('[data-testid=icon-unread-count]').textContent='0'"><div data-testid="cell-frame-primary"><span title="Contact A">Contact A</span></div><div data-testid="cell-frame-secondary"><span dir="auto" title="Preview text without opening chat">Preview text without...</span></div><span data-testid="icon-unread-count">3</span></div>
@@ -31401,7 +31426,7 @@ async function haituoTestMessageScanning() {
         win.webContents.session.protocol.unhandle('https');
         await win.webContents.session.protocol.handle('https',()=>new Response(hoverHTML,{headers:{'content-type':'text/html;charset=utf-8'}}));
         await win.loadURL('https://web.whatsapp.com/hover-fixture');await delay(1000);
-        const preview=()=>win.webContents.executeJavaScript(`(()=>{const p=document.getElementById('haituo-whatsapp-chat-preview');return{shown:!!p,source:p?.querySelector('#haituo-chat-preview-source')?.textContent,target:p?.querySelector('#haituo-chat-preview-translation')?.textContent,opened:window.openedChats,unread:[...document.querySelectorAll('[data-testid=icon-unread-count]')].map(n=>n.textContent),nativeTitle:document.querySelector('#hover-a [data-testid=cell-frame-secondary] span').getAttribute('title'),conversation:document.getElementById('main').textContent}})()`);
+        const preview=()=>win.webContents.executeJavaScript(`(()=>{const p=document.getElementById('haituo-whatsapp-chat-preview');return{shown:!!p,source:p?.querySelector('.haituo-chat-preview-source')?.textContent,target:p?.querySelector('.haituo-chat-preview-translation')?.textContent,opened:window.openedChats,unread:[...document.querySelectorAll('[data-testid=icon-unread-count]')].map(n=>n.textContent),nativeTitle:document.querySelector('#hover-a [data-testid=cell-frame-secondary] span').getAttribute('title'),conversation:document.getElementById('main').textContent}})()`);
         const hover=id=>win.webContents.executeJavaScript(`document.querySelector('#'+${JSON.stringify(id)}+' [data-testid=cell-frame-secondary] span').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}))`);
         const leave=()=>win.webContents.executeJavaScript(`document.querySelector('#pane-side [role=row]').dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:document.body}))`);
         const waitPreview=async expected=>{const deadline=Date.now()+7000;while(Date.now()<deadline){const value=await preview();if(value.target===expected)return value;await delay(50)}throw Error('Preview did not show '+expected+'; '+JSON.stringify(await preview()))};
