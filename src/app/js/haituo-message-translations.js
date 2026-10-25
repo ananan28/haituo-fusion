@@ -39,7 +39,7 @@ function createStore({directory, read, write, residentLimit = 16}) {
         return {text:item.text,provider:item.provider,cached:true,attached:true};
     }
     function put(identity,request,result) {
-        if (!result || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 120000 || result.skipSharedCache) throw Error('译文为空、不完整或需要核对，未保存常驻记录');
+        if (!result || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 120000 || result.finish_reason === 'length' || result.finishReason === 'length') throw Error('译文为空、不完整或需要核对，未保存常驻记录');
         const a=address(identity,request), {file,value}=shard(a);
         const item={text:result.text,provider:String(result.provider||'unknown').slice(0,64),updatedAt:Date.now()};
         const next={version:1,entries:{...value.entries,[a.key]:item}};

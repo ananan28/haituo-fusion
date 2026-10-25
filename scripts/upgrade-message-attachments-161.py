@@ -12,6 +12,8 @@ def edit(rel, replacements):
     p.write_text(text,encoding='utf-8')
 
 if json.loads((ROOT/'project.json').read_text())['versions']['windows']=='1.6.1':
+    import subprocess,sys
+    subprocess.run([sys.executable,str(ROOT/'scripts/refine-message-attachments-161.py')],check=True)
     print('1.6.1 integration already applied');raise SystemExit(0)
 
 helper='''let HaituoMessageAttachments;
@@ -105,4 +107,6 @@ for name in ['README.md','START-HERE.md']:
  p=ROOT/name
  s=p.read_text().replace('1.4.5','1.6.1')
  p.write_text(s)
+import subprocess,sys
+subprocess.run([sys.executable,str(ROOT/'scripts/refine-message-attachments-161.py')],check=True)
 print('1.6.1 message attachment integration applied')
