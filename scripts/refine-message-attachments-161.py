@@ -1,6 +1,18 @@
 """Keep concurrent WhatsApp DOM reuse independent of unfinished old jobs."""
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
+# Optional OS keyboard labels must not indefinitely block the entire Signal bootstrap.
+pre=ROOT/'src/app/bundles/preload/main.js';bundle=pre.read_text()
+if "haituo-startup-keyboard.js" not in bundle:
+ a=bundle.index('    async function t2e() {');b=bundle.index('    function tT(',a)
+ bundle=bundle[:a]+'''    async function t2e() {
+        t.Ri(n2e === void 0, `keyboardLayout already initialized`);
+        n2e = await require('../../js/haituo-startup-keyboard.js').loadLayoutMap(window.navigator, {
+            onFallback: () => console.warn(`Haituo: keyboard layout unavailable; using event key labels`)
+        });
+    }
+'''+bundle[b:]
+ pre.write_text(bundle)
 p=ROOT/'src/app/js/caisheng-webview-preload.js';text=p.read_text()
 if 'function haituoCurrentWebMessage' in text:raise SystemExit(0)
 def change(before,after):
