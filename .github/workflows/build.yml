@@ -30,7 +30,7 @@ jobs:
       - name: Install isolated DOM/React test dependencies
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Test WhatsApp and actual Signal React attachment lifecycle
-        run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs scripts/local-chat-view.dom.cjs
+        run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs scripts/local-chat-view.dom.cjs scripts/local-chat-view.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
       - name: Save the complete integrated editable source
@@ -75,6 +75,12 @@ jobs:
       - name: Verify real native encrypted local message database
         run: node scripts/local-chat-native-check.cjs
       - name: Verify gated child Signal initialization and profile routing
+        timeout-minutes: 4
+        run: node scripts/inprocess-native-check.cjs
+      - name: Verify real native encrypted local message database
+        run: node scripts/local-chat-native-check.cjs
+      - name: Verify gated child Signal initialization and profile routing
+        timeout-minutes: 4
         run: node scripts/inprocess-native-check.cjs
       - name: Normal native launch and durable offline restart check
         run: node scripts/native-attachments-check.cjs

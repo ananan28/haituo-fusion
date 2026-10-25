@@ -12,7 +12,8 @@ function openEncrypted({directory,safeStorage}){
  try{db.pragma(`key = "x'${key}'"`);db.pragma('cipher_memory_security = ON');db.prepare('SELECT count(*) AS count FROM sqlite_master').get();db.pragma('journal_mode = WAL');db.pragma('foreign_keys = ON');db.pragma('busy_timeout = 3000');return db;}catch(error){db.close();throw Error('本机双语数据库无法解锁，原数据库已保留',{cause:error});}
 }
 function createStore(options){
- const db=options.database||openEncrypted(options);
+ const db=options.database||openEncrypted(options),pending=new Map,revisions=new Map;
+ const schema=Number(Object.values(db.prepare('PRAGMA user_version').get())[0]);if(schema>1){db.close();throw Error('本机双语数据库来自更新版本，已停止写入');}
  db.exec(`CREATE TABLE IF NOT EXISTS haituo_local_messages (
  account TEXT NOT NULL, chatId TEXT NOT NULL, messageKey TEXT NOT NULL,
  messageIndex REAL NOT NULL, messageJson TEXT NOT NULL,
@@ -54,6 +55,17 @@ function createStore(options){
  }
  function get(account,id,source,target){const chat=conversation(id);if(!chat)return null;const row=one.get({...identity(account,chat),id});const message=row?JSON.parse(row.messageJson):null,value=message?.source===source&&message.translations?.[target];return value?.text?{...value,cached:true,localMessageRecord:true}:null;}
  function put(account,id,source,target,result){const scope=identity(account,conversation(id));return db.transaction(()=>{const row=one.get({...scope,id});const message=row?JSON.parse(row.messageJson):null;if(!message||message.source!==source)throw Error('原消息已改变，旧译文未保存');if(typeof target!=='string'||!target||target.length>64||typeof result?.text!=='string'||!result.text.trim()||result.text.length>120000||result.finish_reason==='length'||result.finishReason==='length')throw Error('译文无效，未保存');const value={text:result.text,provider:String(result.provider||'unknown').slice(0,64),updatedAt:Date.now()};message.translations={...message.translations,[target]:value};insert.run({...scope,id,rank:row.messageIndex,json:JSON.stringify(message)});return{...result,localMessageRecord:true};})();}
- return{observe,page,get,put,close:()=>db.close()};
+ async function translate(account,request,work){
+  const existing=get(account,request.messageId,request.text,request.targetLanguage);
+  if(request.attachmentOnly)return existing||{text:'',notFound:true};
+  if(existing&&!request.forceRefresh)return existing;
+  const base=JSON.stringify([account,request.messageId,request.text,request.targetLanguage]),key=base+':'+!!request.forceRefresh;
+  if(pending.has(key))return pending.get(key);
+  const revision=(revisions.get(base)||0)+1;revisions.set(base,revision);
+  const task=Promise.resolve().then(work).then(result=>revisions.get(base)===revision?put(account,request.messageId,request.text,request.targetLanguage,result):get(account,request.messageId,request.text,request.targetLanguage)||result);
+  pending.set(key,task);
+  try{return await task}finally{if(pending.get(key)===task)pending.delete(key);if(!pending.has(base+':true')&&!pending.has(base+':false'))revisions.delete(base);}
+ }
+ return{observe,page,get,put,translate,close:()=>db.close()};
 }
 module.exports={conversation,openEncrypted,createStore};

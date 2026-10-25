@@ -28,13 +28,13 @@ function install({document,window,ipc,targetFor,retranslate}){
  }
  function apply(page,prepend=false){if(page.chat!==chat)return;const ids=page.messages.map(x=>x.id);for(const value of page.messages)records.set(value.id,value);ordered=prepend?[...ids,...ordered.filter(id=>!ids.includes(id))]:[...ordered.filter(id=>!ids.includes(id)),...ids];older=page.hasOlder;total=page.total;render();position();}
  async function observe(items,elements){if(!items.length)return;const next=conversation(items[0].id);if(!next||items.some(x=>conversation(x.id)!==next))return;
-  const header=document.querySelector('#main header')?.textContent||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
+  const header=document.querySelector('#main header')?.textContent||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;sequence++;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
   if(expectedDifferent&&next===chat){if(header===navigationHeader&&Date.now()-navStarted>1200)expectedDifferent=false;else return;}
   if(next!==chat){expectedDifferent=false;sequence++;restore();chat=next;observedSignature='';ordered=[];records.clear();nodes.clear();list.replaceChildren();official=false;}
   const token=sequence;
   const candidate=elements.find(x=>conversation(x.getAttribute('data-id')||x.closest('[data-id]')?.getAttribute('data-id'))===chat);
   if(candidate){for(let p=candidate.parentElement;p&&p.id!=='main';p=p.parentElement){const css=window.getComputedStyle(p);if(/^(auto|scroll)$/.test(css.overflowY)&&p.clientHeight>0){if(nativeRoot!==p){restore();nativeRoot=p;}break;}}}
-  const signature=JSON.stringify(items);if(signature===observedSignature){position();return;}
+  const signature=JSON.stringify([items,items.map(item=>targetFor(item.source))]);if(signature===observedSignature){position();return;}
   try{const page=await ipc.invoke('haituo:local-chat-observe',items);if(token===sequence){observedSignature=signature;apply(page);}}catch(error){if(token===sequence){setOfficial(true);status.textContent=error.message;}throw error;}
  }
  async function refresh(){if(!chat)return;const token=sequence;const page=await ipc.invoke('haituo:local-chat-page',chat);if(token===sequence)apply(page);}
@@ -42,7 +42,7 @@ function install({document,window,ipc,targetFor,retranslate}){
  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
  // Hide stale conversation immediately on navigation; message IDs, not display
  // names, decide which local conversation may subsequently be shown.
- document.addEventListener('pointerdown',event=>{if(event.target.closest?.('#pane-side,[data-testid="chat-list"]')){restore();root.style.display='none';expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();}},true);
+ document.addEventListener('pointerdown',event=>{if(event.target.closest?.('#pane-side,[data-testid="chat-list"]')){restore();root.style.display='none';sequence++;expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();}},true);
  return{observe,refresh,setOfficial,showError:message=>{status.textContent=message},isActive:()=>!!chat&&!!nativeRoot,destroy(){sequence++;restore();resize.disconnect();root.remove();window.removeEventListener('resize',position);}};
 }
 module.exports={install};

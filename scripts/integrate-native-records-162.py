@@ -11,3 +11,8 @@ else:
  subprocess.run(["git","apply","--check","scripts/native-records-162.patch"],cwd=root,check=True)
  subprocess.run(["git","apply","scripts/native-records-162.patch"],cwd=root,check=True)
  print("Integrated full editable message record and gated child-view source")
+
+if "syncData=new Map" not in (root/"src/app/bundles/main.js").read_text(encoding="utf-8"):
+ subprocess.run(["git","apply","--check","scripts/refine-native-records-162.patch"],cwd=root,check=True)
+ subprocess.run(["git","apply","scripts/refine-native-records-162.patch"],cwd=root,check=True)
+ print("Applied account bootstrap, target changes and stale-result guards")
