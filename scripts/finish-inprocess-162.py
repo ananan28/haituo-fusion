@@ -73,3 +73,25 @@ for name in ['README.md','START-HERE.md']:
  else:
   body=body.replace('# 海拓 1.4.3 开发工程','# 海拓 1.6.2 开发工程')
  document.write_text(body,encoding='utf-8')
+# Route actions that previously addressed a child BrowserWindow to its embedded view.
+s=p.read_text(encoding='utf-8')
+if 'const haituoEmbeddedRefresh = ' not in s:
+ needle='''    if (process.platform === `darwin` && haituoMacRefreshPromises.has(t)) return haituoMacRefreshPromises.get(t);'''
+ block='''    const haituoEmbeddedRefresh = process.env.HAITUO_INPROCESS===`1`;
+    if(haituoEmbeddedRefresh){
+        if(haituoMacRefreshPromises.has(t))return haituoMacRefreshPromises.get(t);
+        const operation=(async()=>{const child=Yg.get(t);if(!child)return{ok:!1};if(!await haituoStopEmbeddedProfile(t,child))return{ok:!1};globalThis.caishengBridge?.dispose?.(t);return haituoLaunchSignalProfile(e,t)})();
+        haituoMacRefreshPromises.set(t,operation);
+        try{return await operation}finally{if(haituoMacRefreshPromises.get(t)===operation)haituoMacRefreshPromises.delete(t)}
+    }
+'''
+ assert s.count(needle)==1;s=s.replace(needle,block+needle)
+ needle='''        focus(workspaceId){const view=views.get(workspaceId);if(view?.__haituoVisible)view.webContents.focus();},'''
+ assert s.count(needle)==1;s=s.replace(needle,needle+'''
+        viewFor(workspaceId){const view=views.get(workspaceId);return view?{webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()}:null;},''')
+ needle='''        const child = Yg.get(t.id);
+        if (child && !child.killed && child.exitCode === null && child.connected) return caishengRequestChildLabel(child, current);'''
+ assert s.count(needle)==1;s=s.replace(needle,'''        if(process.env.HAITUO_INPROCESS===`1`){const view=globalThis.caishengBridge?.viewFor?.(t.id);return view?haituoPromptAccountLabelInPage(view,current):null;}
+'''+needle)
+ p.write_text(s,encoding='utf-8')
+ print('Routed embedded refresh and account-label actions')

@@ -50,9 +50,30 @@ async function check(id,work){try{const result=await work();report.checks.push({
     }
     return sizes;
    });
+   await check('CHILD-ACCOUNT-LABEL-IN-VIEW',async()=>{
+    const operation=apiEvaluate(`window.SignalContext.caishengEditAccountLabel({id:'signal-ci-inprocess',platformId:'signal',label:'Fixture label'})`).then(value=>({value}),error=>({error}));
+    let shown;const deadline=Date.now()+2000;
+    while(Date.now()<deadline){shown=await childClient.call('Runtime.evaluate',{expression:`!!document.querySelector('#haituo-account-label-overlay input')`,returnByValue:true});if(shown.result?.value)break;await pause(50);}
+    if(!shown?.result?.value)throw Error('Account label overlay was not shown in embedded view');
+    await childClient.call('Runtime.evaluate',{expression:`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`,returnByValue:true});
+    const result=await operation;if(result.error)throw result.error;if(result.value!==null)throw Error('Account label cancel did not return null');return{shown:true,cancelled:true};
+   });
    await check('CHILD-VIEW-SCREENSHOT',async()=>{const screenshot=await childClient.call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,'inprocess-child.png'),Buffer.from(screenshot.data,'base64'));return{file:'inprocess-child.png'}});
    childClient.ws.close();
   }
+  await check('CHILD-PROFILE-REFRESH',async()=>{
+   const before=(await(await fetch('http://127.0.0.1:19342/json/list')).json()).filter(x=>x.type==='page'&&x.url.includes('background.html')).map(x=>x.webSocketDebuggerUrl);
+   const result=await apiEvaluate(`window.SignalContext.caishengRefreshSignalProfile('signal-ci-inprocess')`);if(!result?.ok)throw Error('Embedded profile refresh failed');
+   const deadline=Date.now()+30000;
+   while(Date.now()<deadline){
+    const targets=await(await fetch('http://127.0.0.1:19342/json/list')).json();
+    for(const target of targets.filter(x=>x.type==='page'&&x.url.includes('background.html')&&!before.includes(x.webSocketDebuggerUrl))){
+      const other=await attach(target);try{await other.call('Runtime.enable');for(const contextId of other.contexts){const response=await other.call('Runtime.evaluate',{expression:`({child:window.SignalContext?.caishengIsChildProfile,path:window.SignalContext?.config?.userDataPath,loading:!!document.querySelector('.app-loading-screen')})`,contextId,returnByValue:true});const identity=response.result?.value;if(identity?.child&&!identity.loading&&identity.path?.endsWith('signal-ci-inprocess'))return{restarted:true,path:identity.path};}}finally{other.ws.close();}
+    }
+    await pause(250);
+   }
+   throw Error('Refreshed embedded renderer did not initialize');
+  });
   await check('SWITCH-BACK-TO-MAIN',async()=>apiEvaluate(`window.SignalContext.caishengSyncSignalProfile({id:null,x:0,y:70,width:900,height:650,keepVisible:true})`));
   await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
  }
