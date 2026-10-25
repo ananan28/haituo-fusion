@@ -13,6 +13,7 @@ let f = require(`node:crypto`);
 f = e.o(f, 1);
 
 let p = require(`electron`), m = require(`node:fs`), h = require(`node:events`), g = e.o(h, 1);
+process.argv.includes(`--haituo-inprocess`) && (process.env.HAITUO_INPROCESS=`1`);
 const haituoInprocessBackend = process.env.HAITUO_INPROCESS === `1` && process.argv.some(arg=>arg.startsWith(`--caisheng-profile=`) && arg!==`--caisheng-profile=signal-main`) ? require('../js/haituo-inprocess-ipc.js').capture(p.ipcMain) : null;
 
 
@@ -25527,6 +25528,30 @@ function haituoTranslationCacheKey(e) {
     return JSON.stringify([ `free-ai-chat-v6`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, e.model || ``, contextHash, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []), ...(e.messageScope ? [e.messageScope] : []) ]);
 }
 
+const haituoInprocessStops = new Map;
+function haituoStopEmbeddedProfile(id,child){
+    if(haituoInprocessStops.has(id))return haituoInprocessStops.get(id);
+    if(!child || child.exitCode!==null || child.killed || !child.connected)return Promise.resolve(!0);
+    const operation=new Promise(resolve=>{
+        let timer;
+        const finish=()=>{clearTimeout(timer);resolve(!0)};
+        child.once(`exit`,finish);
+        timer=setTimeout(()=>{X.warn(`Embedded Signal graceful shutdown timed out (${id}); terminating backend`);child.removeListener(`exit`,finish);caishengTerminateSignalChild(child);resolve(!1)},6000);
+        caishengSendChild(child,{type:`haituo-bridge-stop`});
+    });
+    haituoInprocessStops.set(id,operation);
+    operation.finally(()=>{if(haituoInprocessStops.get(id)===operation)haituoInprocessStops.delete(id)});
+    return operation;
+}
+let haituoEmbeddedQuitPending=!1,haituoEmbeddedQuitReady=!1;
+function haituoInstallEmbeddedQuitGate(){
+process.env.HAITUO_INPROCESS===`1` && p.app.on(`before-quit`,event=>{
+    if($u!==`signal-main` || haituoEmbeddedQuitReady || !Yg.size)return;
+    event.preventDefault();if(haituoEmbeddedQuitPending)return;
+    haituoEmbeddedQuitPending=!0;
+    Promise.all([...Yg].map(([id,child])=>haituoStopEmbeddedProfile(id,child))).finally(()=>{haituoEmbeddedQuitReady=!0;p.app.quit()});
+});
+}
 let HaituoLocalChats;
 function haituoLocalChatStore() {
     if(!HaituoLocalChats){
@@ -28620,6 +28645,7 @@ function caishengSoftRefreshWindow() {
 let caishengParentHeartbeat = Date.now(), caishengOrphanExitStarted = !1;
 $u !== `signal-main` && (process.on(`message`, e => {
     if (!e || typeof e != `object`) return;
+    if(process.env.HAITUO_INPROCESS===`1` && e.type===`haituo-bridge-stop`){caishengParentHeartbeat=Date.now();p.app.quit();return;}
     if (process.env.HAITUO_INPROCESS === `1` && e.type === `haituo-bridge-invoke`) {
         const send = payload => { try { process.send?.(payload); } catch {} };
         const event = {sender:Z?.webContents,senderFrame:{url:G_([ $, `background.html` ])},reply(channel,...args){Z?.webContents.send(channel,...args)}};
@@ -29715,6 +29741,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     { value: `open`, label: `打开账号` },
     { value: `delete`, label: `删除账号` }
 ])), process.env.HAITUO_INPROCESS === `1` && $u === `signal-main` && (() => {
+    haituoInstallEmbeddedQuitGate();
     const views = new Map, sender = new Map, pending = new Map, configs=new Map, syncData=new Map;
     let seq = 0;
     globalThis.caishengBridge = {
@@ -29748,6 +29775,8 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         for (const [id,view] of views){
             const visible=!!(id===selected && Z && !Z.isDestroyed() && Z.isVisible() && !Z.isMinimized() && Zg?.width>0 && Zg?.height>0);
             if(visible){const content=Z.getContentBounds();const x=Math.max(0,Math.round(Zg.x||0)),y=Math.max(0,Math.round(Zg.y||0));const width=Math.max(1,Math.round(content.width-x-(Zg.rightGap||0))),height=Math.max(1,Math.round(content.height-y-(Zg.bottomGap||0)));view.setBounds({x,y,width,height});}
+            const appearance=$p(),signature=JSON.stringify([appearance.nativeTheme,appearance.chatFontSize,appearance.chatTextColor,appearance.incomingBubbleColor,appearance.outgoingBubbleColor]);
+            if(view.__haituoAppearance!==signature && view.webContents.getURL().includes(`background.html`)){view.__haituoAppearance=signature;haituoApplyNativeSignalAppearance({webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()},appearance);}
             const wasVisible=view.__haituoVisible;view.__haituoVisible=visible;view.setVisible(visible);
             if(visible&&!wasVisible){view.webContents.send(`haituo-child-push:activate`,{args:[]});view.webContents.focus();}
         }
@@ -29774,7 +29803,7 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
             Z?.contentView?.addChildView(view);
             const b = Z?.getContentBounds(); b && view.setBounds({ x: 0, y: 0, width: b.width, height: b.height });
             view.setVisible(!1);
-            view.webContents.on(`did-finish-load`,()=>{view.__haituoVisible=!1;globalThis.caishengBridge?.syncVisibility?.(Zg?.id)});
+            view.webContents.on(`did-finish-load`,()=>{view.__haituoVisible=!1;view.__haituoAppearance=null;globalThis.caishengBridge?.syncVisibility?.(Zg?.id)});
             view.webContents.on(`preload-error`,(_event,_path,error)=>X.error(`inprocess preload failed (${t}): ${error.message}`));
         } catch (error) { X.warn(`inprocess child view failed: ${error?.message ?? error}`); }
     })();
@@ -29891,9 +29920,10 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
     }), n.keepVisible && caishengKeepMainShellVisible(), Zg = n, e_(), n.keepVisible && setImmediate(caishengKeepMainShellVisible);
     setImmediate(haituoMacOrderSelectedAccount);
     (selectedAccountChanged || n.keepVisible) && !caishengMenuOpen && ![...haituoMacOverlayWindows].some(win=>!win.isDestroyed()&&win.isVisible()) && setImmediate(haituoMacFocusSelectedAccount);
-}), p.ipcMain.handle(`caisheng:stop-signal-profile`, (e, t) => {
+}), p.ipcMain.handle(`caisheng:stop-signal-profile`, async (e, t) => {
     if (typeof t != `string`) throw Error(`Signal 账号标识无效`);
     let n = Yg.get(t);
+    if(process.env.HAITUO_INPROCESS===`1`){const graceful=await haituoStopEmbeddedProfile(t,n);globalThis.caishengBridge?.dispose?.(t);return graceful;}
     globalThis.caishengBridge?.dispose?.(t);
     return Yg.delete(t), Xg.delete(t), caishengTerminateSignalChild(n);
 }), p.ipcMain.handle(`caisheng:clear-workspace-data`, async (e, t) => {
@@ -31388,7 +31418,7 @@ function haituoNativeSettingsCss(mode) {
     const dark = mode !== `light`, bg = dark ? `#191919` : `#ffffff`, fg = dark ? `#eeeeee` : `#202020`, field = dark ? `#292929` : `#f3f3f3`, edge = dark ? `#555555` : `#c6c6c6`;
     return `html,body{color-scheme:${dark ? `dark` : `light`};background:${bg}!important;color:${fg}!important}body,.title,.scroll,.intro,.section,.footer{background:${bg}!important;background-image:none!important;color:${fg}!important;border-color:${edge}!important;box-shadow:none!important}.row>span:first-child,.muted,.fontValue{color:${fg}!important}input,select,button{background:${field}!important;background-image:none!important;color:${fg}!important;border-color:${edge}!important;box-shadow:none!important}input:focus,select:focus{outline:2px solid #3a76f0}.primary{background:#306de1!important;color:#fff!important}.check input{accent-color:#306de1}`;
 }
-let haituoNativeSignalCssKey;
+const haituoNativeSignalCssKeys = new WeakMap;
 async function haituoApplyNativeSignalAppearance(win, cfg) {
     if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
     const mode = cfg.nativeTheme === `light` ? `light` : `dark`;
@@ -31397,8 +31427,9 @@ async function haituoApplyNativeSignalAppearance(win, cfg) {
     if (/^#[0-9a-f]{6}$/iu.test(cfg.chatTextColor || ``)) css += `.module-message__text,.module-message__text *,.MessageText,.MessageText *,.CaishengMessageTranslation__result{color:${cfg.chatTextColor}!important;-webkit-text-fill-color:${cfg.chatTextColor}!important}`;
     for (const [direction,color] of [[`incoming`,cfg.incomingBubbleColor],[`outgoing`,cfg.outgoingBubbleColor]]) if (/^#[0-9a-f]{6}$/iu.test(color || ``)) css += `.module-message__container--${direction}{background:${color}!important;background-image:none!important}`;
     try {
-        if (haituoNativeSignalCssKey) await win.webContents.removeInsertedCSS(haituoNativeSignalCssKey);
-        haituoNativeSignalCssKey = await win.webContents.insertCSS(css);
+        const oldKey=haituoNativeSignalCssKeys.get(win.webContents);
+        if (oldKey) await win.webContents.removeInsertedCSS(oldKey);
+        haituoNativeSignalCssKeys.set(win.webContents,await win.webContents.insertCSS(css));
         await win.webContents.executeJavaScript(`document.documentElement.style.colorScheme=${JSON.stringify(mode)};document.body.classList.toggle('dark-theme',${mode === `dark`});document.body.classList.toggle('light-theme',${mode === `light`});`);
     } catch (error) { X.warn(`Native appearance could not be applied: ${error?.message}`); }
 }
