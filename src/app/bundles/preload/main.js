@@ -44020,9 +44020,9 @@ function haituoCachedSignalTranslation(text) {
     });
     async function t2e() {
         t.Ri(n2e === void 0, `keyboardLayout already initialized`);
-        let e = window.navigator;
-        t.Ri(typeof e.keyboard?.getLayoutMap == `function`, `No support for getLayoutMap`), 
-        n2e = await e.keyboard.getLayoutMap();
+        n2e = await require('../../js/haituo-startup-keyboard.js').loadLayoutMap(window.navigator, {
+            onFallback: () => console.warn(`Haituo: keyboard layout unavailable; using event key labels`)
+        });
     }
     function tT({code: e, key: n}) {
         return t.Ri(n2e !== void 0, `keyboardLayout not initialized`), n2e.get(e) ?? n;
