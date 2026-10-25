@@ -7,3 +7,5 @@ WhatsApp: independent local SQLCipher message store, keyed by account/conversati
 Gated subaccount work: incorporates the bridge work through upstream 6f26ff8 without changing the legacy native follower; HAITUO_INPROCESS=1 enables WebContentsView. Fixes public handler dispatch, structured binary serialization, per-profile browser partitions, a SQL-ready/config handshake before view load, listener cleanup, view bounds/visibility and child cleanup.
 
 Real account messaging, physical drag/resize/sleep and complete long-history scrolling are not certified by unit/DOM/CI bootstrap checks. This is a candidate, not a claim of completion or zero bugs.
+
+The embedded backend now shuts down through the existing Signal renderer/SQL shutdown handshake before the view is destroyed; a bounded timeout remains as a fallback. Appearance CSS keys are scoped per webContents. Optional --haituo-inprocess enables the existing gate for one launch. Native CI phases share one disposable browser profile so Windows OS-crypt keys match the intentionally shared settings directory.

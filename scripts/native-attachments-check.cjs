@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process');
-const mac=process.platform==='darwin',out=path.resolve('audit-results'),profile=fs.mkdtempSync(path.join(os.tmpdir(),'haituo-fresh-'));
-fs.mkdirSync(out,{recursive:true});const report={platform:process.platform,checks:[],errors:[],settingsInventory:[]};
+const mac=process.platform==='darwin',out=path.resolve('audit-results'),profile=process.env.HAITUO_NATIVE_PROFILE||(process.env.GITHUB_ACTIONS==='true'?path.join(process.env.RUNNER_TEMP||os.tmpdir(),'haituo-native-162'):fs.mkdtempSync(path.join(os.tmpdir(),'haituo-fresh-')));
+fs.mkdirSync(out,{recursive:true});fs.mkdirSync(profile,{recursive:true});const report={platform:process.platform,checks:[],errors:[],settingsInventory:[]};
 const app=path.resolve(mac?'macos/out/海拓-darwin-arm64/海拓.app':'windows/out/win-unpacked/海拓.exe');
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let proc,client,log;
 let fixtureCalls=0; const fixtureServer=require("node:http").createServer((req,res)=>{req.resume();req.on("end",()=>{fixtureCalls++;res.setHeader("content-type","application/json");res.end(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"原消息下方的常驻译文"}}]}))})});

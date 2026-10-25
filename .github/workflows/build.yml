@@ -24,6 +24,7 @@ jobs:
         run: |
           python scripts/integrate-native-records-162.py
           python scripts/sync-local-chat-view.py
+          python scripts/finish-inprocess-162.py
           node --check src/app/bundles/main.js
           node --check src/app/bundles/preload/main.js
           node --check src/app/js/caisheng-webview-preload.js
@@ -73,11 +74,6 @@ jobs:
         run: node --test scripts/*.test.cjs
       - name: Build and verify clean production package
         run: python scripts/build.py --target ${{ matrix.target }}
-      - name: Verify real native encrypted local message database
-        run: node scripts/local-chat-native-check.cjs
-      - name: Verify gated child Signal initialization and profile routing
-        timeout-minutes: 4
-        run: node scripts/inprocess-native-check.cjs
       - name: Verify real native encrypted local message database
         run: node scripts/local-chat-native-check.cjs
       - name: Verify gated child Signal initialization and profile routing
