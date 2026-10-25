@@ -43,10 +43,11 @@ async function check(id,work){try{const result=await work();report.checks.push({
   if(childClient){
    await check('CHILD-FOCUS-SERVICE',async()=>{
     // Let the hidden backend's legacy 10s focus timer fire; it must not
-    // overwrite the actual parent/view focus state.
+    // overwrite the actual parent/view focus state. Reset document activity on
+    // both sides before comparing: Signal also has a separate 15s idle cutoff.
     await pause(10500);
-    const parentActive=await apiEvaluate(`window.SignalContext.activeWindowService.isActive()`);let childActive;
-    for(const contextId of childClient.contexts){const result=await childClient.call('Runtime.evaluate',{expression:`window.SignalContext?.caishengIsChildProfile?window.SignalContext.activeWindowService.isActive():null`,contextId,returnByValue:true});if(typeof result.result?.value==='boolean'){childActive=result.result.value;break;}}
+    const parentActive=await apiEvaluate(`(()=>{document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));return window.SignalContext.activeWindowService.isActive()})()`);let childActive;
+    for(const contextId of childClient.contexts){const result=await childClient.call('Runtime.evaluate',{expression:`(()=>{if(!window.SignalContext?.caishengIsChildProfile)return null;document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));return window.SignalContext.activeWindowService.isActive()})()`,contextId,returnByValue:true});if(typeof result.result?.value==='boolean'){childActive=result.result.value;break;}}
     if(typeof parentActive!=='boolean'||childActive!==parentActive)throw Error('Embedded focus does not match parent '+JSON.stringify({parentActive,childActive}));return{parentActive,childActive};
    });
    await check('CHILD-VIEW-BOUNDS-UPDATE',async()=>{
