@@ -22095,104 +22095,61 @@ function haituoCachedSignalTranslation(text) {
     return cached?HaituoFormatMessageParagraphs(text,cached):'';
 }
 
-    function Ive({text: e, quoted: quote = !1}) {
-        let reference = (0, w_.useRef)(null), [t, haituoSetTranslation] = (0, w_.useState)(() => haituoCachedSignalTranslation(e)), [r, a] = (0, w_.useState)(!1), [o, s] = (0, w_.useState)(``), c = (0, 
-        w_.useCallback)(async () => {
-            a(!0), s(``);
+    function Ive({text: e, messageId, quoted: quote = !1}) {
+        const reference = (0,w_.useRef)(null);
+        const identity = `${messageId || ``}\0${e}`;
+        const current = (0,w_.useRef)(identity); current.current = identity;
+        const generation = (0,w_.useRef)(0);
+        const [state,setState] = (0,w_.useState)({identity,translation:``,busy:!1,error:``});
+        const visible = state.identity === identity ? state : {translation:``,busy:!1,error:``};
+        const update = (patch, token) => {
+            if (current.current !== identity || generation.current !== token) return;
+            haituoQueueSignalTranslation(reference, () => {
+                if (current.current === identity && generation.current === token) setState(previous => ({...(previous.identity === identity ? previous : {}),identity,...patch}));
+            });
+        };
+        const run = (0,w_.useCallback)(async (force = !1) => {
+            const token = ++generation.current;
+            update({busy:!0,error:``},token);
             try {
-                let t = x_(), r = HaituoIncomingTarget(e);
-                n(HaituoFormatMessageParagraphs(e, await S_(e, {
-                    ...t,
-                    targetLanguage: r
-                })));
-            } catch (e) {
-                s(e instanceof Error ? e.message : `翻译失败`);
-            } finally {
-                a(!1);
-            }
-        }, [ e ]);
-        const l = (0, w_.useCallback)(async () => {
-            a(!0), s(``);
-            try {
-                const t = x_(), r = HaituoIncomingTarget(e);
-                const o = await window.SignalContext.caishengTranslate({
-                    text: e,
-                    targetLanguage: r,
-                    purpose: `chat`,
-                    provider: `smart-retranslate`,
-                    apiKey: t.apiKey,
-                    groqApiKey: t.groqApiKey,
-                    deepLApiKey: t.deepLApiKey,
-                    context: [ ...document.querySelectorAll(`.module-message__text,.MessageText,[data-testid="message-text"],.module-message-body__text`) ].slice(-10).map(node => String(node.innerText || node.textContent || ``).trim()).filter(Boolean).join(`\n`).slice(-6000),
-                    timeoutMs: t.timeoutMs,
-                    forceRefresh: !0
+                const config=x_(), target=HaituoIncomingTarget(e);
+                const host=reference.current?.closest('.module-message,[data-testid="message"]');
+                const group=!!host?.querySelector('.module-message__author');
+                const enabled=group ? config.groupBackTranslationEnabled !== !1 : config.autoTranslateIncoming !== !1;
+                const result=await window.SignalContext.caishengTranslate({
+                    text:e,messageId,targetLanguage:target,purpose:`chat`,
+                    provider:force ? `smart-retranslate` : config.chatTranslationProvider || `google-free`,
+                    context:[...document.querySelectorAll('.module-message__text,.MessageText,[data-testid="message-text"]')].slice(-10).map(node=>node.textContent||``).join(`\n`).slice(-6000),
+                    forceRefresh:force,attachmentOnly:!force && !enabled
                 });
-                n(HaituoFormatMessageParagraphs(e, o.text.trim()));
-            } catch (e) {
-                s(e instanceof Error ? e.message : `智能重新翻译失败`);
-            } finally {
-                a(!1);
+                if (result?.text?.trim()) update({translation:HaituoFormatMessageParagraphs(e,result.text),busy:!1,error:``},token);
+                else update({busy:!1},token);
+            } catch (error) {
+                update({busy:!1,error:error instanceof Error ? error.message : `翻译失败，点击重试`},token);
             }
-        }, [ e ]);
-        const haituoSource = (0, w_.useRef)(e); haituoSource.current = e;
-        const n = value => { if (haituoSource.current === e) haituoQueueSignalTranslation(reference, () => { if (haituoSource.current === e) haituoSetTranslation(value); }); };
-        return (0, w_.useEffect)(() => {
-            if (quote && reference.current) {
-                const host = reference.current.closest(`.module-message,[data-testid="message"]`);
-                const full = String(host?.innerText || ``).replace(/\s+/gu, ` `);
-                const source = String(e || ``).replace(/\s+/gu, ` `).trim();
-                const first = source ? full.indexOf(source) : -1;
-                if (first >= 0 && full.indexOf(source, first + source.length) >= 0) {
-                    reference.current.style.display = `none`;
-                    return;
-                }
-            }
-            const haituoCfg = x_(), haituoHost = reference.current?.closest('.module-message,[data-testid="message"]'), haituoIsGroup = !!haituoHost?.querySelector('.module-message__author');
-            (haituoIsGroup ? haituoCfg.groupBackTranslationEnabled !== !1 : haituoCfg.autoTranslateIncoming) && !haituoCachedSignalTranslation(e) && c();
-        }, [ e, c, quote ]), (0, T_.jsxs)(`span`, {
-            ref: reference,
-            className: `CaishengMessageTranslation`,
-            children: [ (0, T_.jsx)(`button`, {
-                disabled: r,
-                type: `button`,
-                onClick: (0, w_.useCallback)(() => {
-                    t ? n(``) : c();
-                }, [ c, t ]),
-                children: r ? `自动翻译中…` : t ? `隐藏翻译` : `翻译`
-            }), t ? (0, T_.jsxs)(T_.Fragment, {
-                children: [ (0, T_.jsx)(`span`, {
-                className: `CaishengMessageTranslation__result`,
-                style: { whiteSpace: `pre-wrap`, overflowWrap: `anywhere` },
-                children: t
-                }), (0, T_.jsx)(`button`, {
-                    type: `button`,
-                    onClick: () => navigator.clipboard.writeText(e),
-                    title: `复制原文`,
-                    "aria-label": `复制原文`,
-                    style: { minWidth: `38px`, width: `38px`, height: `34px`, marginInline: `4px`, padding: `4px 7px`, borderRadius: `7px`, fontSize: `18px`, lineHeight: 1 },
-                    children: `📄`
-                }), (0, T_.jsx)(`button`, {
-                    type: `button`,
-                    onClick: () => navigator.clipboard.writeText(t),
-                    title: `复制译文`,
-                    "aria-label": `复制译文`,
-                    style: { minWidth: `38px`, width: `38px`, height: `34px`, marginInline: `4px`, padding: `4px 7px`, borderRadius: `7px`, fontSize: `18px`, lineHeight: 1 },
-                    children: `🌐`
-                }), (0, T_.jsx)(`button`, {
-                    disabled: r,
-                    type: `button`,
-                    onClick: l,
-                    "aria-label": `智能重新翻译`,
-                    title: `优先使用已配置的高质量模型重新翻译并更新缓存`,
-                    style: { minWidth: `38px`, width: `38px`, height: `34px`, marginInline: `4px`, padding: `4px 7px`, borderRadius: `17px`, fontSize: `18px`, lineHeight: 1 },
-                    children: `✨`
-                }) ]
-            }) : null, o ? (0, T_.jsx)(`span`, {
-                className: `CaishengMessageTranslation__error`,
-                children: o
-            }) : null ]
+        },[e,messageId]);
+        (0,w_.useEffect)(()=>{
+            if (!quote && e.trim()) run();
+            return ()=>{generation.current++;};
+        },[e,messageId,quote,run]);
+        if (quote) return null;
+        return (0,T_.jsxs)(`span`,{
+            ref:reference,className:`CaishengMessageTranslation`,
+            "data-haituo-message-id":messageId || ``,
+            style:{display:`block`,clear:`both`,width:`100%`,height:`auto`,maxHeight:`none`,whiteSpace:`normal`,overflowAnchor:`none`},
+            children:[visible.translation ? (0,T_.jsx)(`span`,{
+                className:`CaishengMessageTranslation__result`,
+                style:{display:`block`,whiteSpace:`pre-wrap`,overflowWrap:`anywhere`,borderTop:`1px solid currentColor`,paddingTop:`6px`,marginTop:`6px`},
+                children:visible.translation
+            }) : null,(0,T_.jsxs)(`span`,{
+                style:{display:`flex`,gap:`6px`,alignItems:`center`,marginTop:`3px`,fontSize:`12px`},
+                children:[(0,T_.jsx)(`button`,{type:`button`,disabled:visible.busy,onClick:()=>run(!!visible.translation),title:visible.translation ? `重新翻译并更新本条常驻译文` : `翻译本条消息`,children:visible.busy ? `翻译中…` : visible.translation ? `重新翻译` : visible.error ? `重试翻译` : `翻译`}),
+                visible.translation ? (0,T_.jsx)(`button`,{type:`button`,onClick:()=>navigator.clipboard.writeText(e),"aria-label":`复制原文`,children:`📄`}) : null,
+                visible.translation ? (0,T_.jsx)(`button`,{type:`button`,onClick:()=>navigator.clipboard.writeText(visible.translation),"aria-label":`复制译文`,children:`🌐`}) : null]
+            }),visible.error ? (0,T_.jsx)(`span`,{className:`CaishengMessageTranslation__error`,role:`status`,children:visible.error}) : null]
         });
     }
+
     var w_, T_, Lve = e.n(() => {
         w_ = e.o(n.z()), Fve(), haituoSignalReactDOM = e.o(n.i()), T_ = n.R();
     });
@@ -22206,7 +22163,7 @@ function haituoCachedSignalTranslation(text) {
         if (n === 5) return ge.Small;
         throw r.p(n);
     }
-    function E_({author: e, bodyRanges: t, direction: n, disableJumbomoji: r, disableLinks: o, i18n: s, isSpoilerExpanded: c, kickOffBodyDownload: l, onExpandSpoiler: u, onIncreaseTextLength: d, prefix: f, renderLocation: p, showConversation: m, text: h, textAttachment: g, originalText: _}) {
+    function E_({haituoMessageId, author: e, bodyRanges: t, direction: n, disableJumbomoji: r, disableLinks: o, i18n: s, isSpoilerExpanded: c, kickOffBodyDownload: l, onExpandSpoiler: u, onIncreaseTextLength: d, prefix: f, renderLocation: p, showConversation: m, text: h, textAttachment: g, originalText: _}) {
         let v = o || !Ys(_), y = g?.pending || d || g?.wasTooBig ? `${h}...` : h, b = r ? null : Rve(h), x;
         (0, w_.useEffect)(() => {
             if (d && p === __.Timeline) d();
@@ -22273,6 +22230,7 @@ function haituoCachedSignalTranslation(text) {
                 textLength: h.length
             }), x, (p === __.Timeline || p === __.Quote) && h.trim() && (p !== __.Timeline || !d) ? (0, D_.jsx)(Ive, {
                 text: h,
+                messageId: haituoMessageId,
                 quoted: p === __.Quote
             }) : null ]
         });
@@ -22313,6 +22271,7 @@ function haituoCachedSignalTranslation(text) {
     function Wve({bodyRanges: e, direction: t, disableLinks: n, displayLimit: r, i18n: a, id: o, isSpoilerExpanded: s, kickOffBodyDownload: c, messageExpanded: l, onExpandSpoiler: u, renderLocation: d, showConversation: f, text: p, textAttachment: m}) {
         let h = r || Kve, g = n || !Ys(p), {hasReadMore: _, text: v} = Bve(p, h, Jve);
         return (0, Gve.jsx)(E_, {
+            haituoMessageId: o,
             bodyRanges: e,
             direction: t,
             disableJumbomoji: e?.length ? !0 : void 0,

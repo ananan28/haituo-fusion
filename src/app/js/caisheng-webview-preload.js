@@ -554,7 +554,7 @@ function polishOutgoingEnglish(source, text) {
     return value;
 }
 
-async function translateMessage(e, t = !1) {
+async function translateMessage(e, t = !1, messageId, attachmentOnly = !1) {
     const content = String(e || "").replace(/https?:\/\/\S+|www\.\S+/giu, " ");
     const han = (content.match(/\p{Script=Han}/gu) || []).length;
     const latin = (content.match(/[a-z]+(?:['’][a-z]+)?/giu) || []).length;
@@ -567,8 +567,10 @@ async function translateMessage(e, t = !1) {
         groqApiKey: settings.groqApiKey,
         deepLApiKey: settings.deepLApiKey,
         context,
-        forceRefresh: !!t
+        forceRefresh: !!t,
+        messageId, attachmentOnly
     });
+    if (o?.notFound) return "";
     if (!o || "string" != typeof o.text || !o.text.trim()) throw new Error("消息回译失败");
     return o.text.trim();
 }
@@ -1620,15 +1622,6 @@ function haituoInstallMessageScanner() {
             const t = e.getBoundingClientRect();
             return t.width > 0 && t.height > 0 && t.bottom > 72 && t.top < innerHeight - 86;
         }).slice(-24);
-        // 关闭群组回译/接收回译后，已渲染的译文也要立即撤下，不能只挡住新消息。
-        if (!incomingTranslationOn()) {
-            for (const e of visibleMessages) {
-                if (e.querySelector(".haituo-wa-message-translation,.haituo-wa-translation-error")) {
-                    e.querySelectorAll(".haituo-wa-message-translation,.haituo-wa-translation-error").forEach(node => node.remove());
-                    delete e.dataset.haituoTranslationDone;
-                }
-            }
-        }
         for (const e of visibleMessages) {
             const voiceTrigger = e.querySelector('audio,button[aria-label*="voice" i],button[aria-label*="audio" i],button[aria-label*="语音"],button[aria-label*="播放"],[data-icon*="audio-play" i],[data-icon*="ptt" i],[data-testid*="audio" i],[data-testid*="voice" i],[class*="icon-voice" i],.bubble.is-voice');
             if (voiceTrigger && webTranslationActive() && !voiceProcessed.has(voiceTrigger) && !e.querySelector(".haituo-voice-transcribe,.haituo-voice-result")) {
@@ -1702,7 +1695,7 @@ function haituoInstallMessageScanner() {
                 return copy.textContent?.trim() || "";
             }).filter(Boolean).join("\n\n").trim();
             if (!n || /^\d{1,2}:\d{2}$/.test(n) || /^https?:\/\/\S+$/iu.test(n)) continue;
-            if (!incomingTranslationOn()) continue;
+            if (!webTranslationActive()) continue;
             if (e.dataset.haituoTranslationSource !== n) {
                 e.querySelectorAll(".haituo-wa-message-translation").forEach(node => node.remove());
                 e.dataset.haituoTranslationSource = n;
@@ -1716,30 +1709,16 @@ function haituoInstallMessageScanner() {
                 delete e.dataset.haituoTranslationPending;
                 continue;
             }
-            translationTargets.push({ e, t: e, n, mount });
+            const messageId = e.getAttribute("data-id") || e.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? e.getAttribute("data-mid") : undefined);
+            if (!incomingTranslationOn() && !messageId) { delete e.dataset.haituoTranslationPending; continue; }
+            translationTargets.push({ e, t: e, n, mount, messageId, attachmentOnly: !incomingTranslationOn() });
         }
-        const translated = [], queue = translationTargets.slice(0, 24);
-        let queueIndex = 0;
-        const worker = async () => {
-            while (queueIndex < queue.length) {
-                const item = queue[queueIndex++];
-                try {
-                    item.r = await translateMessage(item.n), item.t.dataset.haituoTranslationDone = "1", delete item.t.dataset.haituoTranslationRetryCount, delete item.t.dataset.haituoTranslationRetryAt;
-                } catch (error) {
-                    item.error = error instanceof Error ? error.message : String(error);
-                    const retry = Math.min(3, Number(item.t.dataset.haituoTranslationRetryCount || 0) + 1);
-                    item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
-                } finally {
-                    delete item.t.dataset.haituoTranslationPending;
-                }
-                translated.push(item);
-            }
-        };
-        await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
-        haituoKeepTranslationPosition(visibleMessages[0], () => {
-        for (const item of translated) {
-            if (!incomingTranslationOn()) continue;
+        const applyTranslation = item => {
+        haituoKeepTranslationPosition(item.e, () => {
+            if (!webTranslationActive()) return;
             const { e, t, n, r, mount } = item;
+            const liveId = e.getAttribute("data-id") || e.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? e.getAttribute("data-mid") : undefined);
+            if (item.messageId !== liveId) return;
             if (e.isConnected && mount?.isConnected && e.dataset.haituoTranslationSource === n) {
                 let status = e.querySelector('.haituo-wa-translation-error');
                 if (item.error) {
@@ -1753,7 +1732,7 @@ function haituoInstallMessageScanner() {
                     status.textContent = '翻译失败，自动重试中 · 点击重试'; status.title = item.error;
                 } else status?.remove();
             }
-            if (!t || !r || !e.isConnected || !t.isConnected || !mount?.isConnected || !e.contains(mount) || e.dataset.haituoTranslationSource !== n || e.querySelector(".haituo-wa-message-translation")) continue;
+            if (!t || !r || !e.isConnected || !t.isConnected || !mount?.isConnected || !e.contains(mount) || e.dataset.haituoTranslationSource !== n || e.querySelector(".haituo-wa-message-translation")) return;
             const o = document.createElement("div");
             o.className = "haituo-wa-message-translation", Object.assign(o.style, {
                 display: "block",
@@ -1802,15 +1781,35 @@ function haituoInstallMessageScanner() {
                     const a = t.currentTarget;
                     a.disabled = !0, a.textContent = "…";
                     try {
-                        translationText.textContent = formatMessageParagraphs(n, await translateMessage(n, !0)), a.textContent = "✨";
+                        translationText.textContent = formatMessageParagraphs(n, await translateMessage(n, !0, item.messageId)), a.textContent = "✨";
                     } catch (e) {
                         toast(e instanceof Error ? e.message : "智能重新翻译失败", !0), a.textContent = "✨";
                     } finally {
                         a.disabled = !1;
                     }
                 }, actions.append(retryButton);
-        }
         });
+
+        };
+        const translated = [], queue = translationTargets.slice(0, 24);
+        let queueIndex = 0;
+        const worker = async () => {
+            while (queueIndex < queue.length) {
+                const item = queue[queueIndex++];
+                try {
+                    item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly), item.t.dataset.haituoTranslationDone = "1", delete item.t.dataset.haituoTranslationRetryCount, delete item.t.dataset.haituoTranslationRetryAt;
+                } catch (error) {
+                    item.error = error instanceof Error ? error.message : String(error);
+                    const retry = Math.min(3, Number(item.t.dataset.haituoTranslationRetryCount || 0) + 1);
+                    item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
+                } finally {
+                    delete item.t.dataset.haituoTranslationPending;
+                }
+                applyTranslation(item);
+            }
+        };
+        regionScanBusy = !1;
+        await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
         } finally {
             regionScanBusy = !1;
         }
@@ -1818,7 +1817,8 @@ function haituoInstallMessageScanner() {
     const scan = () => t().catch(error => console.error('HaiTuo message scan failed', error));
     setInterval(scan, 2000);
     document.addEventListener('scroll', () => { clearTimeout(e); e = setTimeout(scan, 120); }, true);
-    new MutationObserver(() => {
+    new MutationObserver(records => {
+        if (records.every(record => record.target instanceof Element && record.target.closest(".haituo-wa-message-translation,.haituo-wa-translation-error,.haituo-voice-result,#haituo-whatsapp-translator,#haituo-backtranslation-preview"))) return;
         clearTimeout(e), e = setTimeout(() => {
             const e = findComposer();
             if (backTranslationComposer) {
@@ -1829,7 +1829,7 @@ function haituoInstallMessageScanner() {
                 }
             }
             e ? syncPanel(e) : hidePanels(), scan();
-        }, 500);
+        }, 60);
     }).observe(document.documentElement, {
         childList: !0,
         subtree: !0

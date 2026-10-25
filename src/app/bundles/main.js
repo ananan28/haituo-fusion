@@ -25522,7 +25522,26 @@ function haituoTranslationCacheKey(e) {
     let contextHash = 0;
     const context = String(e.context || ``).trim();
     if (context) for (let i = 0; i < context.length; i += 1) contextHash = (contextHash * 33 ^ context.charCodeAt(i)) >>> 0;
-    return JSON.stringify([ `free-ai-chat-v6`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, e.model || ``, contextHash, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []) ]);
+    return JSON.stringify([ `free-ai-chat-v6`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, e.model || ``, contextHash, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []), ...(e.messageScope ? [e.messageScope] : []) ]);
+}
+
+let HaituoMessageAttachments;
+function haituoTranslateAttached(event, request, work) {
+    if (request.purpose !== `chat` || typeof request.messageId !== `string` || !request.messageId.trim()) return work();
+    let platform = `signal`, account = $u;
+    const url = new URL(event.senderFrame?.url || `file:///`);
+    if (url.protocol === `https:`) {
+        platform = url.hostname === `web.whatsapp.com` ? `whatsapp` : url.hostname === `web.telegram.org` ? `telegram` : ``;
+        account = HaituoWorkspaceBySession.get(event.sender.session);
+        if (!platform || !account) throw Error(`无法确认消息所属账号，已停止保存译文`);
+    }
+    HaituoMessageAttachments ||= require('../js/haituo-message-translations.js').createStore({
+        directory: (0,s.join)(p.app.getPath(`appData`), `Haituo`, `message-translations-v1`),
+        read: haituoProtectedRead, write: haituoProtectedWrite
+    });
+    // Do not allow an old text-only shared cache to choose a different message's attachment.
+    request.messageScope = `${platform}:${account}:${request.messageId}`;
+    return HaituoMessageAttachments.translate({platform,account,messageId:request.messageId},request,work);
 }
 
 function haituoSharedChatCacheKey(e) {
@@ -25572,7 +25591,7 @@ async function haituoTranslateLongMessage(config, request) {
 }
 
 function haituoExistingChatTranslation(e) {
-    if (e.purpose !== `chat` || e.forceRefresh || !String(e.text || ``).trim()) return null;
+    if (e.messageScope || e.purpose !== `chat` || e.forceRefresh || !String(e.text || ``).trim()) return null;
     const cache = loadHaituoTranslationCache(), shared = cache[haituoSharedChatCacheKey(e)];
     if (shared?.text?.trim() && (String(e.text).split(/\r?\n/u).length < 8 || haituoLongMessageComplete(e.text, shared.text))) return { ...shared, cached: !0 };
     // Earlier releases keyed every translation by provider. Reuse a successful older result.
@@ -25594,7 +25613,7 @@ function haituoExistingChatTranslation(e) {
 }
 
 function haituoRememberChatTranslation(request, result) {
-    if (request.purpose !== `chat` || !result?.text?.trim() || result.cached || result.skipSharedCache) return;
+    if (request.messageScope || request.purpose !== `chat` || !result?.text?.trim() || result.cached || result.skipSharedCache) return;
     const cache = loadHaituoTranslationCache();
     cache[haituoSharedChatCacheKey(request)] = { text: result.text, provider: result.provider, updatedAt: Date.now() };
     saveHaituoTranslationCache();
@@ -25916,8 +25935,8 @@ function tm() {
             timeoutMs: a.timeoutMs
         });
         const startedAt = Date.now();
-        const result = a.translationPools?await haituoTranslateWithMode(a,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(a, r));
-        haituoRememberChatTranslation(a, result);
+        const result = r.messageId ? await haituoTranslateAttached(e, r, () => a.translationPools?haituoTranslateWithMode(a,r):HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(a, r))) : (a.translationPools?await haituoTranslateWithMode(a,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(a, r)));
+        a.messageScope = r.messageScope; haituoRememberChatTranslation(a, result);
         return haituoRecordTranslationStatus(result, startedAt), result;
     }), p.ipcMain.removeHandler(`caisheng:webview-translate`), p.ipcMain.handle(`caisheng:webview-translate`, async (e, t, n, i) => {
         Jp(e.senderFrame?.url ?? ``);
@@ -25932,11 +25951,12 @@ function tm() {
             targetLanguage: n,
             context: typeof i == `string` ? i.slice(-6000) : typeof i?.context == `string` ? i.context.slice(-6000) : ``,
             purpose,
+            messageId: typeof i?.messageId === `string` ? i.messageId : undefined,
             provider,
             strictProvider: !stored.translationPools && typeof i?.purpose == `string` && i.purpose === `input` && !!requested && requested !== `auto`
         };
         const startedAt = Date.now();
-        const result = r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r));
+        const result = r.messageId ? await haituoTranslateAttached(e, r, () => r.translationPools?haituoTranslateWithMode(r,r):HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r))) : (r.translationPools?await haituoTranslateWithMode(r,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(r, r)));
         haituoRememberChatTranslation(r, result);
         return haituoRecordTranslationStatus(result, startedAt), result;
     }), p.ipcMain.removeHandler(`caisheng:webview-replace-text`), p.ipcMain.handle(`caisheng:webview-replace-text`, async (e, t) => {
