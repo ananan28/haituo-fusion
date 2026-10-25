@@ -1,14 +1,51 @@
-name: Build desktop installers
+name: Build and verify Haituo 1.6.1
 on:
   workflow_dispatch:
   push:
-    branches: ['main', 'build/**']
+    branches: ['build/1.6.1-attachments']
+permissions:
+  contents: write
 env:
   PYTHONUTF8: 1
-permissions:
-  contents: read
 jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply and verify the exact 1.6.0 integration
+        run: |
+          python scripts/upgrade-message-attachments-161.py
+          node --check src/app/bundles/main.js
+          node --check src/app/bundles/preload/main.js
+          node --check src/app/js/caisheng-webview-preload.js
+          node --test scripts/*.test.cjs
+      - name: Install isolated DOM/React test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
+      - name: Test WhatsApp and actual Signal React attachment lifecycle
+        run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs
+        env:
+          HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
+      - name: Save the complete integrated editable source
+        id: source
+        run: |
+          git config user.name 'Haituo Build'
+          git config user.email 'haituo-build@users.noreply.github.com'
+          git add src/app/bundles/main.js src/app/bundles/preload/main.js src/app/js/caisheng-webview-preload.js project.json README.md START-HERE.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: persist bilingual attachments per account and original message (1.6.1)'
+            git push origin HEAD:build/1.6.1-attachments
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
+    needs: integrate
     strategy:
       fail-fast: false
       matrix:
@@ -18,9 +55,11 @@ jobs:
           - os: macos-15
             target: macos
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.commit }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -29,24 +68,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Unit and regression tests
-        run: node --test scripts/translation-validation.test.cjs scripts/network.test.cjs scripts/screenshot.test.cjs scripts/key-recovery.test.cjs scripts/preload-completion.test.cjs scripts/web-loading-effect.test.cjs scripts/protected-config.test.cjs scripts/config-redaction.test.cjs scripts/media-permission.test.cjs scripts/voice-endpoint.test.cjs scripts/translate-core.test.cjs scripts/network-proxy.test.cjs scripts/screenshot-input.test.cjs scripts/startup-settings-sync.test.cjs scripts/screenshot-source.test.cjs scripts/preview-concurrency.test.cjs scripts/startup-settings-deferred.test.cjs scripts/translation-pools-p2.test.cjs scripts/translation-pools-fallthrough.test.cjs scripts/preload-redaction-p1.test.cjs scripts/translate-strict-provider.test.cjs scripts/sqlkey-encrypt-fallback.test.cjs scripts/translation-pools-pause.test.cjs scripts/settings-single-writer.test.cjs scripts/unread-preview.test.cjs scripts/window-show-guards.test.cjs scripts/voice-capture-hook.test.cjs scripts/cache-limit.test.cjs scripts/provider-routing.test.cjs scripts/translation-pools-rotation.test.cjs scripts/translation-queue.test.cjs scripts/composer-quick-sync.test.cjs scripts/whatsapp-group-detect.test.cjs scripts/signal-composer-sync.test.cjs
-      - name: Build installer and verify the release package
+      - name: All regression tests on the target OS
+        run: node --test scripts/*.test.cjs
+      - name: Build and verify clean production package
         run: python scripts/build.py --target ${{ matrix.target }}
-      - name: Runtime tests (GUI only where a desktop session exists)
+      - name: Normal native launch and durable offline restart check
+        run: node scripts/native-attachments-check.cjs
+      - name: Verify native dependencies and network transport
         run: python scripts/build.py --target ${{ matrix.target }} --runtime-tests-only
-      - run: python scripts/package-source.py --target ${{ matrix.target }}
+      - name: Package complete current editable source
+        run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Haituo-1.6.1-verification-${{ matrix.target }}
+          path: |
+            audit-results/**
+            windows/verification/**
+            macos/verification/**
       - uses: actions/upload-artifact@v4
         with:
-          name: Haituo-${{ matrix.target }}
+          name: Haituo-1.6.1-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
-            windows/verification/**
             macos/out/*.dmg
-            macos/verification/**
             source-packages/*.zip
-      - uses: actions/upload-artifact@v4
-        if: matrix.target == 'windows'
-        with:
-          name: Haituo-windows-unpacked
-          path: windows/out/win-unpacked/**
