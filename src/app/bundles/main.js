@@ -29469,6 +29469,7 @@ function haituoPromptAccountLabelInPage(ownerWindow, label) {
 p.ipcMain.handle(`caisheng:edit-account-label`, async (e, t) => {
     const current = typeof t?.label == `string` ? t.label.slice(0, 40) : ``;
     if ($u === `signal-main` && t?.platformId === `signal` && typeof t?.id == `string` && t.id !== `signal-main`) {
+        if(process.env.HAITUO_INPROCESS===`1`){const view=globalThis.caishengBridge?.viewFor?.(t.id);return view?haituoPromptAccountLabelInPage(view,current):null;}
         const child = Yg.get(t.id);
         if (child && !child.killed && child.exitCode === null && child.connected) return caishengRequestChildLabel(child, current);
     }
@@ -29750,6 +29751,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         resolve(requestId, result) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.resolve(result)); },
         reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
         focus(workspaceId){const view=views.get(workspaceId);if(view?.__haituoVisible)view.webContents.focus();},
+        viewFor(workspaceId){const view=views.get(workspaceId);return view?{webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()}:null;},
         configFor(event){return configs.get(sender.get(event?.sender?.id));},
         syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
         ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
@@ -29882,6 +29884,13 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
     }
     if (t === `signal-main`) return { ok: caishengSoftRefreshWindow() };
     if (typeof t != `string` || !/^signal-[a-zA-Z0-9_-]{1,64}$/u.test(t)) throw Error(`Signal 账号标识无效`);
+    const haituoEmbeddedRefresh = process.env.HAITUO_INPROCESS===`1`;
+    if(haituoEmbeddedRefresh){
+        if(haituoMacRefreshPromises.has(t))return haituoMacRefreshPromises.get(t);
+        const operation=(async()=>{const child=Yg.get(t);if(!child)return{ok:!1};if(!await haituoStopEmbeddedProfile(t,child))return{ok:!1};globalThis.caishengBridge?.dispose?.(t);return haituoLaunchSignalProfile(e,t)})();
+        haituoMacRefreshPromises.set(t,operation);
+        try{return await operation}finally{if(haituoMacRefreshPromises.get(t)===operation)haituoMacRefreshPromises.delete(t)}
+    }
     if (process.platform === `darwin` && haituoMacRefreshPromises.has(t)) return haituoMacRefreshPromises.get(t);
     const child = Yg.get(t);
     if (!child || child.exitCode !== null || child.killed || !child.connected) return {
