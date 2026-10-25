@@ -22238,7 +22238,7 @@ function haituoCachedSignalTranslation(text) {
                 onExpandSpoiler: u,
                 renderLocation: p,
                 textLength: h.length
-            }), x, (p === __.Timeline || p === __.Quote) && h.trim() && (p !== __.Timeline || !d) ? (0, D_.jsx)(Ive, {
+            }), x, (p === __.Timeline || p === __.Quote) && h.trim() ? (0, D_.jsx)(Ive, {
                 text: _ || h,
                 messageId: haituoMessageId,
                 quoted: p === __.Quote
