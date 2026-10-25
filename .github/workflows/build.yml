@@ -1,8 +1,8 @@
-name: Build and verify Haituo 1.6.1
+name: Build and verify Haituo 1.6.2
 on:
   workflow_dispatch:
   push:
-    branches: ['build/1.6.1-attachments']
+    branches: ['build/1.6.2-local-records']
 permissions:
   contents: write
 env:
@@ -20,9 +20,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply and verify the exact 1.6.0 integration
+      - name: Integrate and verify message records and gated child views
         run: |
-          python scripts/upgrade-message-attachments-161.py
+          python scripts/integrate-native-records-162.py
           node --check src/app/bundles/main.js
           node --check src/app/bundles/preload/main.js
           node --check src/app/js/caisheng-webview-preload.js
@@ -30,7 +30,7 @@ jobs:
       - name: Install isolated DOM/React test dependencies
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Test WhatsApp and actual Signal React attachment lifecycle
-        run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs
+        run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs scripts/local-chat-view.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
       - name: Save the complete integrated editable source
@@ -38,10 +38,10 @@ jobs:
         run: |
           git config user.name 'Haituo Build'
           git config user.email 'haituo-build@users.noreply.github.com'
-          git add src/app/bundles/main.js src/app/bundles/preload/main.js src/app/js/caisheng-webview-preload.js project.json README.md START-HERE.md
+          git add src/app/bundles/main.js src/app/bundles/preload/main.js src/app/bundles/preload/wrapper.js src/app/js/caisheng-webview-preload.js
           if ! git diff --cached --quiet; then
-            git commit -m 'feat: persist bilingual attachments per account and original message (1.6.1)'
-            git push origin HEAD:build/1.6.1-attachments
+            git commit -m 'feat: native local bilingual message records and gated profile views (1.6.2)'
+            git push origin HEAD:build/1.6.2-local-records
           fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
@@ -72,6 +72,10 @@ jobs:
         run: node --test scripts/*.test.cjs
       - name: Build and verify clean production package
         run: python scripts/build.py --target ${{ matrix.target }}
+      - name: Verify real native encrypted local message database
+        run: node scripts/local-chat-native-check.cjs
+      - name: Verify gated child Signal initialization and profile routing
+        run: node scripts/inprocess-native-check.cjs
       - name: Normal native launch and durable offline restart check
         run: node scripts/native-attachments-check.cjs
       - name: Verify native dependencies and network transport
@@ -81,14 +85,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.1-verification-${{ matrix.target }}
+          name: Haituo-1.6.2-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
             macos/verification/**
       - uses: actions/upload-artifact@v4
         with:
-          name: Haituo-1.6.1-${{ matrix.target }}
+          name: Haituo-1.6.2-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg
