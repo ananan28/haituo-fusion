@@ -36,3 +36,7 @@ test('Signal actual long-message body includes saved bilingual text on its first
  assert.equal(ui.host.querySelector('.CaishengMessageTranslation__result')?.textContent,'完整长消息译文');
  await wait(20);assert.equal(calls,0);
 });
+
+test('Signal completed translation is saved after its chat component unmounts',async t=>{let finish;const ui=setup(t,()=>new Promise(resolve=>finish=resolve));ui.render({text:'Hello',messageId:'pending-persistent'});await wait(10);flushSync(()=>ui.root.render(null));finish({text:'滚走以后也保存'});await wait(25);const model=ui.context.window.MessageCache.getById('pending-persistent');assert.equal(model.get('haituoLocalTranslations').entries['zh-CN'].text,'滚走以后也保存');ui.context.window.SignalContext.caishengTranslate=()=>{throw Error('must not call translation again')};ui.render({text:'Hello',messageId:'pending-persistent'});assert.equal(ui.host.querySelector('.CaishengMessageTranslation__result')?.textContent,'滚走以后也保存')});
+
+test('Signal remount while translation is pending reuses the message job and stores it once',async t=>{let calls=0,finish;const ui=setup(t,()=>{calls++;return new Promise(resolve=>finish=resolve)});ui.render({text:'Hello',messageId:'pending-remount'});await wait(10);flushSync(()=>ui.root.render(null));ui.render({text:'Hello',messageId:'pending-remount'});await wait(10);assert.equal(calls,1);finish({text:'同一消息的译文'});await wait(25);assert.equal(ui.host.querySelector('.CaishengMessageTranslation__result')?.textContent,'同一消息的译文')});

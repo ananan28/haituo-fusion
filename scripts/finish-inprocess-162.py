@@ -95,3 +95,28 @@ if 'const haituoEmbeddedRefresh = ' not in s:
 '''+needle)
  p.write_text(s,encoding='utf-8')
  print('Routed embedded refresh and account-label actions')
+
+preload=root/'src/app/bundles/preload/main.js'
+payload=preload.read_text(encoding='utf-8')
+payload=payload.replace('                    if (current.current !== identity || generation.current !== token) return;\n                    await records.save','                    await records.save')
+if 'async haituoGetOrLoadById(id)' not in payload:
+ anchor='            register(e) {\n                if (!e || !e.id) throw Error(`MessageCache.register: Got falsey id or message`);'
+ assert payload.count(anchor)==1
+ payload=payload.replace(anchor,'            async haituoGetOrLoadById(id) {\n                const current=this.getById(id);if(current)return current;\n                const message=await Na.getMessageById(id);\n                return message?this.register(new Np(message)):undefined;\n            }\n'+anchor)
+preload.write_text(payload,encoding='utf-8')
+
+preload=root/'src/app/bundles/preload/main.js'
+payload=preload.read_text(encoding='utf-8')
+if 'const result=await records.translate(window.MessageCache' not in payload:
+ old='const result=await window.SignalContext.caishengTranslate({'
+ assert payload.count(old)==1
+ payload=payload.replace(old,'const result=await records.translate(window.MessageCache,messageId,e,target,force,()=>window.SignalContext.caishengTranslate({')
+ old='forceRefresh:force,attachmentOnly:!force && !enabled\n                });'
+ assert payload.count(old)==1
+ payload=payload.replace(old,'forceRefresh:force,attachmentOnly:!force && !enabled\n                }));')
+ payload=payload.replace('                    await records.save(window.MessageCache,messageId,e,target,result);\n','')
+ preload.write_text(payload,encoding='utf-8')
+
+preload=root/'src/app/bundles/preload/main.js'
+payload=preload.read_text(encoding='utf-8').replace('m.outgoingBubbleColor ?? `#2c6bed`','m.outgoingBubbleColor || `#2c6bed`').replace('m.chatTextColor ?? `#111827`','m.chatTextColor || `#111827`')
+preload.write_text(payload,encoding='utf-8')
