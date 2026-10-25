@@ -25529,10 +25529,13 @@ function haituoTranslationCacheKey(e) {
 
 let HaituoLocalChats;
 function haituoLocalChatStore() {
-    return HaituoLocalChats ||= require('../js/haituo-local-chat-records.js').createStore({
-        directory:(0,s.join)(p.app.getPath(`appData`),`Haituo`,`local-chat-records-v1`),
-        safeStorage:p.safeStorage
-    });
+    if(!HaituoLocalChats){
+        HaituoLocalChats=require('../js/haituo-local-chat-records.js').createStore({
+            directory:(0,s.join)(p.app.getPath(`appData`),`Haituo`,`local-chat-records-v1`),safeStorage:p.safeStorage
+        });
+        p.app.once(`will-quit`,()=>{try{HaituoLocalChats?.close();}catch(error){X.warn(`Local chat database close failed: ${error.message}`);}});
+    }
+    return HaituoLocalChats;
 }
 function haituoLocalChatAccount(event) {
     Jp(event.senderFrame?.url ?? ``);
@@ -28481,6 +28484,7 @@ function haituoMacOrderSelectedAccount() {
 function haituoMacFocusSelectedAccount() {
     if (haituoScreenshotController?.capturing) return;
     if (process.platform !== `darwin` || $u !== `signal-main` || caishengMenuOpen || !Z || Z.isDestroyed() || !Z.isVisible() || Z.isMinimized()) return;
+    if(process.env.HAITUO_INPROCESS===`1`){globalThis.caishengBridge?.focus?.(Zg?.id);return;}
     const child = Yg.get(Zg?.id);
     if (child && Xg.has(Zg?.id) && Zg?.width > 0 && Zg?.height > 0) {
         $g(Zg.id, child);
@@ -28489,6 +28493,7 @@ function haituoMacFocusSelectedAccount() {
 }
 
 function haituoMacActivateAccountWindow() {
+    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`)return;
     if (process.platform !== `darwin` || $u === `signal-main` || !Z || Z.isDestroyed() || !Qg?.visible || !Qg?.bounds) return;
     n_();
     Z.showInactive();
@@ -28712,6 +28717,7 @@ const __ = (0, ee.createParser)({
 Se(X, Dv, b_);
 
 function C_() {
+    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`)return;
     if (!Z || Z.isDestroyed()) return;
     if (process.platform === `darwin` && $u !== `signal-main`) {
         if (Qg?.visible) haituoMacActivateAccountWindow();
@@ -28975,6 +28981,7 @@ async function nv() {
     g.acceptFirstMouse = process.platform === `darwin`,
     Z = new p.BrowserWindow(g), (process.platform===`darwin`&&$u!==`signal-main`&&Z.setWindowButtonVisibility(false)), p.Menu.setApplicationMenu(null), Z.removeMenu(), Z.setAutoHideMenuBar(!0), (process.env.HAITUO_INPROCESS === `1` && $u !== `signal-main` && (() => {
         const caishengBridgeRelay = (channel, ...args) => { try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };
+        Z.show = ()=>{}; Z.showInactive = ()=>{};
         const caishengNativeSend = Z.webContents.send.bind(Z.webContents);
         Z.webContents.send = (channel, ...args) => { caishengBridgeRelay(channel, ...args); return caishengNativeSend(channel, ...args); };
     })()), 
@@ -29715,10 +29722,11 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         push(workspaceId, channel, args) { views.get(workspaceId)?.webContents?.send(`haituo-child-push:${channel}`, { args: args || [] }); },
         resolve(requestId, result) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.resolve(result)); },
         reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
+        focus(workspaceId){const view=views.get(workspaceId);if(view?.__haituoVisible)view.webContents.focus();},
         configFor(event){return configs.get(sender.get(event?.sender?.id));},
         syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
         ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
-        register(workspaceId, view) { views.set(workspaceId, view); sender.set(view.webContents.id, workspaceId); view.webContents.once(`destroyed`,()=>{views.delete(workspaceId);sender.delete(view.webContents.id);configs.delete(workspaceId);syncData.delete(workspaceId)}); },
+        register(workspaceId, view) { const contentsId=view.webContents.id;views.set(workspaceId, view); sender.set(contentsId, workspaceId); view.webContents.once(`destroyed`,()=>{sender.delete(contentsId);if(views.get(workspaceId)===view){views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId)}}); },
         dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
 
     };
