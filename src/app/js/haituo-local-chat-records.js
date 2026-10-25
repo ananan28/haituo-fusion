@@ -34,7 +34,13 @@ function createStore(options){
     const item=items[index],previous=one.get({...scope,id:item.id});let rank=previous?.messageIndex;
     if(rank===undefined){
      const preceding=items.slice(0,index).reverse().find(x=>ranks.has(x.id));const following=items.slice(index+1).find(x=>ranks.has(x.id));
-     if(preceding&&following){const lower=ranks.get(preceding.id),upper=ranks.get(following.id);rank=(lower+upper)/2;if(!(lower<rank&&rank<upper))throw Error('本机消息顺序需要整理，请重试');}
+     if(preceding&&following){const lower=ranks.get(preceding.id),upper=ranks.get(following.id);rank=(lower+upper)/2;if(!(lower<rank&&rank<upper)){
+      // A large missing history range can exhaust fractional rank precision.
+      // Reindex atomically, preserving JSON/translation data and cursor IDs.
+      const rows=allOrder.all(scope),update=db.prepare('UPDATE haituo_local_messages SET messageIndex=$rank WHERE account=$account AND chatId=$chat AND messageKey=$id');
+      ranks.clear();rows.forEach((row,index)=>{const value=(index+1)*1024;update.run({...scope,id:row.messageKey,rank:value});ranks.set(row.messageKey,value)});
+      largest=rows.length*1024;rank=(ranks.get(preceding.id)+ranks.get(following.id))/2;
+     }}
      else if(following)rank=ranks.get(following.id)-1024;
      else if(preceding)rank=ranks.get(preceding.id)+1024;
      else rank=largest===null?1024:largest+1024;
