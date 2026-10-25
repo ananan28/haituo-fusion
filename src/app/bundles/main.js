@@ -28649,7 +28649,7 @@ $u !== `signal-main` && (process.on(`message`, e => {
     if (process.env.HAITUO_INPROCESS === `1` && e.type === `haituo-bridge-invoke`) {
         const send = payload => { try { process.send?.(payload); } catch {} };
         const event = {sender:Z?.webContents,senderFrame:{url:G_([ $, `background.html` ])},reply(channel,...args){Z?.webContents.send(channel,...args)}};
-        Promise.resolve().then(()=>haituoInprocessBackend.dispatch(e.channel,e.args||[],event)).then(result=>send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!0,result})).catch(error=>{X.error(`inprocess IPC failed (${e.channel}): ${error?.message || error}`);send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!1,error:String(error?.message||error)})});
+        Promise.resolve().then(()=>haituoInprocessBackend.dispatch(e.channel,e.args||[],event)).then(result=>{if(e.channel===`signal-app-loaded`)process.send?.({type:`haituo-bridge-renderer-ready`});send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!0,result})}).catch(error=>{X.error(`inprocess IPC failed (${e.channel}): ${error?.message || error}`);send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!1,error:String(error?.message||error)})});
         return;
     }
     if(e.type==='haituo-close-settings-view'){Z?.webContents?.send('haituo:close-settings');return}
@@ -29006,7 +29006,7 @@ async function nv() {
     process.platform === `darwin` && p.app.setActivationPolicy($u === `signal-main` ? `regular` : `accessory`),
     g.acceptFirstMouse = process.platform === `darwin`,
     Z = new p.BrowserWindow(g), (process.platform===`darwin`&&$u!==`signal-main`&&Z.setWindowButtonVisibility(false)), p.Menu.setApplicationMenu(null), Z.removeMenu(), Z.setAutoHideMenuBar(!0), (process.env.HAITUO_INPROCESS === `1` && $u !== `signal-main` && (() => {
-        const caishengBridgeRelay = (channel, ...args) => { try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };
+        const caishengBridgeRelay = (channel, ...args) => { if(channel===`set-window-focus`)return;try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };
         Z.show = ()=>{}; Z.showInactive = ()=>{};
         const caishengNativeSend = Z.webContents.send.bind(Z.webContents);
         Z.webContents.send = (channel, ...args) => { caishengBridgeRelay(channel, ...args); return caishengNativeSend(channel, ...args); };
@@ -29743,6 +29743,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     { value: `delete`, label: `删除账号` }
 ])), process.env.HAITUO_INPROCESS === `1` && $u === `signal-main` && (() => {
     haituoInstallEmbeddedQuitGate();
+    const viewSecurity = require('../js/haituo-inprocess-view-security.js');
     const views = new Map, sender = new Map, pending = new Map, configs=new Map, syncData=new Map;
     let seq = 0;
     globalThis.caishengBridge = {
@@ -29752,6 +29753,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
         focus(workspaceId){const view=views.get(workspaceId);if(view?.__haituoVisible)view.webContents.focus();},
         viewFor(workspaceId){const view=views.get(workspaceId);return view?{webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()}:null;},
+        rendererReady(workspaceId){const view=views.get(workspaceId);if(view){viewSecurity.resetFocus(view.webContents);globalThis.caishengBridge.syncVisibility(Zg?.id);}},
         configFor(event){return configs.get(sender.get(event?.sender?.id));},
         syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
         ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
@@ -29780,6 +29782,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
             const appearance=$p(),signature=JSON.stringify([appearance.nativeTheme,appearance.chatFontSize,appearance.chatTextColor,appearance.incomingBubbleColor,appearance.outgoingBubbleColor]);
             if(view.__haituoAppearance!==signature && view.webContents.getURL().includes(`background.html`)){view.__haituoAppearance=signature;haituoApplyNativeSignalAppearance({webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()},appearance);}
             const wasVisible=view.__haituoVisible;view.__haituoVisible=visible;view.setVisible(visible);
+            viewSecurity.publishFocus(view.webContents,visible&&Z.isFocused());
             if(visible&&!wasVisible){view.webContents.send(`haituo-child-push:activate`,{args:[]});view.webContents.focus();}
         }
     };
@@ -29800,18 +29803,20 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
     });
     process.env.HAITUO_INPROCESS === `1` && (() => {
         try {
-            const view = new p.WebContentsView({ webPreferences: { ...v_, nodeIntegration: !1, nodeIntegrationInWorker: !1, sandbox: !1, contextIsolation: !0, webviewTag: !0, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`, additionalArguments: [ `--caisheng-inprocess`, `--caisheng-renderer-profile=${t}` ], spellcheck: !1 } });
+            const view = new p.WebContentsView({ webPreferences: { ...v_, nodeIntegration: !1, nodeIntegrationInWorker: !1, sandbox: !1, contextIsolation: !0, backgroundThrottling:!1, webviewTag: !1, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`, additionalArguments: [ `--caisheng-inprocess`, `--caisheng-renderer-profile=${t}` ], spellcheck: !1 } });
+            require('../js/haituo-inprocess-view-security.js').install(view.webContents,G_([ $, `background.html` ]),q_);
             globalThis.caishengBridge?.register?.(t, view);
             Z?.contentView?.addChildView(view);
             const b = Z?.getContentBounds(); b && view.setBounds({ x: 0, y: 0, width: b.width, height: b.height });
             view.setVisible(!1);
-            view.webContents.on(`did-finish-load`,()=>{view.__haituoVisible=!1;view.__haituoAppearance=null;globalThis.caishengBridge?.syncVisibility?.(Zg?.id)});
+            view.webContents.on(`did-finish-load`,()=>{view.__haituoVisible=!1;view.__haituoAppearance=null;require('../js/haituo-inprocess-view-security.js').resetFocus(view.webContents);globalThis.caishengBridge?.syncVisibility?.(Zg?.id)});
             view.webContents.on(`preload-error`,(_event,_path,error)=>X.error(`inprocess preload failed (${t}): ${error.message}`));
         } catch (error) { X.warn(`inprocess child view failed: ${error?.message ?? error}`); }
     })();
     return Yg.set(t, r), (process.env.HAITUO_INPROCESS===`1`&&Xg.add(t)), r.on(`error`, error => {
         X.error(`Haituo Signal profile failed to start (${t}): ${error?.message ?? error}`), Yg.get(t) === r && (Yg.delete(t), Xg.delete(t), caishengLastWindowPayload.delete(t));
     }), r.on(`message`, e => {
+        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-renderer-ready`){globalThis.caishengBridge?.rendererReady?.(t);return;}
         if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){X.info(`inprocess backend ready (${t}); SQL initialized`);globalThis.caishengBridge?.ready?.(t,e.config,e.sync);return;}
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-result`) { (e.ok ? globalThis.caishengBridge?.resolve : globalThis.caishengBridge?.reject)?.(e.requestId, e.ok ? e.result : e.error); return; }
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-push`) { globalThis.caishengBridge?.push?.(t, e.channel, e.args || []); return; }
