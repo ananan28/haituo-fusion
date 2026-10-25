@@ -22096,12 +22096,15 @@ function haituoCachedSignalTranslation(text) {
 }
 
     function Ive({text: e, messageId, quoted: quote = !1}) {
+        const records = require('../../js/haituo-signal-message-record.js');
+        const targetLanguage = HaituoIncomingTarget(e);
+        const saved = quote ? null : records.read(window.MessageCache,messageId,e,targetLanguage);
         const reference = (0,w_.useRef)(null);
-        const identity = `${messageId || ``}\0${e}`;
+        const identity = `${messageId || ``}\0${targetLanguage}\0${e}`;
         const current = (0,w_.useRef)(identity); current.current = identity;
         const generation = (0,w_.useRef)(0);
-        const [state,setState] = (0,w_.useState)({identity,translation:``,busy:!1,error:``});
-        const visible = state.identity === identity ? state : {translation:``,busy:!1,error:``};
+        const [state,setState] = (0,w_.useState)({identity,translation:saved ? HaituoFormatMessageParagraphs(e,saved.text) : ``,busy:!1,error:``});
+        const visible = state.identity === identity ? state : {translation:saved ? HaituoFormatMessageParagraphs(e,saved.text) : ``,busy:!1,error:``};
         const update = (patch, token) => {
             if (current.current !== identity || generation.current !== token) return;
             haituoQueueSignalTranslation(reference, () => {
@@ -22109,6 +22112,7 @@ function haituoCachedSignalTranslation(text) {
             });
         };
         const run = (0,w_.useCallback)(async (force = !1) => {
+            if (!force && saved) return;
             const token = ++generation.current;
             update({busy:!0,error:``},token);
             try {
@@ -22117,21 +22121,27 @@ function haituoCachedSignalTranslation(text) {
                 const group=!!host?.querySelector('.module-message__author');
                 const enabled=group ? config.groupBackTranslationEnabled !== !1 : config.autoTranslateIncoming !== !1;
                 const result=await window.SignalContext.caishengTranslate({
-                    text:e,messageId,targetLanguage:target,purpose:`chat`,
+                    text:e,messageId,targetLanguage:target,purpose:`chat`,localMessageRecord:!0,
                     provider:force ? `smart-retranslate` : config.chatTranslationProvider || `google-free`,
                     context:[...document.querySelectorAll('.module-message__text,.MessageText,[data-testid="message-text"]')].slice(-10).map(node=>node.textContent||``).join(`\n`).slice(-6000),
                     forceRefresh:force,attachmentOnly:!force && !enabled
                 });
-                if (result?.text?.trim()) update({translation:HaituoFormatMessageParagraphs(e,result.text),busy:!1,error:``},token);
+                if (result?.text?.trim()) {
+                    // Persist before declaring success. Remount reads this message
+                    // attribute synchronously during React's original render.
+                    if (current.current !== identity || generation.current !== token) return;
+                    await records.save(window.MessageCache,messageId,e,target,result);
+                    update({translation:HaituoFormatMessageParagraphs(e,result.text),busy:!1,error:``},token);
+                }
                 else update({busy:!1},token);
             } catch (error) {
                 update({busy:!1,error:error instanceof Error ? error.message : `翻译失败，点击重试`},token);
             }
-        },[e,messageId]);
+        },[e,messageId,targetLanguage]);
         (0,w_.useEffect)(()=>{
             if (!quote && e.trim()) run();
             return ()=>{generation.current++;};
-        },[e,messageId,quote,run]);
+        },[e,messageId,targetLanguage,quote,run]);
         if (quote) return null;
         return (0,T_.jsxs)(`span`,{
             ref:reference,className:`CaishengMessageTranslation`,
@@ -22229,7 +22239,7 @@ function haituoCachedSignalTranslation(text) {
                 renderLocation: p,
                 textLength: h.length
             }), x, (p === __.Timeline || p === __.Quote) && h.trim() && (p !== __.Timeline || !d) ? (0, D_.jsx)(Ive, {
-                text: h,
+                text: _ || h,
                 messageId: haituoMessageId,
                 quoted: p === __.Quote
             }) : null ]
@@ -55914,6 +55924,7 @@ function haituoCachedSignalTranslation(text) {
             unidentifiedDeliveries: `preserve`,
             attachments: `erase`,
             body: `erase`,
+            haituoLocalTranslations: `erase`,
             bodyAttachment: `erase`,
             bodyRanges: `erase`,
             callId: `erase`,

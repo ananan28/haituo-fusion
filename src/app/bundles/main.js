@@ -13,6 +13,8 @@ let f = require(`node:crypto`);
 f = e.o(f, 1);
 
 let p = require(`electron`), m = require(`node:fs`), h = require(`node:events`), g = e.o(h, 1);
+const haituoInprocessBackend = process.env.HAITUO_INPROCESS === `1` && process.argv.some(arg=>arg.startsWith(`--caisheng-profile=`) && arg!==`--caisheng-profile=signal-main`) ? require('../js/haituo-inprocess-ipc.js').capture(p.ipcMain) : null;
+
 
 h = e.o(h);
 
@@ -25525,6 +25527,20 @@ function haituoTranslationCacheKey(e) {
     return JSON.stringify([ `free-ai-chat-v6`, e.provider || `google-free`, e.targetLanguage || `zh-CN`, e.model || ``, contextHash, String(e.text || ``).trim(), ...(e.__haituoPool ? [e.endpoint||'',e.model||''] : []), ...(e.messageScope ? [e.messageScope] : []) ]);
 }
 
+let HaituoLocalChats;
+function haituoLocalChatStore() {
+    return HaituoLocalChats ||= require('../js/haituo-local-chat-records.js').createStore({
+        directory:(0,s.join)(p.app.getPath(`appData`),`Haituo`,`local-chat-records-v1`),
+        safeStorage:p.safeStorage
+    });
+}
+function haituoLocalChatAccount(event) {
+    Jp(event.senderFrame?.url ?? ``);
+    const url=new URL(event.senderFrame?.url || `file:///`);
+    const account=HaituoWorkspaceBySession.get(event.sender.session);
+    if(url.protocol!==`https:` || url.hostname!==`web.whatsapp.com` || !account) throw Error(`无法确认本机聊天记录所属账号`);
+    return account;
+}
 let HaituoMessageAttachments;
 function haituoTranslateAttached(event, request, work) {
     if (request.purpose !== `chat` || typeof request.messageId !== `string` || !request.messageId.trim()) return work();
@@ -25541,6 +25557,19 @@ function haituoTranslateAttached(event, request, work) {
     });
     // Do not allow an old text-only shared cache to choose a different message's attachment.
     request.messageScope = `${platform}:${account}:${request.messageId}`;
+    if (platform === `whatsapp` && request.localMessageRecord === !0) {
+        const records=haituoLocalChatStore();
+        const existing=request.forceRefresh ? null : records.get(account,request.messageId,request.text,request.targetLanguage);
+        if(existing) return existing;
+        if(request.attachmentOnly) return {text:``,notFound:!0};
+        return Promise.resolve().then(work).then(result=>records.put(account,request.messageId,request.text,request.targetLanguage,result));
+    }
+    if (platform === `signal` && request.localMessageRecord === !0) {
+        // 1.6.1 records are read only for one-way migration into the original
+        // Signal message. New results are committed by the native model writer.
+        const existing = request.forceRefresh ? null : HaituoMessageAttachments.get({platform,account,messageId:request.messageId},request);
+        return existing || (request.attachmentOnly ? {text:``,notFound:!0} : work());
+    }
     return HaituoMessageAttachments.translate({platform,account,messageId:request.messageId},request,work);
 }
 
@@ -25908,7 +25937,9 @@ function tm() {
         Jp(e.senderFrame?.url ?? ``);
         let t = $p().refreshShortcut ?? $p().shortcut;
         return typeof t == `string` ? t : `ctrl-r`;
-    }), p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
+    }), p.ipcMain.removeHandler(`haituo:local-chat-observe`), p.ipcMain.handle(`haituo:local-chat-observe`,(event,items)=>haituoLocalChatStore().observe(haituoLocalChatAccount(event),items)),
+    p.ipcMain.removeHandler(`haituo:local-chat-page`), p.ipcMain.handle(`haituo:local-chat-page`,(event,chat,options)=>haituoLocalChatStore().page(haituoLocalChatAccount(event),chat,options)),
+    p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
         Jp(e.senderFrame?.url ?? ``);
         let n = $p(), r = haituoUnredactConfigPatch(t ?? {}), selectedProvider = r.provider;
         // The configured pool is the single ordered route for chat, input and
@@ -28464,6 +28495,7 @@ function haituoMacActivateAccountWindow() {
 }
 
 function e_() {
+    globalThis.caishengBridge?.syncVisibility?.(Zg?.id);
     let e = !Z || Z.isDestroyed() || Z.isMinimized() || !Z.isVisible();
     for (let [t, n] of Yg) e && n.connected ? (caishengLastWindowPayload.delete(t), caishengSendChild(n, {
         type: `caisheng-window`,
@@ -28528,6 +28560,7 @@ function caishengAttachNativeOwner(e) {
 }
 
 function n_() {
+    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`){if(Z?.isVisible())Z.hide();return;}
     if (!(!Z || Z.isDestroyed() || !Qg)) {
         const nativeMode = Qg.nativeTheme === `light` ? `light` : `dark`;
         const appearance = `${nativeMode}|${Qg.chatTextColor}|${Qg.outgoingBubbleColor}|${Qg.incomingBubbleColor}|${Qg.chatFontSize}`;
@@ -28581,6 +28614,12 @@ function caishengSoftRefreshWindow() {
 let caishengParentHeartbeat = Date.now(), caishengOrphanExitStarted = !1;
 $u !== `signal-main` && (process.on(`message`, e => {
     if (!e || typeof e != `object`) return;
+    if (process.env.HAITUO_INPROCESS === `1` && e.type === `haituo-bridge-invoke`) {
+        const send = payload => { try { process.send?.(payload); } catch {} };
+        const event = {sender:Z?.webContents,senderFrame:{url:G_([ $, `background.html` ])},reply(channel,...args){Z?.webContents.send(channel,...args)}};
+        Promise.resolve().then(()=>haituoInprocessBackend.dispatch(e.channel,e.args||[],event)).then(result=>send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!0,result})).catch(error=>{X.error(`inprocess IPC failed (${e.channel}): ${error?.message || error}`);send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!1,error:String(error?.message||error)})});
+        return;
+    }
     if(e.type==='haituo-close-settings-view'){Z?.webContents?.send('haituo:close-settings');return}
     if (e.type === `haituo-captcha-response` && typeof e.token === `string` && e.token.length > 0 && e.token.length < 32768) { p_.handleCaptcha(e.token); return; }
     if (e.type === `caisheng-edit-account-label-in-page`) {
@@ -28933,7 +28972,11 @@ async function nv() {
     X.info(`Initializing BrowserWindow config:`, g), $u === `signal-main` && (g.resizable = !0, g.maximizable = !0), 
     process.platform === `darwin` && p.app.setActivationPolicy($u === `signal-main` ? `regular` : `accessory`),
     g.acceptFirstMouse = process.platform === `darwin`,
-    Z = new p.BrowserWindow(g), (process.platform===`darwin`&&$u!==`signal-main`&&Z.setWindowButtonVisibility(false)), p.Menu.setApplicationMenu(null), Z.removeMenu(), Z.setAutoHideMenuBar(!0), 
+    Z = new p.BrowserWindow(g), (process.platform===`darwin`&&$u!==`signal-main`&&Z.setWindowButtonVisibility(false)), p.Menu.setApplicationMenu(null), Z.removeMenu(), Z.setAutoHideMenuBar(!0), (process.env.HAITUO_INPROCESS === `1` && $u !== `signal-main` && (() => {
+        const caishengBridgeRelay = (channel, ...args) => { try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };
+        const caishengNativeSend = Z.webContents.send.bind(Z.webContents);
+        Z.webContents.send = (channel, ...args) => { caishengBridgeRelay(channel, ...args); return caishengNativeSend(channel, ...args); };
+    })()), 
     (()=>{if(process.platform===`darwin`&&$u!==`signal-main`){
         Z.on(`focus`,()=>process.send?.({type:`haituo-account-focus`,focused:true}));
         Z.on(`blur`,()=>process.send?.({type:`haituo-account-focus`,focused:false}));
@@ -29172,7 +29215,7 @@ async function nv() {
         X.info(`main window webContents did-finish-load`), x();
     }) : Z.once(`ready-to-show`, async () => {
         X.info(`main window is ready-to-show`), x();
-    }), await tv(Z, a.y() === a.v.Test ? G_([ $, `test`, `index.html` ]) : G_([ $, `background.html` ]));
+    }), (process.env.HAITUO_INPROCESS !== `1` || $u === `signal-main`) && await tv(Z, a.y() === a.v.Test ? G_([ $, `test`, `index.html` ]) : G_([ $, `background.html` ]));
 }
 
 const rv = `sb_publishable_hVl7mHSjPJYEuaMCrOjYbw_KG0Y4QjO`, iv = t.Qa({
@@ -29663,7 +29706,44 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     { value: `upload`, label: `上传图标` },
     { value: `open`, label: `打开账号` },
     { value: `delete`, label: `删除账号` }
-])), p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = async (e, t) => {
+])), process.env.HAITUO_INPROCESS === `1` && $u === `signal-main` && (() => {
+    const views = new Map, sender = new Map, pending = new Map, configs=new Map;
+    let seq = 0;
+    globalThis.caishengBridge = {
+        childFor(event) { const id = sender.get(event?.sender?.id); return id && Yg.has(id) ? { id, child: Yg.get(id) } : null; },
+        push(workspaceId, channel, args) { views.get(workspaceId)?.webContents?.send(`haituo-child-push:${channel}`, { args: args || [] }); },
+        resolve(requestId, result) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.resolve(result)); },
+        reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
+        configFor(event){return configs.get(sender.get(event?.sender?.id));},
+        ready(workspaceId,config){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
+        register(workspaceId, view) { views.set(workspaceId, view); sender.set(view.webContents.id, workspaceId); view.webContents.once(`destroyed`,()=>{views.delete(workspaceId);sender.delete(view.webContents.id);configs.delete(workspaceId)}); },
+        dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
+
+    };
+    p.ipcMain.handle(`haituo-child-invoke`, (event, payload) => {
+        const link = globalThis.caishengBridge.childFor(event);
+        if (!link || !link.child?.connected) throw new Error(`inprocess bridge: no child`);
+        const requestId = `ipc-${++seq}`;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => { pending.delete(requestId); reject(new Error(`inprocess bridge timeout: ${payload?.channel}`)); }, 60000);
+            pending.set(requestId, { resolve, reject, timer,workspaceId:link.id });
+            caishengSendChild(link.child, { type: `haituo-bridge-invoke`, channel: payload?.channel, args: payload?.args || [], requestId });
+        });
+    });
+    p.ipcMain.on(`haituo-child-send`, (event, payload) => {
+        const link = globalThis.caishengBridge.childFor(event);
+        link && link.child?.connected && caishengSendChild(link.child, { type: `haituo-bridge-invoke`, channel: payload?.channel, args: payload?.args || [], requestId: `send-${++seq}` });
+    });
+    globalThis.caishengBridge.syncVisibility = selected => {
+        for (const [id,view] of views){
+            const visible=!!(id===selected && Z && !Z.isDestroyed() && Z.isVisible() && !Z.isMinimized() && Zg?.width>0 && Zg?.height>0);
+            if(visible){const content=Z.getContentBounds();const x=Math.max(0,Math.round(Zg.x||0)),y=Math.max(0,Math.round(Zg.y||0));const width=Math.max(1,Math.round(content.width-x-(Zg.rightGap||0))),height=Math.max(1,Math.round(content.height-y-(Zg.bottomGap||0)));view.setBounds({x,y,width,height});}
+            const wasVisible=view.__haituoVisible;view.__haituoVisible=visible;view.setVisible(visible);
+            if(visible&&!wasVisible){view.webContents.send(`haituo-child-push:activate`,{args:[]});view.webContents.focus();}
+        }
+    };
+})();
+p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = async (e, t) => {
     if (typeof t != `string` || !/^signal-[a-zA-Z0-9_-]{1,64}$/u.test(t)) throw Error(`Signal 账号标识无效`);
     let n = Yg.get(t);
     if (n && n.exitCode === null && !n.killed && n.connected) return caishengKeepMainShellVisible(), {
@@ -29672,12 +29752,28 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     n && (Yg.delete(t), Xg.delete(t), caishengTerminateSignalChild(n));
     let r = (0, c.spawn)(process.execPath, [ `--caisheng-profile=${t}` ], {
         detached: !1,
-        stdio: (process.env.HAITUO_WINDOW_TEST === `1` || process.env.HAITUO_VERIFY_RUNTIME === `1` || process.env.HAITUO_SETTINGS_TEST === `1`) ? [ `ignore`, `inherit`, `inherit`, `ipc` ] : [ `ignore`, `ignore`, `ignore`, `ipc` ],
-        windowsHide: !1
+        serialization: process.env.HAITUO_INPROCESS===`1` ? `advanced` : `json`,
+        stdio: (process.env.HAITUO_INPROCESS === `1` || process.env.HAITUO_WINDOW_TEST === `1` || process.env.HAITUO_VERIFY_RUNTIME === `1` || process.env.HAITUO_SETTINGS_TEST === `1`) ? [ `ignore`, `inherit`, `inherit`, `ipc` ] : [ `ignore`, `ignore`, `ignore`, `ipc` ],
+        windowsHide: !1,
+        env: process.env.HAITUO_INPROCESS === `1` ? { ...process.env, HAITUO_INPROCESS: `1` } : process.env
     });
-    return Yg.set(t, r), r.on(`error`, error => {
+    process.env.HAITUO_INPROCESS === `1` && (() => {
+        try {
+            const view = new p.WebContentsView({ webPreferences: { ...v_, nodeIntegration: !1, nodeIntegrationInWorker: !1, sandbox: !1, contextIsolation: !0, webviewTag: !0, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`, additionalArguments: [ `--caisheng-inprocess`, `--caisheng-renderer-profile=${t}` ], spellcheck: !1 } });
+            globalThis.caishengBridge?.register?.(t, view);
+            Z?.contentView?.addChildView(view);
+            const b = Z?.getContentBounds(); b && view.setBounds({ x: 0, y: 0, width: b.width, height: b.height });
+            view.setVisible(!1);
+            view.webContents.on(`did-finish-load`,()=>{view.__haituoVisible=!1;globalThis.caishengBridge?.syncVisibility?.(Zg?.id)});
+            view.webContents.on(`preload-error`,(_event,_path,error)=>X.error(`inprocess preload failed (${t}): ${error.message}`));
+        } catch (error) { X.warn(`inprocess child view failed: ${error?.message ?? error}`); }
+    })();
+    return Yg.set(t, r), (process.env.HAITUO_INPROCESS===`1`&&Xg.set(t,{})), r.on(`error`, error => {
         X.error(`Haituo Signal profile failed to start (${t}): ${error?.message ?? error}`), Yg.get(t) === r && (Yg.delete(t), Xg.delete(t), caishengLastWindowPayload.delete(t));
     }), r.on(`message`, e => {
+        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){X.info(`inprocess backend ready (${t}); SQL initialized`);globalThis.caishengBridge?.ready?.(t,e.config);return;}
+        if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-result`) { (e.ok ? globalThis.caishengBridge?.resolve : globalThis.caishengBridge?.reject)?.(e.requestId, e.ok ? e.result : e.error); return; }
+        if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-push`) { globalThis.caishengBridge?.push?.(t, e.channel, e.args || []); return; }
         if (Yg.get(t) === r && e?.type === `haituo-captcha-pending`) { haituoPendingCaptchaAccounts.set(t,e.seq); return; }
         if(Yg.get(t)===r&&e?.type===`haituo-account-focus`){
             const newlyFocused = e.focused && !caishengFocusedSignals.has(t);
@@ -29729,6 +29825,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
             });
         }
     }), r.once(`exit`, (code,signal) => {if(process.env.HAITUO_VERIFY_RUNTIME === `1`) console.error(`Account helper exit`,t,code,signal);
+        if(Yg.get(t)===r)globalThis.caishengBridge?.dispose?.(t);
         haituoPendingCaptchaAccounts.delete(t);
         caishengCancelChildLabelRequests(r), Yg.get(t) === r && (Yg.delete(t), Xg.delete(t), caishengFocusedSignals.delete(t), caishengLastWindowPayload.delete(t));
     }), {
@@ -29787,6 +29884,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
 }), p.ipcMain.handle(`caisheng:stop-signal-profile`, (e, t) => {
     if (typeof t != `string`) throw Error(`Signal 账号标识无效`);
     let n = Yg.get(t);
+    globalThis.caishengBridge?.dispose?.(t);
     return Yg.delete(t), Xg.delete(t), caishengTerminateSignalChild(n);
 }), p.ipcMain.handle(`caisheng:clear-workspace-data`, async (e, t) => {
     if (!haituoIsAppFrame(e.senderFrame?.url ?? e.sender?.getURL?.() ?? ``)) throw Error(`不允许的清理请求来源`);
@@ -30540,6 +30638,11 @@ p.app.on(`ready`, async () => {
     } catch (e) {
         X.error(`(ready event handler) error deleting IndexedDB:`, t.Aa(e));
     }
+    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`){
+        const config=await haituoBuildRendererConfig();
+        process.send?.({type:`haituo-bridge-ready`,config});
+        X.info(`inprocess backend SQL ready; renderer config prepared for ${$u}`);
+    }
     Kv = !0, qv(), $u === `signal-main` && (P_ = new rm({
         i18n: Q().i18n
     }), P_.setMainWindow(Z), P_.setEnabled(n.lt(await F_.get()))), await ry([ `config.json`, `sql/db.sqlite`, `sql/db.sqlite-wal`, `sql/db.sqlite-shm` ]);
@@ -30765,7 +30868,7 @@ function Qv() {
     Z && Z.webContents && Z.webContents.send(`remove-dark-overlay`);
 }
 
-p.ipcMain.on(`get-config`, async e => {
+async function haituoBuildRendererConfig(){
     let n = await A_(), o = t.fa(Zu, {
         name: re.productName,
         availableLocales: Q().availableLocales,
@@ -30820,7 +30923,12 @@ p.ipcMain.on(`get-config`, async e => {
         argv: JSON.stringify(process.argv)
     });
     if (!o.success) throw Error(`prepareUrl: Failed to parse renderer config ${JSON.stringify(o.error.flatten())}`);
-    e.returnValue = o.data;
+    return o.data;
+
+}
+p.ipcMain.on(`get-config`, async e => {
+    const profile=globalThis.caishengBridge?.configFor?.(e);
+    e.returnValue=profile || await haituoBuildRendererConfig();
 }), p.ipcMain.on(`locale-data`, e => {
     e.returnValue = Q().messages;
 }), p.ipcMain.on(`locale-display-names`, e => {
@@ -30835,7 +30943,7 @@ p.ipcMain.handle(`DebugLogs.upload`, async (e, t) => Ku({
     appVersion: p.app.getVersion(),
     logger: X
 })), p.ipcMain.on(`get-user-data-path`, e => {
-    e.returnValue = p.app.getPath(`userData`);
+    e.returnValue = globalThis.caishengBridge?.configFor?.(e)?.userDataPath || p.app.getPath(`userData`);
 });
 
 const $v = () => {
