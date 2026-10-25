@@ -25,3 +25,14 @@ test('Signal translated message remount includes translation in first React comm
  assert.equal(ui.host.querySelector('.CaishengMessageTranslation__result')?.textContent,'消息内译文');
  await wait(30);assert.equal(calls,before);assert.equal(ui.host.querySelector('.CaishengMessageTranslation__error'),null);
 });
+
+test('Signal actual long-message body includes saved bilingual text on its first collapsed render',async t=>{
+ let calls=0;const ui=setup(t,async()=>{calls++;throw Error('stored message must not use IPC')});
+ const full='Hello '.repeat(200);ui.context.window.MessageCache.getById('long').set({haituoLocalTranslations:{version:1,entries:{'zh-CN':{source:full,text:'完整长消息译文'}}}});
+ Object.assign(ui.context,{D_:jsx,__:{Timeline:'Timeline',Quote:'Quote'},Rve:()=>null,Ys:()=>true,gve:props=>React.createElement('span',{className:'original'},props.messageText)});
+ const ea=bundle.indexOf('    function E_('),eb=bundle.indexOf('    var D_, zve',ea);assert.ok(ea>=0&&eb>ea);vm.runInContext(bundle.slice(ea,eb),ui.context);
+ flushSync(()=>ui.root.render(React.createElement(ui.context.E_,{haituoMessageId:'long',text:full.slice(0,800),originalText:full,renderLocation:'Timeline',i18n:k=>k,onIncreaseTextLength:()=>{}})));
+ assert.ok(ui.host.querySelector('.original').textContent.startsWith('Hello'));
+ assert.equal(ui.host.querySelector('.CaishengMessageTranslation__result')?.textContent,'完整长消息译文');
+ await wait(20);assert.equal(calls,0);
+});

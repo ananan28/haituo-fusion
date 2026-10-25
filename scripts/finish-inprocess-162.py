@@ -57,3 +57,19 @@ let HaituoLocalChats;'''
  p.write_text(s,encoding='utf-8')
  print('Integrated graceful profile shutdown and per-view appearance')
 else:print('Final inprocess safety integration already present')
+
+preload=root/'src/app/bundles/preload/main.js'
+payload=preload.read_text(encoding='utf-8')
+old='(p === __.Timeline || p === __.Quote) && h.trim() && (p !== __.Timeline || !d) ?'
+if old in payload:
+ assert payload.count(old)==1
+ preload.write_text(payload.replace(old,'(p === __.Timeline || p === __.Quote) && h.trim() ?'),encoding='utf-8')
+for name in ['README.md','START-HERE.md']:
+ document=root/name
+ body=document.read_text(encoding='utf-8')
+ if name=='README.md':
+  body=body.replace('1.6.1','1.6.2')
+  body=body.replace('本轮弱网、行情、语言及徽标修改见 CHANGELOG-1.6.2.md。','本轮消息记录持久化及子 Signal 融合候选功能见 CHANGELOG-1.6.2.md、INPROCESS-1.6.2.md。')
+ else:
+  body=body.replace('# 海拓 1.4.3 开发工程','# 海拓 1.6.2 开发工程')
+ document.write_text(body,encoding='utf-8')

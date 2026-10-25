@@ -20,7 +20,7 @@ async function save(cache, id, source, target, result) {
     const operation = (queues.get(model) || Promise.resolve()).catch(()=>{}).then(async()=>{
         if (cache.getById(id) !== model || model.get('deletedForEveryone') || model.get('isErased')) throw Error('原消息已移除，停止保存译文');
         const body = model.get('body');
-        if (typeof body === 'string' && body !== source) throw Error('原消息已编辑，停止保存旧译文');
+        if (typeof body === 'string' && body !== source && !(body.length && model.get('bodyAttachment') && source.startsWith(body))) throw Error('原消息已编辑，停止保存旧译文');
         const previous = model.get(field);
         const entries = previous?.version === 1 ? previous.entries : {};
         const next = {version:1,entries:{...entries,[target]:{source,text:result.text,provider:String(result.provider||'unknown').slice(0,64),updatedAt:Date.now()}}};

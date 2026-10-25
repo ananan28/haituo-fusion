@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name 'Haituo Build'
           git config user.email 'haituo-build@users.noreply.github.com'
-          git add src/app/bundles/main.js src/app/bundles/preload/main.js src/app/bundles/preload/wrapper.js src/app/js/caisheng-webview-preload.js
+          git add src/app/bundles/main.js src/app/bundles/preload/main.js src/app/bundles/preload/wrapper.js src/app/js/caisheng-webview-preload.js README.md START-HERE.md
           if ! git diff --cached --quiet; then
             git commit -m 'feat: native local bilingual message records and gated profile views (1.6.2)'
             git push origin HEAD:build/1.6.2-local-records
