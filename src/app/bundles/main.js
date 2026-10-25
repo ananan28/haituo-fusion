@@ -29145,7 +29145,7 @@ async function nv() {
     let b = () => {
         Z && (Z.webContents.send(`activate`), Z.webContents.send(`set-media-playback-disabled`, !1));
     };
-    Z.on(`show`, b), Z.webContents.on(`devtools-reload-page`, () => {
+    Z.on(`show`, b), require("../js/haituo-window-activation.js").replayOnRendererReady(Z,b), Z.webContents.on(`devtools-reload-page`, () => {
         Z?.webContents.on(`dom-ready`, () => {
             Z?.webContents.send(`activate`);
         });
