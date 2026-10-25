@@ -1,6 +1,13 @@
 """Keep concurrent WhatsApp DOM reuse independent of unfinished old jobs."""
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
+# Replay the real window visibility event after the preload is installed.
+main=ROOT/'src/app/bundles/main.js';code=main.read_text()
+if "haituo-window-activation.js" not in code:
+ before='    Z.on(`show`, b), Z.webContents.on(`devtools-reload-page`, () => {'
+ after='    Z.on(`show`, b), require("../js/haituo-window-activation.js").replayOnRendererReady(Z,b), Z.webContents.on(`devtools-reload-page`, () => {'
+ if code.count(before)!=1:raise RuntimeError('Activation handshake anchor mismatch')
+ main.write_text(code.replace(before,after,1))
 # Optional OS keyboard labels must not indefinitely block the entire Signal bootstrap.
 pre=ROOT/'src/app/bundles/preload/main.js';bundle=pre.read_text()
 if "haituo-startup-keyboard.js" not in bundle:
