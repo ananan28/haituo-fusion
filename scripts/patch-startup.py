@@ -3,12 +3,12 @@ import json
 app=Path('macos/staging/app')
 p=app/'bundles/main.js'
 s=p.read_text(encoding='utf-8')
-anchor='    Z.on(\x60show\x60, b), Z.webContents.on(\x60devtools-reload-page\x60, () => {'
+# The shared 1.6.1 lifecycle module owns dom-ready replay on both platforms.
+# Windows only adds restore notification here; do not match an entire old tail.
+anchor='    Z.on(\x60show\x60, b),'
 assert s.count(anchor)==1
-s=s.replace(anchor,'''    Z.on(\x60show\x60, b), Z.on(\x60restore\x60, b),
-    Z.webContents.on(\x60dom-ready\x60, () => {
-        if (Z && !Z.isDestroyed() && Z.isVisible() && !Z.isMinimized()) b();
-    }), Z.webContents.on(\x60devtools-reload-page\x60, () => {''',1)
+assert 'haituo-window-activation.js' in s
+s=s.replace(anchor,'    Z.on(\x60show\x60, b), Z.on(\x60restore\x60, b),',1)
 anchor='p.ipcMain.handle(\x60database-ready\x60, async () => {'
 assert s.count(anchor)==1
 s=s.replace(anchor,'''p.ipcMain.handle(\x60haituo:is-window-visible\x60, event => {
