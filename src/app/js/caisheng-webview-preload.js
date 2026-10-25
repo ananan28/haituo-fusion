@@ -1599,6 +1599,12 @@ function haituoWhatsAppTranslationMount(message, roots) {
     return mount;
 }
 
+function haituoWebMessageId(node) {
+    return node.getAttribute("data-id") || node.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? node.getAttribute("data-mid") : undefined);
+}
+function haituoCurrentWebMessage(item) {
+    return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && haituoWebMessageId(item.e) === item.messageId;
+}
 function haituoInstallMessageScanner() {
     if (window.__haituoMessageScannerInstalled) return;
     window.__haituoMessageScannerInstalled = true;
@@ -1696,20 +1702,25 @@ function haituoInstallMessageScanner() {
             }).filter(Boolean).join("\n\n").trim();
             if (!n || /^\d{1,2}:\d{2}$/.test(n) || /^https?:\/\/\S+$/iu.test(n)) continue;
             if (!webTranslationActive()) continue;
-            if (e.dataset.haituoTranslationSource !== n) {
+            const messageId = haituoWebMessageId(e);
+            if (e.dataset.haituoTranslationSource !== n || e.dataset.haituoTranslationMessageId !== (messageId || "")) {
                 e.querySelectorAll(".haituo-wa-message-translation").forEach(node => node.remove());
                 e.dataset.haituoTranslationSource = n;
+                e.dataset.haituoTranslationMessageId = messageId || "";
+                delete e.dataset.haituoTranslationPending;
+                delete e.dataset.haituoTranslationRetryAt;
+                delete e.dataset.haituoAttachmentMiss;
                 delete e.dataset.haituoTranslationDone;
             }
             const mount = haituoWhatsAppTranslationMount(e, roots);
             if (e.dataset.haituoTranslationDone === "1" && e.querySelector(".haituo-wa-message-translation")) continue;
+            if (!incomingTranslationOn() && e.dataset.haituoAttachmentMiss === "1") continue;
             if (e.dataset.haituoTranslationPending === "1" || Number(e.dataset.haituoTranslationRetryAt || 0) > Date.now()) continue;
             e.dataset.haituoTranslationPending = "1";
             if (!mount || !e.contains(mount)) {
                 delete e.dataset.haituoTranslationPending;
                 continue;
             }
-            const messageId = e.getAttribute("data-id") || e.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? e.getAttribute("data-mid") : undefined);
             if (!incomingTranslationOn() && !messageId) { delete e.dataset.haituoTranslationPending; continue; }
             translationTargets.push({ e, t: e, n, mount, messageId, attachmentOnly: !incomingTranslationOn() });
         }
@@ -1797,13 +1808,19 @@ function haituoInstallMessageScanner() {
             while (queueIndex < queue.length) {
                 const item = queue[queueIndex++];
                 try {
-                    item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly), item.t.dataset.haituoTranslationDone = "1", delete item.t.dataset.haituoTranslationRetryCount, delete item.t.dataset.haituoTranslationRetryAt;
+                    item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly);
+                    if (haituoCurrentWebMessage(item)) {
+                        item.t.dataset.haituoTranslationDone = "1";
+                        if (!item.r && item.attachmentOnly) item.t.dataset.haituoAttachmentMiss = "1";
+                        delete item.t.dataset.haituoTranslationRetryCount;
+                        delete item.t.dataset.haituoTranslationRetryAt;
+                    }
                 } catch (error) {
                     item.error = error instanceof Error ? error.message : String(error);
                     const retry = Math.min(3, Number(item.t.dataset.haituoTranslationRetryCount || 0) + 1);
-                    item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
+                    if (haituoCurrentWebMessage(item)) item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
                 } finally {
-                    delete item.t.dataset.haituoTranslationPending;
+                    if (haituoCurrentWebMessage(item)) delete item.t.dataset.haituoTranslationPending;
                 }
                 applyTranslation(item);
             }
@@ -1831,6 +1848,7 @@ function haituoInstallMessageScanner() {
             e ? syncPanel(e) : hidePanels(), scan();
         }, 60);
     }).observe(document.documentElement, {
+        attributes: !0, attributeFilter: ["data-id", "data-mid"], characterData: !0,
         childList: !0,
         subtree: !0
      }), scan();
