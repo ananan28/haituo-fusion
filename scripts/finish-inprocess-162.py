@@ -120,3 +120,33 @@ if 'const result=await records.translate(window.MessageCache' not in payload:
 preload=root/'src/app/bundles/preload/main.js'
 payload=preload.read_text(encoding='utf-8').replace('m.outgoingBubbleColor ?? `#2c6bed`','m.outgoingBubbleColor || `#2c6bed`').replace('m.chatTextColor ?? `#111827`','m.chatTextColor || `#111827`')
 preload.write_text(payload,encoding='utf-8')
+s=p.read_text(encoding='utf-8')
+if "const viewSecurity = require('../js/haituo-inprocess-view-security.js')" not in s:
+ needle='''    const views = new Map, sender = new Map, pending = new Map, configs=new Map, syncData=new Map;'''
+ assert s.count(needle)==1;s=s.replace(needle,"    const viewSecurity = require('../js/haituo-inprocess-view-security.js');\n"+needle)
+ needle='''        const caishengBridgeRelay = (channel, ...args) => { try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };'''
+ assert s.count(needle)==1;s=s.replace(needle,'''        const caishengBridgeRelay = (channel, ...args) => { if(channel===`set-window-focus`)return;try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };''')
+ needle='''            const wasVisible=view.__haituoVisible;view.__haituoVisible=visible;view.setVisible(visible);'''
+ assert s.count(needle)==1;s=s.replace(needle,needle+'''
+            viewSecurity.publishFocus(view.webContents,visible&&Z.isFocused());''')
+ needle='''            globalThis.caishengBridge?.register?.(t, view);'''
+ assert s.count(needle)==1;s=s.replace(needle,'''            require('../js/haituo-inprocess-view-security.js').install(view.webContents,G_([ $, `background.html` ]),q_);
+'''+needle)
+ needle='''view.__haituoVisible=!1;view.__haituoAppearance=null;globalThis.caishengBridge?.syncVisibility'''
+ assert s.count(needle)==1;s=s.replace(needle,'''view.__haituoVisible=!1;view.__haituoAppearance=null;require('../js/haituo-inprocess-view-security.js').resetFocus(view.webContents);globalThis.caishengBridge?.syncVisibility''')
+ needle='''sandbox: !1, contextIsolation: !0, webviewTag: !0, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`'''
+ assert s.count(needle)==1;s=s.replace(needle,'''sandbox: !1, contextIsolation: !0, backgroundThrottling:!1, webviewTag: !1, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`''')
+ p.write_text(s,encoding='utf-8')
+ print('Guarded internal view navigation and published real visible-account focus')
+s=p.read_text(encoding='utf-8')
+if 'haituo-bridge-renderer-ready' not in s:
+ needle='''.then(result=>send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!0,result})).catch(error=>'''
+ assert s.count(needle)==1;s=s.replace(needle,'''.then(result=>{if(e.channel===`signal-app-loaded`)process.send?.({type:`haituo-bridge-renderer-ready`});send({type:`haituo-bridge-result`,requestId:e.requestId,ok:!0,result})}).catch(error=>''')
+ needle='''        viewFor(workspaceId){const view=views.get(workspaceId);return view?{webContents:view.webContents,isDestroyed:()=>view.webContents.isDestroyed()}:null;},'''
+ assert s.count(needle)==1;s=s.replace(needle,needle+'''
+        rendererReady(workspaceId){const view=views.get(workspaceId);if(view){viewSecurity.resetFocus(view.webContents);globalThis.caishengBridge.syncVisibility(Zg?.id);}},''')
+ needle='''        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`)'''
+ assert s.count(needle)==1;s=s.replace(needle,'''        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-renderer-ready`){globalThis.caishengBridge?.rendererReady?.(t);return;}
+'''+needle)
+ p.write_text(s,encoding='utf-8')
+ print('Replayed parent focus after account renderer initialization')
