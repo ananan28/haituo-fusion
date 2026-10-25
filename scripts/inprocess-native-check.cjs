@@ -40,7 +40,19 @@ async function check(id,work){try{const result=await work();report.checks.push({
    }
    throw Error('Child profile never reached initialized renderer; inspect child stderr/startup log');
   });
-  if(childClient)childClient.ws.close();
+  if(childClient){
+   await check('CHILD-VIEW-BOUNDS-UPDATE',async()=>{
+    const sizes=[];
+    for(const bounds of [{x:20,y:90,width:360,height:300},{x:30,y:80,width:420,height:320}]){
+      await apiEvaluate(`window.SignalContext.caishengSyncSignalProfile(${JSON.stringify({id:'signal-ci-inprocess',...bounds,keepVisible:true})})`);await pause(150);
+      const result=await childClient.call('Runtime.evaluate',{expression:'({width:innerWidth,height:innerHeight})',returnByValue:true});
+      const actual=result.result?.value;if(actual.width!==bounds.width||actual.height!==bounds.height)throw Error('Subview bounds mismatch '+JSON.stringify({bounds,actual}));sizes.push(actual);
+    }
+    return sizes;
+   });
+   await check('CHILD-VIEW-SCREENSHOT',async()=>{const screenshot=await childClient.call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,'inprocess-child.png'),Buffer.from(screenshot.data,'base64'));return{file:'inprocess-child.png'}});
+   childClient.ws.close();
+  }
   await check('SWITCH-BACK-TO-MAIN',async()=>apiEvaluate(`window.SignalContext.caishengSyncSignalProfile({id:null,x:0,y:70,width:900,height:650,keepVisible:true})`));
   await check('CHILD-PROFILE-STOP',async()=>apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`));
  }

@@ -1,0 +1,99 @@
+--- a/src/app/bundles/main.js
++++ b/src/app/bundles/main.js
+@@ -25530,10 +25530,13 @@
+ 
+ let HaituoLocalChats;
+ function haituoLocalChatStore() {
+-    return HaituoLocalChats ||= require('../js/haituo-local-chat-records.js').createStore({
+-        directory:(0,s.join)(p.app.getPath(`appData`),`Haituo`,`local-chat-records-v1`),
+-        safeStorage:p.safeStorage
+-    });
++    if(!HaituoLocalChats){
++        HaituoLocalChats=require('../js/haituo-local-chat-records.js').createStore({
++            directory:(0,s.join)(p.app.getPath(`appData`),`Haituo`,`local-chat-records-v1`),safeStorage:p.safeStorage
++        });
++        p.app.once(`will-quit`,()=>{try{HaituoLocalChats?.close();}catch(error){X.warn(`Local chat database close failed: ${error.message}`);}});
++    }
++    return HaituoLocalChats;
+ }
+ function haituoLocalChatAccount(event) {
+     Jp(event.senderFrame?.url ?? ``);
+@@ -28482,6 +28485,7 @@
+ function haituoMacFocusSelectedAccount() {
+     if (haituoScreenshotController?.capturing) return;
+     if (process.platform !== `darwin` || $u !== `signal-main` || caishengMenuOpen || !Z || Z.isDestroyed() || !Z.isVisible() || Z.isMinimized()) return;
++    if(process.env.HAITUO_INPROCESS===`1`){globalThis.caishengBridge?.focus?.(Zg?.id);return;}
+     const child = Yg.get(Zg?.id);
+     if (child && Xg.has(Zg?.id) && Zg?.width > 0 && Zg?.height > 0) {
+         $g(Zg.id, child);
+@@ -28490,6 +28494,7 @@
+ }
+ 
+ function haituoMacActivateAccountWindow() {
++    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`)return;
+     if (process.platform !== `darwin` || $u === `signal-main` || !Z || Z.isDestroyed() || !Qg?.visible || !Qg?.bounds) return;
+     n_();
+     Z.showInactive();
+@@ -28713,6 +28718,7 @@
+ Se(X, Dv, b_);
+ 
+ function C_() {
++    if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`)return;
+     if (!Z || Z.isDestroyed()) return;
+     if (process.platform === `darwin` && $u !== `signal-main`) {
+         if (Qg?.visible) haituoMacActivateAccountWindow();
+@@ -28976,6 +28982,7 @@
+     g.acceptFirstMouse = process.platform === `darwin`,
+     Z = new p.BrowserWindow(g), (process.platform===`darwin`&&$u!==`signal-main`&&Z.setWindowButtonVisibility(false)), p.Menu.setApplicationMenu(null), Z.removeMenu(), Z.setAutoHideMenuBar(!0), (process.env.HAITUO_INPROCESS === `1` && $u !== `signal-main` && (() => {
+         const caishengBridgeRelay = (channel, ...args) => { try { process.send?.({ type: `haituo-bridge-push`, channel, args }); } catch {} };
++        Z.show = ()=>{}; Z.showInactive = ()=>{};
+         const caishengNativeSend = Z.webContents.send.bind(Z.webContents);
+         Z.webContents.send = (channel, ...args) => { caishengBridgeRelay(channel, ...args); return caishengNativeSend(channel, ...args); };
+     })()), 
+@@ -29716,10 +29723,11 @@
+         push(workspaceId, channel, args) { views.get(workspaceId)?.webContents?.send(`haituo-child-push:${channel}`, { args: args || [] }); },
+         resolve(requestId, result) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.resolve(result)); },
+         reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
++        focus(workspaceId){const view=views.get(workspaceId);if(view?.__haituoVisible)view.webContents.focus();},
+         configFor(event){return configs.get(sender.get(event?.sender?.id));},
+         syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
+         ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
+-        register(workspaceId, view) { views.set(workspaceId, view); sender.set(view.webContents.id, workspaceId); view.webContents.once(`destroyed`,()=>{views.delete(workspaceId);sender.delete(view.webContents.id);configs.delete(workspaceId);syncData.delete(workspaceId)}); },
++        register(workspaceId, view) { const contentsId=view.webContents.id;views.set(workspaceId, view); sender.set(contentsId, workspaceId); view.webContents.once(`destroyed`,()=>{sender.delete(contentsId);if(views.get(workspaceId)===view){views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId)}}); },
+         dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
+ 
+     };
+--- a/src/app/js/caisheng-webview-preload.js
++++ b/src/app/js/caisheng-webview-preload.js
+@@ -1620,7 +1620,7 @@
+  bar.append(label,toggle);root.append(bar,list,status);document.body.append(root);
+  const nodes=new Map;
+  function restore(){if(nativeRoot){nativeRoot.style.visibility= nativeRoot.dataset.haituoOriginalVisibility||'';delete nativeRoot.dataset.haituoOriginalVisibility;} }
+- function position(){if(!nativeRoot?.isConnected||!chat){restore();root.style.display='none';return;}const r=nativeRoot.getBoundingClientRect();Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});list.style.display=official?'none':'block';status.style.display=official?'none':'block';if(!official){if(!('haituoOriginalVisibility' in nativeRoot.dataset))nativeRoot.dataset.haituoOriginalVisibility=nativeRoot.style.visibility;nativeRoot.style.visibility='hidden';}else restore();}
++ function position(){if(!nativeRoot?.isConnected||!chat||expectedDifferent){restore();root.style.display='none';return;}const r=nativeRoot.getBoundingClientRect();Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});list.style.display=official?'none':'block';status.style.display=official?'none':'block';if(!official){if(!('haituoOriginalVisibility' in nativeRoot.dataset))nativeRoot.dataset.haituoOriginalVisibility=nativeRoot.style.visibility;nativeRoot.style.visibility='hidden';}else restore();}
+  function setOfficial(value){official=value;toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';position();}
+  toggle.onclick=()=>setOfficial(!official);
+  function render(){const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<=32;const anchor=[...list.children].find(x=>x.getBoundingClientRect().bottom>list.getBoundingClientRect().top);const anchorTop=anchor?.getBoundingClientRect().top;const oldTop=list.scrollTop;
+@@ -1633,18 +1633,18 @@
+   if(atBottom)list.scrollTop=Math.max(0,list.scrollHeight-list.clientHeight);else if(anchor?.isConnected)list.scrollTop=oldTop+anchor.getBoundingClientRect().top-anchorTop;
+   status.textContent=`已保存 ${total} 条本机记录；仅包含本机已加载的文字消息。图片、语音请切换官方视图。`;
+  }
+- function apply(page,prepend=false){if(page.chat!==chat)return;const ids=page.messages.map(x=>x.id);for(const value of page.messages)records.set(value.id,value);ordered=prepend?[...ids,...ordered.filter(id=>!ids.includes(id))]:[...ordered.filter(id=>!ids.includes(id)),...ids];older=page.hasOlder;total=page.total;render();position();}
++ function apply(page,prepend=false){if(page.chat!==chat||expectedDifferent)return;const ids=page.messages.map(x=>x.id);for(const value of page.messages)records.set(value.id,value);ordered=prepend?[...ids,...ordered.filter(id=>!ids.includes(id))]:[...ordered.filter(id=>!ids.includes(id)),...ids];older=page.hasOlder;total=page.total;render();position();}
+  async function observe(items,elements){if(!items.length)return;const next=haituoLocalChatConversation(items[0].id);if(!next||items.some(x=>haituoLocalChatConversation(x.id)!==next))return;
+-  const header=document.querySelector('#main header')?.textContent||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;sequence++;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
++  const headerNode=document.querySelector('#main header');const header=headerNode?.querySelector('[data-testid=conversation-info-header-chat-title]')?.textContent||headerNode?.querySelector('[title]')?.getAttribute('title')||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;sequence++;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
+   if(expectedDifferent&&next===chat){if(header===navigationHeader&&Date.now()-navStarted>1200)expectedDifferent=false;else return;}
+   if(next!==chat){expectedDifferent=false;sequence++;restore();chat=next;observedSignature='';ordered=[];records.clear();nodes.clear();list.replaceChildren();official=false;}
+   const token=sequence;
+   const candidate=elements.find(x=>haituoLocalChatConversation(x.getAttribute('data-id')||x.closest('[data-id]')?.getAttribute('data-id'))===chat);
+-  if(candidate){for(let p=candidate.parentElement;p&&p.id!=='main';p=p.parentElement){const css=window.getComputedStyle(p);if(/^(auto|scroll)$/.test(css.overflowY)&&p.clientHeight>0){if(nativeRoot!==p){restore();nativeRoot=p;}break;}}}
++  if(candidate){for(let p=candidate.parentElement;p&&p.id!=='main';p=p.parentElement){const css=window.getComputedStyle(p);if(/^(auto|scroll)$/.test(css.overflowY)&&p.clientHeight>0){if(nativeRoot!==p){restore();if(nativeRoot)resize.unobserve?.(nativeRoot);nativeRoot=p;resize.observe(nativeRoot);}break;}}}
+   const signature=JSON.stringify([items,items.map(item=>targetFor(item.source))]);if(signature===observedSignature){position();return;}
+   try{const page=await ipc.invoke('haituo:local-chat-observe',items);if(token===sequence){observedSignature=signature;apply(page);}}catch(error){if(token===sequence){setOfficial(true);status.textContent=error.message;}throw error;}
+  }
+- async function refresh(){if(!chat)return;const token=sequence;const page=await ipc.invoke('haituo:local-chat-page',chat);if(token===sequence)apply(page);}
++ async function refresh(){if(!chat||expectedDifferent)return;const token=sequence;const page=await ipc.invoke('haituo:local-chat-page',chat);if(token===sequence)apply(page);}
+  list.addEventListener('scroll',async()=>{if(list.scrollTop>60||loading||!chat)return;loading=true;const token=sequence;try{if(older){const page=await ipc.invoke('haituo:local-chat-page',chat,{before:ordered[0],limit:200});if(token===sequence)apply(page,true);}else if(nativeRoot){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight);}}catch(error){status.textContent=error.message;}finally{loading=false;}});
+  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
+  // Hide stale conversation immediately on navigation; message IDs, not display

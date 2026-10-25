@@ -23,6 +23,7 @@ jobs:
       - name: Integrate and verify message records and gated child views
         run: |
           python scripts/integrate-native-records-162.py
+          python scripts/sync-local-chat-view.py
           node --check src/app/bundles/main.js
           node --check src/app/bundles/preload/main.js
           node --check src/app/js/caisheng-webview-preload.js

@@ -16,3 +16,8 @@ if "syncData=new Map" not in (root/"src/app/bundles/main.js").read_text(encoding
  subprocess.run(["git","apply","--check","scripts/refine-native-records-162.patch"],cwd=root,check=True)
  subprocess.run(["git","apply","scripts/refine-native-records-162.patch"],cwd=root,check=True)
  print("Applied account bootstrap, target changes and stale-result guards")
+
+if "register(workspaceId, view) { const contentsId=" not in (root/"src/app/bundles/main.js").read_text(encoding="utf-8"):
+ subprocess.run(["git","apply","--check","scripts/polish-native-records-162.patch"],cwd=root,check=True)
+ subprocess.run(["git","apply","scripts/polish-native-records-162.patch"],cwd=root,check=True)
+ print("Applied view lifecycle and local record navigation fixes")

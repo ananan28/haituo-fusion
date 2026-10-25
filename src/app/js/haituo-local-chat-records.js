@@ -6,7 +6,7 @@ function openEncrypted({directory,safeStorage}){
  if(!safeStorage?.isEncryptionAvailable())throw Error('系统密钥保护暂不可用，本机双语数据库未打开，请使用官方视图');
  fs.mkdirSync(directory,{recursive:true,mode:0o700});const file=path.join(directory,'messages.sqlite'),keyFile=path.join(directory,'database-key.bin');let key;
  if(fs.existsSync(keyFile)){key=safeStorage.decryptString(fs.readFileSync(keyFile));}
- else {if(fs.existsSync(file))throw Error('本机双语数据库密钥缺失，原数据库已保留');key=randomBytes(32).toString('hex');const encrypted=safeStorage.encryptString(key);if(safeStorage.decryptString(encrypted)!==key)throw Error('本机双语数据库密钥保护校验失败');fs.writeFileSync(keyFile,encrypted,{flag:'wx',mode:0o600});}
+ else {if(fs.existsSync(file))throw Error('本机双语数据库密钥缺失，原数据库已保留');key=randomBytes(32).toString('hex');const encrypted=safeStorage.encryptString(key);if(safeStorage.decryptString(encrypted)!==key)throw Error('本机双语数据库密钥保护校验失败');fs.writeFileSync(keyFile,encrypted,{flag:'wx',mode:0o600,flush:true});}
  if(!/^[a-f0-9]{64}$/.test(key))throw Error('本机双语数据库密钥格式无效');
  const {Database}=require('@signalapp/sqlcipher');const db=new Database(file,{cacheStatements:true});
  try{db.pragma(`key = "x'${key}'"`);db.pragma('cipher_memory_security = ON');db.prepare('SELECT count(*) AS count FROM sqlite_master').get();db.pragma('journal_mode = WAL');db.pragma('foreign_keys = ON');db.pragma('busy_timeout = 3000');return db;}catch(error){db.close();throw Error('本机双语数据库无法解锁，原数据库已保留',{cause:error});}
