@@ -25559,10 +25559,11 @@ function haituoTranslateAttached(event, request, work) {
     request.messageScope = `${platform}:${account}:${request.messageId}`;
     if (platform === `whatsapp` && request.localMessageRecord === !0) {
         const records=haituoLocalChatStore();
-        const existing=request.forceRefresh ? null : records.get(account,request.messageId,request.text,request.targetLanguage);
-        if(existing) return existing;
-        if(request.attachmentOnly) return {text:``,notFound:!0};
-        return Promise.resolve().then(work).then(result=>records.put(account,request.messageId,request.text,request.targetLanguage,result));
+        if(!request.forceRefresh && !records.get(account,request.messageId,request.text,request.targetLanguage)){
+            const legacy=HaituoMessageAttachments.get({platform,account,messageId:request.messageId},request);
+            if(legacy)records.put(account,request.messageId,request.text,request.targetLanguage,legacy);
+        }
+        return records.translate(account,request,work);
     }
     if (platform === `signal` && request.localMessageRecord === !0) {
         // 1.6.1 records are read only for one-way migration into the original
@@ -28396,7 +28397,7 @@ function caishengTerminateSignalChild(child) {
     if (process.platform === `win32` && Number.isInteger(pid) && pid > 0) try {
         const result = (0, c.spawnSync)(`taskkill.exe`, [ `/PID`, String(pid), `/T`, `/F` ], {
             windowsHide: !0,
-            stdio: `ignore`
+            stdio: `ignore`, timeout:5000
         });
         terminated = result.status === 0;
     } catch {}
@@ -29707,7 +29708,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
     { value: `open`, label: `打开账号` },
     { value: `delete`, label: `删除账号` }
 ])), process.env.HAITUO_INPROCESS === `1` && $u === `signal-main` && (() => {
-    const views = new Map, sender = new Map, pending = new Map, configs=new Map;
+    const views = new Map, sender = new Map, pending = new Map, configs=new Map, syncData=new Map;
     let seq = 0;
     globalThis.caishengBridge = {
         childFor(event) { const id = sender.get(event?.sender?.id); return id && Yg.has(id) ? { id, child: Yg.get(id) } : null; },
@@ -29715,9 +29716,10 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         resolve(requestId, result) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.resolve(result)); },
         reject(requestId, error) { const p = pending.get(requestId); p && (pending.delete(requestId), clearTimeout(p.timer), p.reject(new Error(error))); },
         configFor(event){return configs.get(sender.get(event?.sender?.id));},
-        ready(workspaceId,config){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
-        register(workspaceId, view) { views.set(workspaceId, view); sender.set(view.webContents.id, workspaceId); view.webContents.once(`destroyed`,()=>{views.delete(workspaceId);sender.delete(view.webContents.id);configs.delete(workspaceId)}); },
-        dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
+        syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
+        ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
+        register(workspaceId, view) { views.set(workspaceId, view); sender.set(view.webContents.id, workspaceId); view.webContents.once(`destroyed`,()=>{views.delete(workspaceId);sender.delete(view.webContents.id);configs.delete(workspaceId);syncData.delete(workspaceId)}); },
+        dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
 
     };
     p.ipcMain.handle(`haituo-child-invoke`, (event, payload) => {
@@ -29768,10 +29770,10 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
             view.webContents.on(`preload-error`,(_event,_path,error)=>X.error(`inprocess preload failed (${t}): ${error.message}`));
         } catch (error) { X.warn(`inprocess child view failed: ${error?.message ?? error}`); }
     })();
-    return Yg.set(t, r), (process.env.HAITUO_INPROCESS===`1`&&Xg.set(t,{})), r.on(`error`, error => {
+    return Yg.set(t, r), (process.env.HAITUO_INPROCESS===`1`&&Xg.add(t)), r.on(`error`, error => {
         X.error(`Haituo Signal profile failed to start (${t}): ${error?.message ?? error}`), Yg.get(t) === r && (Yg.delete(t), Xg.delete(t), caishengLastWindowPayload.delete(t));
     }), r.on(`message`, e => {
-        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){X.info(`inprocess backend ready (${t}); SQL initialized`);globalThis.caishengBridge?.ready?.(t,e.config);return;}
+        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){X.info(`inprocess backend ready (${t}); SQL initialized`);globalThis.caishengBridge?.ready?.(t,e.config,e.sync);return;}
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-result`) { (e.ok ? globalThis.caishengBridge?.resolve : globalThis.caishengBridge?.reject)?.(e.requestId, e.ok ? e.result : e.error); return; }
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-push`) { globalThis.caishengBridge?.push?.(t, e.channel, e.args || []); return; }
         if (Yg.get(t) === r && e?.type === `haituo-captcha-pending`) { haituoPendingCaptchaAccounts.set(t,e.seq); return; }
@@ -30640,7 +30642,7 @@ p.app.on(`ready`, async () => {
     }
     if(process.env.HAITUO_INPROCESS===`1` && $u!==`signal-main`){
         const config=await haituoBuildRendererConfig();
-        process.send?.({type:`haituo-bridge-ready`,config});
+        process.send?.({type:`haituo-bridge-ready`,config,sync:{'locale-data':Q().messages,'locale-display-names':Q().localeDisplayNames,'country-display-names':Q().countryDisplayNames,'OS.getClassName':n.Lt.getClassName()}});
         X.info(`inprocess backend SQL ready; renderer config prepared for ${$u}`);
     }
     Kv = !0, qv(), $u === `signal-main` && (P_ = new rm({
@@ -30930,13 +30932,13 @@ p.ipcMain.on(`get-config`, async e => {
     const profile=globalThis.caishengBridge?.configFor?.(e);
     e.returnValue=profile || await haituoBuildRendererConfig();
 }), p.ipcMain.on(`locale-data`, e => {
-    e.returnValue = Q().messages;
+    e.returnValue = globalThis.caishengBridge?.syncFor?.(e,`locale-data`) ?? Q().messages;
 }), p.ipcMain.on(`locale-display-names`, e => {
-    e.returnValue = Q().localeDisplayNames;
+    e.returnValue = globalThis.caishengBridge?.syncFor?.(e,`locale-display-names`) ?? Q().localeDisplayNames;
 }), p.ipcMain.on(`country-display-names`, e => {
-    e.returnValue = Q().countryDisplayNames;
+    e.returnValue = globalThis.caishengBridge?.syncFor?.(e,`country-display-names`) ?? Q().countryDisplayNames;
 }), p.ipcMain.on(`OS.getClassName`, e => {
-    e.returnValue = n.Lt.getClassName();
+    e.returnValue = globalThis.caishengBridge?.syncFor?.(e,`OS.getClassName`) ?? n.Lt.getClassName();
 }), p.ipcMain.handle(`DebugLogs.getLogs`, async (e, t, r) => Wt(t, process.versions.node, p.app.getVersion(), u.version(), r, process.arch, p.app.runningUnderARM64Translation, n.Lt.getLinuxName())), 
 p.ipcMain.handle(`DebugLogs.upload`, async (e, t) => Ku({
     content: t,

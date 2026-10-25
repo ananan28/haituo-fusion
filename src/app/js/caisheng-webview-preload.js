@@ -1604,7 +1604,7 @@ function haituoWebMessageId(node) {
     return node.getAttribute("data-id") || node.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? node.getAttribute("data-mid") : undefined);
 }
 function haituoCurrentWebMessage(item) {
-    return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && haituoWebMessageId(item.e) === item.messageId;
+    return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId;
 }
 function haituoLocalChatConversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
 function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate}){
@@ -1635,13 +1635,13 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
  }
  function apply(page,prepend=false){if(page.chat!==chat)return;const ids=page.messages.map(x=>x.id);for(const value of page.messages)records.set(value.id,value);ordered=prepend?[...ids,...ordered.filter(id=>!ids.includes(id))]:[...ordered.filter(id=>!ids.includes(id)),...ids];older=page.hasOlder;total=page.total;render();position();}
  async function observe(items,elements){if(!items.length)return;const next=haituoLocalChatConversation(items[0].id);if(!next||items.some(x=>haituoLocalChatConversation(x.id)!==next))return;
-  const header=document.querySelector('#main header')?.textContent||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
+  const header=document.querySelector('#main header')?.textContent||'';if(lastHeader&&header!==lastHeader){expectedDifferent=!!chat;sequence++;navigationHeader=lastHeader;navStarted=Date.now();restore();root.style.display='none';}lastHeader=header;
   if(expectedDifferent&&next===chat){if(header===navigationHeader&&Date.now()-navStarted>1200)expectedDifferent=false;else return;}
   if(next!==chat){expectedDifferent=false;sequence++;restore();chat=next;observedSignature='';ordered=[];records.clear();nodes.clear();list.replaceChildren();official=false;}
   const token=sequence;
   const candidate=elements.find(x=>haituoLocalChatConversation(x.getAttribute('data-id')||x.closest('[data-id]')?.getAttribute('data-id'))===chat);
   if(candidate){for(let p=candidate.parentElement;p&&p.id!=='main';p=p.parentElement){const css=window.getComputedStyle(p);if(/^(auto|scroll)$/.test(css.overflowY)&&p.clientHeight>0){if(nativeRoot!==p){restore();nativeRoot=p;}break;}}}
-  const signature=JSON.stringify(items);if(signature===observedSignature){position();return;}
+  const signature=JSON.stringify([items,items.map(item=>targetFor(item.source))]);if(signature===observedSignature){position();return;}
   try{const page=await ipc.invoke('haituo:local-chat-observe',items);if(token===sequence){observedSignature=signature;apply(page);}}catch(error){if(token===sequence){setOfficial(true);status.textContent=error.message;}throw error;}
  }
  async function refresh(){if(!chat)return;const token=sequence;const page=await ipc.invoke('haituo:local-chat-page',chat);if(token===sequence)apply(page);}
@@ -1649,7 +1649,7 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
  // Hide stale conversation immediately on navigation; message IDs, not display
  // names, decide which local conversation may subsequently be shown.
- document.addEventListener('pointerdown',event=>{if(event.target.closest?.('#pane-side,[data-testid="chat-list"]')){restore();root.style.display='none';expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();}},true);
+ document.addEventListener('pointerdown',event=>{if(event.target.closest?.('#pane-side,[data-testid="chat-list"]')){restore();root.style.display='none';sequence++;expectedDifferent=!!chat;navigationHeader=lastHeader;navStarted=Date.now();}},true);
  return{observe,refresh,setOfficial,showError:message=>{status.textContent=message},isActive:()=>!!chat&&!!nativeRoot,destroy(){sequence++;restore();resize.disconnect();root.remove();window.removeEventListener('resize',position);}};
 }
 
@@ -1759,10 +1759,11 @@ function haituoInstallMessageScanner() {
             const messageId = haituoWebMessageId(e);
             if(haituoLocalBilingualView && haituoLocalChatConversation(messageId)) localRecords.push({id:messageId,source:n,metadata:e.querySelector('[data-pre-plain-text]')?.getAttribute('data-pre-plain-text') || ``});
             if (!webTranslationActive()) continue;
-            if (e.dataset.haituoTranslationSource !== n || e.dataset.haituoTranslationMessageId !== (messageId || "")) {
+            if (e.dataset.haituoTranslationSource !== n || e.dataset.haituoTranslationMessageId !== (messageId || "") || e.dataset.haituoTranslationTarget !== haituoMessageTarget(n)) {
                 e.querySelectorAll(".haituo-wa-message-translation").forEach(node => node.remove());
                 e.dataset.haituoTranslationSource = n;
                 e.dataset.haituoTranslationMessageId = messageId || "";
+                e.dataset.haituoTranslationTarget = haituoMessageTarget(n);
                 delete e.dataset.haituoTranslationPending;
                 delete e.dataset.haituoTranslationRetryAt;
                 delete e.dataset.haituoAttachmentMiss;
@@ -1778,7 +1779,7 @@ function haituoInstallMessageScanner() {
                 continue;
             }
             if (!incomingTranslationOn() && !messageId) { delete e.dataset.haituoTranslationPending; continue; }
-            translationTargets.push({ e, t: e, n, mount, messageId, attachmentOnly: !incomingTranslationOn() });
+            translationTargets.push({ e, t: e, n, mount, messageId, target:haituoMessageTarget(n), attachmentOnly: !incomingTranslationOn() });
         }
         if(haituoLocalBilingualView && localRecords.length) await haituoLocalBilingualView.observe(localRecords,visibleMessages);
         const applyTranslation = item => {
