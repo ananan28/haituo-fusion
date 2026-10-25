@@ -22120,17 +22120,15 @@ function haituoCachedSignalTranslation(text) {
                 const host=reference.current?.closest('.module-message,[data-testid="message"]');
                 const group=!!host?.querySelector('.module-message__author');
                 const enabled=group ? config.groupBackTranslationEnabled !== !1 : config.autoTranslateIncoming !== !1;
-                const result=await window.SignalContext.caishengTranslate({
+                const result=await records.translate(window.MessageCache,messageId,e,target,force,()=>window.SignalContext.caishengTranslate({
                     text:e,messageId,targetLanguage:target,purpose:`chat`,localMessageRecord:!0,
                     provider:force ? `smart-retranslate` : config.chatTranslationProvider || `google-free`,
                     context:[...document.querySelectorAll('.module-message__text,.MessageText,[data-testid="message-text"]')].slice(-10).map(node=>node.textContent||``).join(`\n`).slice(-6000),
                     forceRefresh:force,attachmentOnly:!force && !enabled
-                });
+                }));
                 if (result?.text?.trim()) {
                     // Persist before declaring success. Remount reads this message
                     // attribute synchronously during React's original render.
-                    if (current.current !== identity || generation.current !== token) return;
-                    await records.save(window.MessageCache,messageId,e,target,result);
                     update({translation:HaituoFormatMessageParagraphs(e,result.text),busy:!1,error:``},token);
                 }
                 else update({busy:!1},token);
@@ -230538,8 +230536,8 @@ function haituoCachedSignalTranslation(text) {
             className: `CaishengPlatformShell${m.darkTheme ? ` is-haituo-dark` : ``}`,
             style: {
                 "--haituo-account-label-color": m.accountLabelColor ?? `#30343b`,
-                "--haituo-chat-text-color": m.chatTextColor ?? `#111827`,
-                "--haituo-outgoing-bubble-color": m.outgoingBubbleColor ?? `#2c6bed`
+                "--haituo-chat-text-color": m.chatTextColor || `#111827`,
+                "--haituo-outgoing-bubble-color": m.outgoingBubbleColor || `#2c6bed`
             },
             onClick: () => {
                 x(void 0), l(!1), u && requestAnimationFrame(() => A(o, 0, !haituoHome)), d(!1);
@@ -230888,20 +230886,20 @@ function haituoCachedSignalTranslation(text) {
                         children: [ (0, O9.jsx)(`span`, {
                             children: `我的气泡颜色`
                         }), (0, O9.jsxs)(`div`, { style: { display: `flex`, gap: `8px`, width: `100%` }, children: [ (0, O9.jsx)(`input`, {
-                            type: `color`, value: m.outgoingBubbleColor ?? `#2c6bed`, onChange: e => Q({ outgoingBubbleColor: e.target.value, ...m.incomingBubbleLinked !== !1 ? { incomingBubbleColor: e.target.value } : {} })
+                            type: `color`, value: m.outgoingBubbleColor || `#2c6bed`, onChange: e => Q({ outgoingBubbleColor: e.target.value, ...m.incomingBubbleLinked !== !1 ? { incomingBubbleColor: e.target.value } : {} })
                         }) ] }) ]
                     }), (0, O9.jsxs)(`label`, {
-                        children: [ (0, O9.jsx)(`input`, { type: `checkbox`, checked: m.incomingBubbleLinked !== !1, onChange: e => Q({ incomingBubbleLinked: e.target.checked, ...e.target.checked ? { incomingBubbleColor: m.outgoingBubbleColor ?? `#2c6bed` } : {} }) }), (0, O9.jsx)(`span`, { children: `对方气泡颜色跟随我方` }) ]
+                        children: [ (0, O9.jsx)(`input`, { type: `checkbox`, checked: m.incomingBubbleLinked !== !1, onChange: e => Q({ incomingBubbleLinked: e.target.checked, ...e.target.checked ? { incomingBubbleColor: m.outgoingBubbleColor || `#2c6bed` } : {} }) }), (0, O9.jsx)(`span`, { children: `对方气泡颜色跟随我方` }) ]
                     }), (0, O9.jsxs)(`label`, {
                         children: [ (0, O9.jsx)(`span`, { children: `对方气泡颜色` }), (0, O9.jsx)(`input`, {
-                            type: `color`, disabled: m.incomingBubbleLinked !== !1, value: m.incomingBubbleLinked !== !1 ? m.outgoingBubbleColor ?? `#2c6bed` : m.incomingBubbleColor || `#e6dfcf`,
+                            type: `color`, disabled: m.incomingBubbleLinked !== !1, value: m.incomingBubbleLinked !== !1 ? m.outgoingBubbleColor || `#2c6bed` : m.incomingBubbleColor || `#e6dfcf`,
                             onChange: e => Q({ incomingBubbleLinked: !1, incomingBubbleColor: e.target.value })
                         }) ]
                     }), (0, O9.jsxs)(`label`, {
                         children: [ (0, O9.jsx)(`span`, {
                             children: `聊天文字颜色`
                         }), (0, O9.jsxs)(`div`, { style: { display: `flex`, gap: `8px`, width: `100%` }, children: [ (0, O9.jsx)(`input`, {
-                            type: `color`, value: m.chatTextColor ?? `#111827`, onChange: e => Q({ chatTextColor: e.target.value })
+                            type: `color`, value: m.chatTextColor || `#111827`, onChange: e => Q({ chatTextColor: e.target.value })
                         }) ] }) ]
                     }), (0, O9.jsx)(`button`, {
                         type: `button`,
@@ -233449,6 +233447,11 @@ function haituoCachedSignalTranslation(text) {
                     postSaveUpdates: cM,
                     ...t
                 });
+            }
+            async haituoGetOrLoadById(id) {
+                const current=this.getById(id);if(current)return current;
+                const message=await Na.getMessageById(id);
+                return message?this.register(new Np(message)):undefined;
             }
             register(e) {
                 if (!e || !e.id) throw Error(`MessageCache.register: Got falsey id or message`);
