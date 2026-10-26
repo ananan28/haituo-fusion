@@ -1653,6 +1653,8 @@ function installResident({document,window,ipc,targetFor,translate,enabled=()=>tr
  function slotFor(item){let state=slots.get(item.node);
  if(state?.key!==item.key){slots.delete(item.node);state?.host.remove();state=undefined}
  if(!state){item.node.querySelectorAll('.ht-translation-slot').forEach(old=>old.remove());const host=document.createElement('div');host.className='ht-translation-slot haituo-wa-message-translation';host.dataset.htSlot='1';Object.assign(host.style,{display:'block',visibility:'visible',textAlign:'right',color:'inherit',userSelect:'none',overflowAnchor:'none',whiteSpace:'pre-wrap',overflowWrap:'anywhere',marginTop:'6px'});host.setAttribute('contenteditable','false');host.setAttribute('aria-hidden','true');state={host,shadow:host.attachShadow({mode:'closed'}),key:item.key,status:''};slots.set(item.node,state)}
+ // React may clone a light-DOM slot shell without its closed shadow root.
+ for(const other of item.node.querySelectorAll('.ht-translation-slot'))if(other!==state.host)other.remove();
  // A WeakMap entry is not evidence that WhatsApp kept its host in the DOM.
  if(!state.host.isConnected||state.host.parentElement!==item.mount||!item.node.contains(state.host)){item.mount.append(state.host);counters.slotReattachments++}
  return state;

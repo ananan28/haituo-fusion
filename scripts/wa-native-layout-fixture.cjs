@@ -32,6 +32,7 @@ module.exports=async function verifyResidentNative(installResident,installHooks,
    native.scrollTop=cycle%2?0:native.scrollHeight;native.dispatchEvent(new w.Event('scroll',{bubbles:true}));native.dispatchEvent(new w.WheelEvent('wheel',{deltaY:cycle%2?-10000:10000,bubbles:true}));
    await tick();for(const node of pool)assert(node.querySelector('.ht-translation-slot')?.dataset.translationCacheHit==='true','Rapid scroll lost cached host');
   }
+  for(const node of pool){node.replaceChildren(...[...node.childNodes].map(child=>child.cloneNode(true)));const slot=node.querySelector('.ht-translation-slot');assert(node.querySelectorAll('.ht-translation-slot').length===1&&!!shadowMap.get(slot)?.textContent,'Cloned shell replaced live closed-shadow translation')}
   native.dispatchEvent(new w.Event('scrollend',{bubbles:true}));await new Promise(resolve=>w.setTimeout(resolve,140));await tick();
   for(const node of pool)assert(node.dataset.translationCacheHit==='true'&&node.querySelectorAll('.ht-translation-slot').length===1,'Settled scroll lost or duplicated cached slot');
   assert(reads===readsBeforeRecycle,'Recycling a cached message requested another lookup');
