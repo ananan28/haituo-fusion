@@ -34,6 +34,9 @@ jobs:
         run: node --test scripts/message-attachments.dom.cjs scripts/signal-attachments.dom.cjs scripts/local-chat-view.dom.cjs scripts/whatsapp-records-scanner.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
+      - name: Verify real Chromium scrolling and retained bilingual nodes
+        timeout-minutes: 2
+        run: node scripts/local-chat-chromium-check.cjs
       - name: Save the complete integrated editable source
         id: source
         run: |

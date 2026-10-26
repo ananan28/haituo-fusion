@@ -1,8 +1,12 @@
 'use strict';
 module.exports=async function verifyPersistentLayout(install){
- const iframe=document.createElement('iframe');Object.assign(iframe.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647',border:'0'});
- const loaded=new Promise(resolve=>iframe.onload=resolve);iframe.srcdoc='<!doctype html><style>body{margin:0;font:14px Arial}#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';document.body.append(iframe);await loaded;
- const w=iframe.contentWindow,d=w.document,tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
+ // Keep production CSP intact (Signal intentionally forbids frames). Use a
+ // shadow root for a real layout surface whose styles cannot affect the app.
+ const host=document.createElement('div');Object.assign(host.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647'});document.body.append(host);
+ const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial';
+ shadow.append(body);body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';
+ const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)};
+ const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
  let view;
  try{
   const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}},metadata:'10:00'});
@@ -30,5 +34,5 @@ module.exports=async function verifyPersistentLayout(install){
   // and neither translation generation nor original-DOM patching is needed.
   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
   return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true};
- }finally{view?.destroy();iframe.remove()}
+ }finally{view?.destroy();host.remove()}
 };

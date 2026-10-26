@@ -65,11 +65,47 @@ index 2f7d7a2..0aeaea6 100644
    await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
   }
  }catch(error){report.fatal=String(error.stack||error)}finally{collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();
+diff --git a/scripts/local-chat-chromium-check.cjs b/scripts/local-chat-chromium-check.cjs
+new file mode 100644
+index 0000000..8144641
+--- /dev/null
++++ b/scripts/local-chat-chromium-check.cjs
+@@ -0,0 +1,14 @@
++'use strict';
++// Run the exact native-app layout fixture in a fast real Chromium session
++// before spending time packaging either desktop platform. No linked accounts.
++const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');
++const profile=fs.mkdtempSync(path.join(os.tmpdir(),'haituo-layout-')),port=19453;
++const browser=cp.spawn(process.env.HAITUO_QA_CHROME||'google-chrome',['--headless=new','--no-sandbox','--disable-gpu','--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port,'--user-data-dir='+profile,'about:blank'],{stdio:'ignore'});
++let socket,serial=0;const pending=new Map,pause=ms=>new Promise(r=>setTimeout(r,ms));
++function call(method,params={}){return new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout: '+method))},12000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}))})}
++(async()=>{try{
++ let target,last;const deadline=Date.now()+20000;while(Date.now()<deadline){try{target=(await(await fetch('http://127.0.0.1:'+port+'/json/list')).json()).find(x=>x.type==='page');if(target)break}catch(error){last=error}await pause(100)}if(!target)throw Error('Chromium unavailable: '+last);
++ socket=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true})});socket.addEventListener('message',event=>{const message=JSON.parse(event.data),item=pending.get(message.id);if(item){pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result)}});
++ const source=fs.readFileSync(path.resolve('src/app/js/haituo-local-chat-view.js'),'utf8'),fixture=require('./local-chat-layout-fixture.cjs').toString();
++ const result=await call('Runtime.evaluate',{expression:`(async()=>{const local={exports:{}};((module)=>{${source}\n})(local);return (${fixture})(local.exports.install)})()`,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);console.log('WHATSAPP_CHROMIUM_LAYOUT_OK',JSON.stringify(result.result.value));
++ }catch(error){console.error(error);process.exitCode=1}finally{try{await call('Browser.close')}catch{}try{socket?.close()}catch{}browser.kill();await pause(250);fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100})}})();
 diff --git a/scripts/local-chat-layout-fixture.cjs b/scripts/local-chat-layout-fixture.cjs
-index ef0260b..4bb7d37 100644
+index ef0260b..88ed4ff 100644
 --- a/scripts/local-chat-layout-fixture.cjs
 +++ b/scripts/local-chat-layout-fixture.cjs
-@@ -12,7 +12,7 @@ module.exports=async function verifyPersistentLayout(install){
+@@ -1,8 +1,12 @@
+ 'use strict';
+ module.exports=async function verifyPersistentLayout(install){
+- const iframe=document.createElement('iframe');Object.assign(iframe.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647',border:'0'});
+- const loaded=new Promise(resolve=>iframe.onload=resolve);iframe.srcdoc='<!doctype html><style>body{margin:0;font:14px Arial}#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';document.body.append(iframe);await loaded;
+- const w=iframe.contentWindow,d=w.document,tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
++ // Keep production CSP intact (Signal intentionally forbids frames). Use a
++ // shadow root for a real layout surface whose styles cannot affect the app.
++ const host=document.createElement('div');Object.assign(host.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647'});document.body.append(host);
++ const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial';
++ shadow.append(body);body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';
++ const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)};
++ const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
+  let view;
+  try{
+   const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}},metadata:'10:00'});
+@@ -12,7 +16,7 @@ module.exports=async function verifyPersistentLayout(install){
    const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
    view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
    const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
@@ -78,6 +114,13 @@ index ef0260b..4bb7d37 100644
    const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
    assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
    list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
+@@ -30,5 +34,5 @@ module.exports=async function verifyPersistentLayout(install){
+   // and neither translation generation nor original-DOM patching is needed.
+   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
+   return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true};
+- }finally{view?.destroy();iframe.remove()}
++ }finally{view?.destroy();host.remove()}
+ };
 diff --git a/scripts/local-chat-view.dom.cjs b/scripts/local-chat-view.dom.cjs
 index f9091dc..5dc47bb 100644
 --- a/scripts/local-chat-view.dom.cjs
