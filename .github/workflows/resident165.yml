@@ -24,8 +24,10 @@ jobs:
       - name: Apply isolated WhatsApp implementation
         run: |
           git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
-          git apply --check scripts/wa-resident-165.patch
-          git apply scripts/wa-resident-165.patch
+          if [ ! -f src/app/js/haituo-wa-resident.js ]; then
+            git apply --check scripts/wa-resident-165.patch
+            git apply scripts/wa-resident-165.patch
+          fi
           python scripts/sync-local-chat-view.py
           git diff --exit-code 42e7aac6074979f5e654880efbc993799944c8f2 -- src/app/bundles/preload src/app/bundles/workers src/app/js/haituo-signal-message-record.js src/app/js/haituo-scroll.js
           node --check src/app/bundles/main.js
@@ -43,8 +45,10 @@ jobs:
           git config user.name 'Haituo Build'
           git config user.email 'haituo-build@users.noreply.github.com'
           git add -A
-          git commit -m 'source165: WhatsApp resident diagnostic candidate; real-account gates UNTESTED'
-          git push origin HEAD:impl/1.6.5-whatsapp-resident
+          if ! git diff --cached --quiet; then
+            git commit -m 'source165: WhatsApp resident diagnostic candidate; real-account gates UNTESTED'
+            git push origin HEAD:impl/1.6.5-whatsapp-resident
+          fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
     needs: integrate

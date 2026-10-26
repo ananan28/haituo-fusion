@@ -22,11 +22,13 @@ async function check(id,work){try{const result=await work();report.checks.push({
  let initial;await check('FRESH-START',async()=>{initial=await start();if(!initial.installed||initial.loading)throw Error('Fresh launch did not reach Signal install/inbox: '+JSON.stringify(initial));return initial});
  if(client){
   report.bootstrap=await evaluate(`({startApp:typeof window.startApp,body:document.body.innerText.slice(-1200)})`);
-  await check('WHATSAPP-CHROMIUM-PERSISTENT-LAYOUT',async()=>{
-   const viewSource=fs.readFileSync(path.resolve('src/app/js/haituo-local-chat-view.js'),'utf8');
-   const fixture=require('./local-chat-layout-fixture.cjs').toString();
+  for(const rate of [1,6])await check('WHATSAPP-NATIVE-SYNTHETIC-RESIDENT-'+rate+'X',async()=>{
+   const resident=fs.readFileSync(path.resolve('src/app/js/haituo-wa-resident.js'),'utf8'),hooks=fs.readFileSync(path.resolve('src/app/js/haituo-wa-node-hooks.js'),'utf8');
+   const fixture=require('./wa-native-layout-fixture.cjs').toString();
    const webSource=fs.readFileSync(path.resolve('src/app/js/caisheng-webview-preload.js'),'utf8'),positionSource=webSource.slice(webSource.indexOf('function haituoTranslationScroller('),webSource.indexOf('// Apply only to WhatsApp.'));
-   return evaluate(`(async()=>{const local={exports:{}};((module)=>{${viewSource}\n})(local);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(local.exports.install,keep)})()`);
+   await client.call('Emulation.setCPUThrottlingRate',{rate});
+   try{return await evaluate(`(async()=>{const resident={exports:{}},hooks={exports:{}};((module)=>{${resident}\n})(resident);((module)=>{${hooks}\n})(hooks);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(resident.exports.installResident,hooks.exports.installHooks,keep)})()`)}
+   finally{await client.call('Emulation.setCPUThrottlingRate',{rate:1})}
   });
   await check('SETTINGS-OPEN',async()=>{await evaluate(`document.querySelector('.CaishengPlatformShell__settingsButton')?.click()`);await pause(500);const s=await evaluate(snapshot);if(!s.settings)throw Error('settings absent');return s});
   report.settingsInventory=await evaluate(`[...document.querySelectorAll('.CaishengPlatformShell__settings input,.CaishengPlatformShell__settings select,.CaishengPlatformShell__settings details,.CaishengPlatformShell__settings button')].map(e=>({tag:e.tagName,type:e.type,key:e.dataset.haituoSetting||e.name||'',label:e.closest('label')?.innerText?.slice(0,160)||e.innerText?.slice(0,100),options:e.tagName==='SELECT'?[...e.options].map(o=>({value:o.value,label:o.label})):undefined}))`);
