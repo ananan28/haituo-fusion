@@ -23,7 +23,7 @@ async function check(id,work){try{const result=await work();report.checks.push({
  if(client){
   report.bootstrap=await evaluate(`({startApp:typeof window.startApp,body:document.body.innerText.slice(-1200)})`);
   for(const rate of [1,6])await check('WHATSAPP-NATIVE-SYNTHETIC-RESIDENT-'+rate+'X',async()=>{
-   const identity=fs.readFileSync(path.resolve('src/app/js/haituo-wa-identity.js'),'utf8'),resident=fs.readFileSync(path.resolve('src/app/js/haituo-wa-resident.js'),'utf8').replace("const {conversationContext,messageOutgoing,shortMessageId}=require('./haituo-wa-identity.js');\n",''),hooks=fs.readFileSync(path.resolve('src/app/js/haituo-wa-node-hooks.js'),'utf8');
+   const identity=fs.readFileSync(path.resolve('src/app/js/haituo-wa-identity.js'),'utf8'),resident=fs.readFileSync(path.resolve('src/app/js/haituo-wa-resident.js'),'utf8').replace(/\r\n?/gu,'\n').replace("const {conversationContext,messageOutgoing,shortMessageId}=require('./haituo-wa-identity.js');\n",''),hooks=fs.readFileSync(path.resolve('src/app/js/haituo-wa-node-hooks.js'),'utf8');
    const fixture=require('./wa-native-layout-fixture.cjs').toString();
    const webSource=fs.readFileSync(path.resolve('src/app/js/caisheng-webview-preload.js'),'utf8'),positionSource=webSource.slice(webSource.indexOf('function haituoTranslationScroller('),webSource.indexOf('// Apply only to WhatsApp.'));
    await client.call('Emulation.setCPUThrottlingRate',{rate});
