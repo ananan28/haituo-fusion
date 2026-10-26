@@ -18,6 +18,53 @@ index e708a75..2065702 100644
 + const events=[],window={isFocused:()=>true,webContents:{send:(...args)=>events.push(args)}};
 + const context={e:window,Z:window,Zg:{id:'signal-child'},process:{env:{HAITUO_INPROCESS:'1'}},caishengBridge:{syncVisibility:id=>events.push(['embedded',id])}};vm.runInNewContext(source.slice(start,end)+';t();',context);assert.deepEqual(events,[['set-window-focus',true],['embedded','signal-child']]);
 +});
+diff --git a/scripts/inprocess-native-check.cjs b/scripts/inprocess-native-check.cjs
+index 2f7d7a2..0aeaea6 100644
+--- a/scripts/inprocess-native-check.cjs
++++ b/scripts/inprocess-native-check.cjs
+@@ -23,8 +23,19 @@ async function check(id,work){try{const result=await work();report.checks.push({
+ (async()=>{try{
+  await check('MAIN-DEFAULT-EMBEDDED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
+  if(client){
+-  await check('CHILD-PROFILE-CREATE',async()=>apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`));
+-  await check('CHILD-PROFILE-SELECT',async()=>apiEvaluate(`window.SignalContext.caishengSyncSignalProfile({id:'signal-ci-inprocess',x:0,y:70,width:900,height:650,keepVisible:true})`));
++  await check('CHILD-PROFILE-CREATE',async()=>{
++   // Register a real shell workspace, then reload its persisted UI state.
++   // A phantom IPC-only profile leaves React on the main tab; ResizeObserver
++   // can legitimately hide that profile and invalidate a focus comparison.
++   await evaluate(`(()=>{const key='caisheng.workspaces.v3',items=JSON.parse(localStorage.getItem(key)||'[]').filter(x=>x.id!=='signal-ci-inprocess');items.push({id:'signal-ci-inprocess',platformId:'signal',label:'CI embedded account',createdAt:Date.now()});localStorage.setItem(key,JSON.stringify(items));localStorage.setItem('caisheng.lastWorkspace','signal-main')})()`);
++   await client.call('Page.reload');const deadline=Date.now()+30000;
++   while(Date.now()<deadline){try{if(await evaluate(`!!document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]')`))return{registered:true}}catch{}await pause(250)}
++   throw Error('Persisted child workspace did not appear in the shell');
++  });
++  await check('CHILD-PROFILE-SELECT',async()=>{
++   await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]').click()`);
++   const deadline=Date.now()+10000;while(Date.now()<deadline){if(await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]')?.getAttribute('aria-pressed')==='true'`))return{selectedInUI:true};await pause(100)}throw Error('Child tab was not selected in the actual shell');
++  });
+   let childClient;
+   await check('CHILD-VIEW-BOOTSTRAP-AND-SQL',async()=>{
+    const deadline=Date.now()+45000;
+@@ -46,9 +57,10 @@ async function check(id,work){try{const result=await work();report.checks.push({
+     // overwrite the actual parent/view focus state. Reset document activity on
+     // both sides before comparing: Signal also has a separate 15s idle cutoff.
+     await pause(10500);
++    const selectedInUI=await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]')?.getAttribute('aria-pressed')==='true'`);if(!selectedInUI)throw Error('Focus comparison requires the child tab to be selected');
+     const parentActive=await apiEvaluate(`(()=>{document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));return window.SignalContext.activeWindowService.isActive()})()`);let childActive;
+     for(const contextId of childClient.contexts){const result=await childClient.call('Runtime.evaluate',{expression:`(()=>{if(!window.SignalContext?.caishengIsChildProfile)return null;document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));return window.SignalContext.activeWindowService.isActive()})()`,contextId,returnByValue:true});if(typeof result.result?.value==='boolean'){childActive=result.result.value;break;}}
+-    if(typeof parentActive!=='boolean'||childActive!==parentActive)throw Error('Embedded focus does not match parent '+JSON.stringify({parentActive,childActive}));return{parentActive,childActive};
++    if(typeof parentActive!=='boolean'||childActive!==parentActive)throw Error('Embedded focus does not match parent '+JSON.stringify({parentActive,childActive}));return{parentActive,childActive,selectedInUI};
+    });
+    await check('CHILD-VIEW-BOUNDS-UPDATE',async()=>{
+     const sizes=[];
+@@ -83,7 +95,7 @@ async function check(id,work){try{const result=await work();report.checks.push({
+    }
+    throw Error('Refreshed embedded renderer did not initialize');
+   });
+-  await check('SWITCH-BACK-TO-MAIN',async()=>apiEvaluate(`window.SignalContext.caishengSyncSignalProfile({id:null,x:0,y:70,width:900,height:650,keepVisible:true})`));
++  await check('SWITCH-BACK-TO-MAIN',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await pause(200);if(!await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]')?.getAttribute('aria-pressed')==='true'`))throw Error('Main tab was not selected');return{selectedInUI:true}});
+   await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
+  }
+ }catch(error){report.fatal=String(error.stack||error)}finally{collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();
 diff --git a/scripts/local-chat-layout-fixture.cjs b/scripts/local-chat-layout-fixture.cjs
 index ef0260b..4bb7d37 100644
 --- a/scripts/local-chat-layout-fixture.cjs
