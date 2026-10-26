@@ -10,7 +10,7 @@ env:
 jobs:
   integrate:
     if: ${{ !startsWith(github.event.head_commit.message, 'source165:') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       commit: ${{ steps.source.outputs.commit }}
     steps:
