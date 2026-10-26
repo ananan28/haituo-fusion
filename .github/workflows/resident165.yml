@@ -23,6 +23,7 @@ jobs:
           python-version: '3.12.10'
       - name: Apply isolated WhatsApp implementation
         run: |
+          git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
           git apply --check scripts/wa-resident-165.patch
           git apply scripts/wa-resident-165.patch
           python scripts/sync-local-chat-view.py
