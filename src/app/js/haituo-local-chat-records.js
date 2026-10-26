@@ -74,6 +74,7 @@ function createStore(options){
   pending.set(key,task);
   try{return await task}finally{if(pending.get(key)===task)pending.delete(key);if(!pending.has(base+':true')&&!pending.has(base+':false'))revisions.delete(base);}
  }
- return{observe,page,get,put,translate,close:()=>db.close()};
+ const content=require('./haituo-wa-translation-store.js').createStore({database:db});
+ return{observe,page,get,put,translate,content,close:()=>{content.flush();db.close()}};
 }
 module.exports={conversation,openEncrypted,createStore};

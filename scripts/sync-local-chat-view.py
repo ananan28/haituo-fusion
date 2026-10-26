@@ -1,9 +1,16 @@
 from pathlib import Path
+import re
 root=Path(__file__).resolve().parent.parent
-module=(root/'src/app/js/haituo-local-chat-view.js').read_text(encoding='utf-8')
-view=module.replace("'use strict';\n",'',1).replace('function conversation(id)','function haituoLocalChatConversation(id)',1).replace('conversation(', 'haituoLocalChatConversation(').replace('function install({','function haituoInstallLocalChatView({',1).replace('module.exports={install};','')
+resident=(root/'src/app/js/haituo-wa-resident.js').read_text(encoding='utf-8').replace("'use strict';\n",'',1).replace('module.exports={installResident};','')
+hooks=(root/'src/app/js/haituo-wa-node-hooks.js').read_text(encoding='utf-8').replace("'use strict';\n",'',1).replace('module.exports={installHooks};','')
+helper="""function haituoLocalChatConversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\\.us|s\\.whatsapp\\.net|g\\.us|lid))_/u)?.[1]||null:null}
+function haituoInstallLocalChatView(options){return installResident({...options,translate:(text,id)=>translateMessage(text,false,id),enabled:()=>incomingTranslationOn(),installMainWorld:()=>webFrame.executeJavaScript('('+installHooks.toString()+')({document,window})')})}
+"""
 p=root/'src/app/js/caisheng-webview-preload.js';source=p.read_text(encoding='utf-8')
 start=source.index('function haituoLocalChatConversation(');end=source.index('let haituoLocalBilingualView;',start)
-source=source[:start]+view+'\n'+source[end:]
+source=source[:start]+helper+resident+'\n'+hooks+'\n'+source[end:]
+source=re.sub(r'\nif\(isWhatsApp\(\)\)haituoLocalBilingualView=haituoInstallLocalChatView\([^\n]+\);','',source)
+old='let haituoLocalBilingualView;'
+source=source.replace(old,old+"\nif(isWhatsApp())haituoLocalBilingualView=haituoInstallLocalChatView({document,window,ipc:ipcRenderer,targetFor:haituoMessageTarget,keepPosition:haituoKeepTranslationPosition});",1)
 p.write_text(source,encoding='utf-8')
-print('Generated sandbox-safe local chat view from editable module')
+print('Generated WhatsApp resident controller + main-world creation hooks')

@@ -25590,12 +25590,9 @@ function haituoTranslateAttached(event, request, work) {
     // Do not allow an old text-only shared cache to choose a different message's attachment.
     request.messageScope = `${platform}:${account}:${request.messageId}`;
     if (platform === `whatsapp` && request.localMessageRecord === !0) {
-        const records=haituoLocalChatStore();
-        if(!request.forceRefresh && !records.get(account,request.messageId,request.text,request.targetLanguage)){
-            const legacy=HaituoMessageAttachments.get({platform,account,messageId:request.messageId},request);
-            if(legacy)records.put(account,request.messageId,request.text,request.targetLanguage,legacy);
-        }
-        return records.translate(account,request,work);
+        const records=haituoLocalChatStore(),chat=require('../js/haituo-local-chat-records.js').conversation(request.messageId);
+        if(!chat)throw Error(`WhatsApp 消息归属无效`);
+        return records.content.translate(account,account,chat,request,work);
     }
     if (platform === `signal` && request.localMessageRecord === !0) {
         // 1.6.1 records are read only for one-way migration into the original
@@ -25607,6 +25604,7 @@ function haituoTranslateAttached(event, request, work) {
 }
 
 function haituoSharedChatCacheKey(e) {
+    if(typeof e.messageScope===`string`&&e.messageScope.startsWith(`whatsapp:`))return JSON.stringify([`wa-content-cache-v1`,e.messageScope,e.targetLanguage||`zh-CN`,String(e.text||``).normalize(`NFKC`).replace(/\s+/gu,` `).trim()]);
     return JSON.stringify([ `literal-chat-message-v1`, e.targetLanguage || `zh-CN`, String(e.text || ``).trim() ]);
 }
 
@@ -25686,6 +25684,7 @@ const HaituoTranslationInFlight = new Map;
 const HaituoRequestQueue = [];
 const HaituoWebContentsByWorkspace = new Map;
 const HaituoWorkspaceBySession = new WeakMap;
+const HaituoWABootstrap=require('../js/haituo-wa-bootstrap.js').createBootstrap({app:p.app,webContents:p.webContents,log:message=>X.info(message)});
 let HaituoActiveRequests = 0;
 let HaituoOpenAIKeyCursor = 0;
 
@@ -25971,6 +25970,16 @@ function tm() {
         Jp(e.senderFrame?.url ?? ``);
         let t = $p().refreshShortcut ?? $p().shortcut;
         return typeof t == `string` ? t : `ctrl-r`;
+    }), p.ipcMain.removeHandler(`haituo:wa-cache-lookup`), p.ipcMain.handle(`haituo:wa-cache-lookup`,async(event,request)=>{
+        const account=haituoLocalChatAccount(event);
+        if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);
+        const store=haituoLocalChatStore().content,rows=await store.lookup(account,account,request.chat,request.lang,request.sources);
+        return rows.map((row,index)=>{if(request.outgoing?.[index]&&$p().backTranslationEnabled!==!1){const original=store.sentGet(account,account,request.chat,row.source);if(original)return{...row,state:`hit`,text:original,sentSource:!0}}return row});
+    }), p.ipcMain.removeHandler(`haituo:wa-sent-source`),p.ipcMain.handle(`haituo:wa-sent-source`,(event,request)=>{const account=haituoLocalChatAccount(event);if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);haituoLocalChatStore().content.sentPut(account,account,request.chat,request.original,request.sentText);return!0;
+    }), p.ipcMain.removeHandler(`haituo:wa-cache-warm`), p.ipcMain.handle(`haituo:wa-cache-warm`,async(event,request)=>{
+        const account=haituoLocalChatAccount(event);if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);
+        const store=haituoLocalChatStore().content;await store.migrate(account,account,request.chat);return store.warm(account,account,request.chat,request.lang,{before:request.before});
+    }), p.ipcMain.removeHandler(`haituo:wa-cache-flush`), p.ipcMain.handle(`haituo:wa-cache-flush`,event=>{haituoLocalChatAccount(event);haituoLocalChatStore().content.flush();return true;
     }), p.ipcMain.removeAllListeners(`haituo:local-chat-read`), p.ipcMain.on(`haituo:local-chat-read`,(event,request)=>{
         try{event.returnValue={ok:!0,page:haituoLocalChatStore().page(haituoLocalChatAccount(event),request?.chat,{ids:request?.ids})}}
         catch(error){event.returnValue={ok:!1,error:`本机译文读取失败，原对话保持可用`}}
@@ -29149,6 +29158,7 @@ async function nv() {
         t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`),
         p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler);
         if (c === `whatsapp`) {
+            HaituoWABootstrap.installSession(p.session.fromPartition(r.partition??``));
             let e = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, t = p.session.fromPartition(r.partition ?? ``);
             t.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
             t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler(haituoMediaPermissionCheckHandler),
