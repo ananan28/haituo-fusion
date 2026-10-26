@@ -1,0 +1,14 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const code=fs.readFileSync(path.join(__dirname,'../src/app/bundles/main.js'),'utf8'),start=code.indexOf('function haituoAttachWebviewHandler('),end=code.indexOf('    Z.webContents.on(`will-attach-webview`',start);assert(start>=0&&end>start);
+function setup(platform='whatsapp',invalid=false){
+ const calls=[],errors=[],prefs={},event={blocked:false,preventDefault(){this.blocked=true}},params={src:'https://web.'+(platform==='whatsapp'?'whatsapp.com':'telegram.org')+'/?haituoWorkspace='+platform+'-qa',partition:'persist:caisheng-'+platform+'-qa'};
+ const session={preconnect(value){calls.push(['preconnect',value])},setUserAgent(value){calls.push(['userAgent',value])},setPermissionCheckHandler(){},setPermissionRequestHandler(){},webRequest:{onBeforeSendHeaders(fn){calls.push(['headers',fn])}}};
+ const context={URL,require,n:{W:()=>({platformId:platform,workspaceId:platform+'-qa'})},p:{session:{fromPartition:()=>session}},HaituoWorkspaceBySession:new WeakMap,HaituoWABootstrap:{prepare(value,r){if(invalid)throw Error('fixture preload missing');assert.equal(value,prefs);assert.equal(r,params);calls.push(['prepare',value])},installSession(value,url){assert.equal(value,session);calls.push(['installSession',url])}},X:{error:message=>errors.push(message)},s:path,$:path.resolve(__dirname,'../src/app'),haituoMediaPermissionHandler(){},haituoMediaPermissionCheckHandler(){}};
+ // Execute only this business handler against stubs. Never execute preload code.
+ const handler=new vm.Script('('+code.slice(start,end).trim()+')').runInNewContext(context);return{calls,errors,prefs,event,params,session,run:()=>handler(event,prefs,params)};
+}
+test('production WhatsApp attach handler validates outer webPreferences before configuring its session',()=>{const x=setup();x.run();assert.equal(x.event.blocked,false,x.errors.join('\n'));assert.equal(x.errors.length,0);assert.deepEqual(x.calls.slice(0,3).map(x=>x[0]),['prepare','installSession','preconnect']);assert.equal(x.calls.filter(x=>x[0]==='prepare').length,1);assert.equal(x.prefs.sandbox,true);assert.equal(x.prefs.contextIsolation,true);assert.equal(x.prefs.nodeIntegration,false);assert(x.prefs.preload.endsWith('caisheng-webview-preload.js'));assert(x.calls.some(x=>x[0]==='userAgent'&&x[1].includes('Chrome/140')))});
+test('production Telegram attach path stays separate from WhatsApp bootstrap',()=>{const x=setup('telegram');x.run();assert.equal(x.event.blocked,false);assert.equal(x.calls.length,0);assert.equal(x.prefs.sandbox,true)});
+
+test('preload validation failure uses the outer event without a second TDZ',()=>{const x=setup('whatsapp',true);assert.doesNotThrow(()=>x.run());assert.equal(x.event.blocked,true);assert.equal(x.errors.length,1);assert(x.errors[0].includes('fixture preload missing'));assert.equal(x.calls.length,0)});

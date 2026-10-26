@@ -86,11 +86,22 @@ jobs:
       - name: Native sandboxed WhatsApp webview startup regression
         timeout-minutes: 3
         run: node scripts/wa-guest-native-check.cjs
+      - name: Package Windows source for immediate diagnostic delivery
+        if: matrix.target == 'windows'
+        run: python scripts/package-source.py --target windows
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'windows'
+        with:
+          name: Haituo-1.6.5-diagnostic-windows
+          path: |
+            windows/out/*Setup.exe
+            source-packages/*.zip
       - name: Native settings and offline restart regression
         run: node scripts/native-attachments-check.cjs
       - name: Runtime dependency and transport checks
         run: python scripts/build.py --target ${{ matrix.target }} --runtime-tests-only
       - name: Package corresponding client source
+        if: matrix.target == 'macos'
         run: python scripts/package-source.py --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         if: always()
@@ -101,6 +112,7 @@ jobs:
             windows/verification/**
             macos/verification/**
       - uses: actions/upload-artifact@v4
+        if: matrix.target == 'macos'
         with:
           name: Haituo-1.6.5-diagnostic-${{ matrix.target }}
           path: |

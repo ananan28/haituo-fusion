@@ -29162,12 +29162,12 @@ async function nv() {
             try { HaituoWABootstrap.prepare(t,r); }
             catch(error) { X.error(`WhatsApp preload validation failed: ${error.message}`); e.preventDefault(); return; }
             HaituoWABootstrap.installSession(p.session.fromPartition(r.partition??``),r.src);
-            let e = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, t = p.session.fromPartition(r.partition ?? ``);
-            t.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
-            t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler(haituoMediaPermissionCheckHandler),
-            t.setPermissionRequestHandler(haituoMediaPermissionHandler), t.webRequest.onBeforeSendHeaders((t, n) => {
+            const whatsappUserAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, whatsappSession = p.session.fromPartition(r.partition ?? ``);
+            whatsappSession.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
+            whatsappSession.setUserAgent(whatsappUserAgent, `zh-CN,zh`), whatsappSession.setPermissionCheckHandler(haituoMediaPermissionCheckHandler),
+            whatsappSession.setPermissionRequestHandler(haituoMediaPermissionHandler), whatsappSession.webRequest.onBeforeSendHeaders((t, n) => {
                 let r = t.requestHeaders;
-                r[`User-Agent`] = e, r[`Accept-Language`] = `zh-CN,zh;q=0.9`, r[`sec-ch-ua`] = `"Chromium";v="140", "Google Chrome";v="140", "Not=A?Brand";v="24"`, 
+                r[`User-Agent`] = whatsappUserAgent, r[`Accept-Language`] = `zh-CN,zh;q=0.9`, r[`sec-ch-ua`] = `"Chromium";v="140", "Google Chrome";v="140", "Not=A?Brand";v="24"`,
                 r[`sec-ch-ua-mobile`] = `?0`, r[`sec-ch-ua-platform`] = `"Windows"`, n({
                     requestHeaders: r
                 });
@@ -32226,4 +32226,4 @@ if ($u === 'signal-main') p.app.whenReady().then(() => {
     try { haituoScreenshotController.configure($p()); } catch (error) { X.warn('截图快捷键注册失败：'+error.message); }
 });
 
-if(process.env.HAITUO_WA_GUEST_TEST==='1'&&$u==='signal-main')p.app.whenReady().then(()=>require('../js/haituo-wa-guest-fixture.js').run({electron:p,bootstrap:HaituoWABootstrap,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),reportPath:process.env.HAITUO_WA_GUEST_REPORT,waitForAppReady:async()=>{const end=Date.now()+45000;while(!Vv&&Date.now()<end)await new Promise(resolve=>setTimeout(resolve,50));if(!Vv)throw Error('Application database initialization did not start');const result=await Vv;if(!result?.ok)throw Error('Application database initialization failed');},shutdown:async()=>{await E_.close();}}));
+if(process.env.HAITUO_WA_GUEST_TEST==='1'&&$u==='signal-main')p.app.whenReady().then(()=>require('../js/haituo-wa-guest-fixture.js').run({electron:p,bootstrap:HaituoWABootstrap,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),reportPath:process.env.HAITUO_WA_GUEST_REPORT,waitForAppReady:async()=>{const end=Date.now()+45000;while(!Vv&&Date.now()<end)await new Promise(resolve=>setTimeout(resolve,50));if(!Vv)throw Error('Application database initialization did not start');const result=await Vv;if(!result?.ok)throw Error('Application database initialization failed');let handler;while(!(handler=Z?.webContents.listeners('will-attach-webview').find(fn=>fn.name==='haituoAttachWebviewHandler'))&&Date.now()<end)await new Promise(resolve=>setTimeout(resolve,50));if(!handler)throw Error('Production webview attach handler unavailable');return handler;},shutdown:async()=>{await E_.close();}}));

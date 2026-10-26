@@ -3,7 +3,7 @@
 async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,shutdown}){
  const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
  const {app,BrowserWindow,session}=electron;const report={scope:'REAL_ELECTRON_WEBVIEW_SYNTHETIC_PAGE',realAccount:'UNTESTED',versions:process.versions,checks:[],errors:[],events:[]};let host,timer;
- try{await waitForAppReady();const partition='haituo-wa-startup-fixture-'+Date.now(),guestSession=session.fromPartition(partition);
+ try{const attachHandler=await waitForAppReady();if(typeof attachHandler!=='function')throw Error('Production attach handler is required');const partition='persist:caisheng-whatsapp-startup-fixture-'+Date.now(),guestSession=session.fromPartition(partition);
  // Match the production WhatsApp session's ASCII browser UA. Electron's
  // default Chinese product-name UA cannot be converted to fetch Headers by
  // protocol.handle (ByteString), which would invalidate the offline fixture.
@@ -15,7 +15,7 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
  // This isolated offline fixture replaces that guard on THIS temporary host
  // only, with an exact URL/partition/preload allowlist. Production is unchanged.
  host.webContents.removeAllListeners('will-attach-webview');
- host.webContents.on('will-attach-webview',(event,prefs,params)=>{report.events.push({type:'will-attach',url:params.src,partition:params.partition});if(params.src!=='https://web.whatsapp.com/haituo-startup-fixture'||params.partition!==partition){event.preventDefault();report.errors.push('Fixture attach allowlist rejected');return}bootstrap.prepare(prefs,params)});
+ host.webContents.on('will-attach-webview',(event,prefs,params)=>{report.events.push({type:'will-attach',url:params.src,partition:params.partition});if(params.src!=='https://web.whatsapp.com/haituo-startup-fixture'||params.partition!==partition){event.preventDefault();report.errors.push('Fixture attach allowlist rejected');return}attachHandler(event,prefs,params);report.events.push({type:'production-attach-handler',preload:params.preload,blocked:!!event.defaultPrevented})});
  host.webContents.on('console-message',(_e,details)=>report.events.push({type:'host-console',message:typeof details==='object'?details.message:String(details)}));
  const result=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('Guest did not finish navigation/preload within 30s')),30000);
  host.webContents.on('did-attach-webview',(_event,guest)=>{report.events.push({type:'did-attach',id:guest.id});bootstrap.attach(guest,host.webContents);let handshake=false;guest.on('did-start-navigation',(_e,url,inPlace,main)=>report.events.push({type:'navigation',url,inPlace,main}));guest.on('did-fail-load',(_e,code,message,url,main)=>{report.events.push({type:'load-failed',code,message,url,main});if(main&&code!==-3)reject(Error('Fixture navigation failed: '+code+' '+message))});
