@@ -267,6 +267,6 @@ test('WhatsApp and Signal outgoing output helpers preserve provider text exactly
  }
 });
 test('all translation UI prompts and screenshot AI policy use faithful output',()=>{
- for(const file of ['src/app/js/caisheng-webview-preload.js','src/app/bundles/preload/main.js'])assert.doesNotMatch(fs.readFileSync(file,'utf8'),/自然口语|口语化|生成自然/);
+ for(const file of ['src/app/js/caisheng-webview-preload.js','src/app/bundles/preload/main.js'])assert.doesNotMatch(fs.readFileSync(file,'utf8'),/自然口语|口语化|生成自然|AI 润色/);
  const source=fs.readFileSync('src/app/js/haituo-screenshot.js','utf8');assert.match(source,/translate directly and faithfully/);
 });

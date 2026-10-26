@@ -1,4 +1,4 @@
-"""Freeze Signal core; permit only the two explicitly requested translation-output edits."""
+"""Freeze Signal core; permit only the explicitly requested translation-output edits."""
 import pathlib, subprocess
 BASE = "42e7aac6074979f5e654880efbc993799944c8f2"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -13,5 +13,6 @@ for path in files:
         old = "调用 AI 结合最近聊天上下文，生成自然口语化译文".encode()
         assert expected.count(old) == 1, "Signal translation tooltip baseline changed"
         expected = expected.replace(old, "调用 AI 忠实原意，精准直译".encode())
+        expected = expected.replace("AI 润色（Google 对照）".encode(), "AI 直译（Google 对照）".encode())
     assert (ROOT/path).read_bytes() == expected, "Unexpected Signal core change: "+path
-print(f"Signal core freeze: {len(files)} files verified; only identity output helper and faithful AI tooltip allowed")
+print(f"Signal core freeze: {len(files)} files verified; only identity output helper and faithful AI labels allowed")
