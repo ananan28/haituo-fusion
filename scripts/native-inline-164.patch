@@ -220,10 +220,10 @@ index 919c2ff..0575ad4 100644
   }finally{view?.destroy();host.remove()}
  };
 diff --git a/scripts/local-chat-view.dom.cjs b/scripts/local-chat-view.dom.cjs
-index 0ac4bdf..c10c92b 100644
+index 0ac4bdf..f0ddcdf 100644
 --- a/scripts/local-chat-view.dom.cjs
 +++ b/scripts/local-chat-view.dom.cjs
-@@ -2,48 +2,24 @@
+@@ -2,48 +2,29 @@
  const {test}=require('node:test'),assert=require('node:assert/strict');
  const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.HAITUO_QA_NODE_MODULES||'/tmp/haituo-qa/node_modules']}));
  const {install}=require('../src/app/js/haituo-local-chat-view.js');
@@ -292,6 +292,11 @@ index 0ac4bdf..c10c92b 100644
 +test('destroying the translation observer never removes original messages or controls',t=>{const x=setup(t);x.view.destroy();assert.equal(x.original.isConnected,true);assert.equal(x.footer.isConnected,true)});
 +
 +test('a restored native message batch uses one layout transaction and does not rescan its own insertions',async t=>{let layouts=0;const stored=Array.from({length:100},(_,i)=>({...record,id:'false_123@c.us_'+i,source:'Hello '+i}));const x=setup(t,{stored,html:stored.map(r=>bubble(r.id,r.source)).join(''),keepPosition:(_node,work)=>{layouts++;return work()}});assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,100);assert.equal(layouts,1);await new Promise(r=>setImmediate(r));assert.equal(layouts,1)});
++
++test('native reconciliation removing only the translated child restores saved text before the next paint',async t=>{const x=setup(t);x.original.querySelector('.haituo-wa-message-translation').remove();await new Promise(r=>x.w.requestAnimationFrame(r));assert.equal(x.original.querySelector('[data-haituo-saved-text]').textContent,'你好');assert.equal(x.w.document.querySelector('[data-id]'),x.original);assert.equal(x.calls.includes('haituo:local-chat-observe'),false)});
++test('one virtualized message batch is restored in one layout transaction',async t=>{let layouts=0;const stored=Array.from({length:100},(_,i)=>({...record,id:'false_123@c.us_'+i,source:'Hello '+i}));const x=setup(t,{stored,html:stored.map(r=>bubble(r.id,r.source)).join(''),keepPosition:(_node,work)=>{layouts++;return work()}});await new Promise(r=>setImmediate(r));layouts=0;x.w.document.querySelector('#scroll').innerHTML=stored.map(r=>bubble(r.id,r.source)).join('');await new Promise(r=>x.w.requestAnimationFrame(r));assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,100);assert.equal(layouts,1)});
++
++test('a native bubble reused for another same-text message receives its own record identity and translation',async t=>{const x=setup(t),next='false_999@c.us_same';x.data.set(next,{...record,id:next,translations:{'zh-CN':{text:'另一条消息的译文'}}});x.original.setAttribute('data-id',next);await new Promise(r=>x.w.requestAnimationFrame(r));const result=x.original.querySelector('.haituo-wa-message-translation');assert.equal(result.dataset.messageId,next);assert.equal(result.querySelector('[data-haituo-saved-text]').textContent,'另一条消息的译文')});
 diff --git a/scripts/native-attachments-check.cjs b/scripts/native-attachments-check.cjs
 index 3257218..49cfadc 100644
 --- a/scripts/native-attachments-check.cjs
@@ -441,7 +446,7 @@ index 959643b..4dcaf6b 100644
      if (haituoScreenshotController) {
          // Re-registering on every save made an occupied screenshot shortcut
 diff --git a/src/app/js/caisheng-webview-preload.js b/src/app/js/caisheng-webview-preload.js
-index cf1b54f..b4e97d7 100644
+index cf1b54f..2506e9e 100644
 --- a/src/app/js/caisheng-webview-preload.js
 +++ b/src/app/js/caisheng-webview-preload.js
 @@ -1607,120 +1607,73 @@ function haituoCurrentWebMessage(item) {
@@ -508,7 +513,7 @@ index cf1b54f..b4e97d7 100644
 +  const existing=item.node.querySelector('.haituo-wa-message-translation');
 +  if(!value){if(existing?.dataset.haituoOwned==='record'&&(existing.dataset.messageId!==item.id||existing.dataset.source!==item.source||existing.dataset.target!==target))place(()=>existing.remove());return;}
 +  item.node.dataset.haituoTranslationSource=item.source;item.node.dataset.haituoTranslationMessageId=item.id;item.node.dataset.haituoTranslationTarget=target;item.node.dataset.haituoTranslationDone='1';
-+  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)place(()=>{text.textContent=value});return;}
++  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.messageId===item.id&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)place(()=>{text.textContent=value});return;}
 +  const mount=mountFor(item);if(!mount)return;
 +  place(()=>{
 +   existing?.remove();
@@ -619,7 +624,7 @@ index cf1b54f..b4e97d7 100644
 - observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
 - return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
 + function showError(message,id){if(!id)return;for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node),mount=item&&mountFor(item);if(!mount)continue;let error=node.querySelector('.haituo-wa-translation-error');if(!error){error=document.createElement('button');error.className='haituo-wa-translation-error';error.type='button';error.onclick=async()=>{try{await retranslate(item.source,id);await refresh(id);error.remove()}catch(next){error.title=next.message}};mount.append(error)}error.textContent='翻译失败 · 点击重试';error.title=String(message||'翻译暂时不可用')}}
-+ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='childList'&&[...event.addedNodes,...event.removedNodes].length&&[...event.addedNodes,...event.removedNodes].every(n=>n.nodeType===1&&n.matches('.haituo-wa-message-translation,.haituo-wa-translation-error')))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}for(const root of roots)hydrate(root)});
++ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='childList'&&event.addedNodes.length&&[...event.addedNodes,...event.removedNodes].every(n=>n.nodeType===1&&n.matches('.haituo-wa-message-translation,.haituo-wa-translation-error')))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}const nodes=new Set;for(const root of roots)for(const node of candidates(root))nodes.add(node);const items=[...nodes].map(read).filter(Boolean);readSaved(items);renderAll(items)});
 + observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id']});hydrate(document.querySelector('#main'));
 + return{observe,refresh,showError,isActive:()=>!destroyed,isManaged:()=>!destroyed,destroy(){destroyed=true;observer.disconnect();records.clear();checked.clear()}};
  }
@@ -644,7 +649,7 @@ index cf1b54f..b4e97d7 100644
              if (!webTranslationActive()) return;
              const { e, t, n, r, mount } = item;
 diff --git a/src/app/js/haituo-local-chat-view.js b/src/app/js/haituo-local-chat-view.js
-index e5cff86..b400e92 100644
+index e5cff86..30d1d1b 100644
 --- a/src/app/js/haituo-local-chat-view.js
 +++ b/src/app/js/haituo-local-chat-view.js
 @@ -1,118 +1,71 @@
@@ -710,7 +715,7 @@ index e5cff86..b400e92 100644
 +  const existing=item.node.querySelector('.haituo-wa-message-translation');
 +  if(!value){if(existing?.dataset.haituoOwned==='record'&&(existing.dataset.messageId!==item.id||existing.dataset.source!==item.source||existing.dataset.target!==target))place(()=>existing.remove());return;}
 +  item.node.dataset.haituoTranslationSource=item.source;item.node.dataset.haituoTranslationMessageId=item.id;item.node.dataset.haituoTranslationTarget=target;item.node.dataset.haituoTranslationDone='1';
-+  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)place(()=>{text.textContent=value});return;}
++  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.messageId===item.id&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)place(()=>{text.textContent=value});return;}
 +  const mount=mountFor(item);if(!mount)return;
 +  place(()=>{
 +   existing?.remove();
@@ -821,7 +826,7 @@ index e5cff86..b400e92 100644
 - observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
 - return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
 + function showError(message,id){if(!id)return;for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node),mount=item&&mountFor(item);if(!mount)continue;let error=node.querySelector('.haituo-wa-translation-error');if(!error){error=document.createElement('button');error.className='haituo-wa-translation-error';error.type='button';error.onclick=async()=>{try{await retranslate(item.source,id);await refresh(id);error.remove()}catch(next){error.title=next.message}};mount.append(error)}error.textContent='翻译失败 · 点击重试';error.title=String(message||'翻译暂时不可用')}}
-+ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='childList'&&[...event.addedNodes,...event.removedNodes].length&&[...event.addedNodes,...event.removedNodes].every(n=>n.nodeType===1&&n.matches('.haituo-wa-message-translation,.haituo-wa-translation-error')))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}for(const root of roots)hydrate(root)});
++ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='childList'&&event.addedNodes.length&&[...event.addedNodes,...event.removedNodes].every(n=>n.nodeType===1&&n.matches('.haituo-wa-message-translation,.haituo-wa-translation-error')))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}const nodes=new Set;for(const root of roots)for(const node of candidates(root))nodes.add(node);const items=[...nodes].map(read).filter(Boolean);readSaved(items);renderAll(items)});
 + observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id']});hydrate(document.querySelector('#main'));
 + return{observe,refresh,showError,isActive:()=>!destroyed,isManaged:()=>!destroyed,destroy(){destroyed=true;observer.disconnect();records.clear();checked.clear()}};
  }
