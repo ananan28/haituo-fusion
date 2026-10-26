@@ -86,7 +86,7 @@ index 0000000..8144641
 + const result=await call('Runtime.evaluate',{expression:`(async()=>{const local={exports:{}};((module)=>{${source}\n})(local);return (${fixture})(local.exports.install)})()`,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);console.log('WHATSAPP_CHROMIUM_LAYOUT_OK',JSON.stringify(result.result.value));
 + }catch(error){console.error(error);process.exitCode=1}finally{try{await call('Browser.close')}catch{}try{socket?.close()}catch{}browser.kill();await pause(250);fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100})}})();
 diff --git a/scripts/local-chat-layout-fixture.cjs b/scripts/local-chat-layout-fixture.cjs
-index ef0260b..88ed4ff 100644
+index ef0260b..919c2ff 100644
 --- a/scripts/local-chat-layout-fixture.cjs
 +++ b/scripts/local-chat-layout-fixture.cjs
 @@ -1,8 +1,12 @@
@@ -105,24 +105,34 @@ index ef0260b..88ed4ff 100644
   let view;
   try{
    const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}},metadata:'10:00'});
-@@ -12,7 +16,7 @@ module.exports=async function verifyPersistentLayout(install){
+@@ -11,13 +15,15 @@ module.exports=async function verifyPersistentLayout(install){
+   let item=native('123@c.us','Contact A');
    const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
    view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
++  view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked before text loaded');view.setOfficial(false);
    const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
 -  assert(w.getComputedStyle(item).visibility==='hidden','Native original flashed during storage read');await first;await tick();
 +  assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
    const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
    assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
    list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
-@@ -30,5 +34,5 @@ module.exports=async function verifyPersistentLayout(install){
+   // Recycle official nodes while leaving the local message object untouched.
+   item=native('123@c.us','Contact A');await tick();assert(d.querySelector('article')===original,'Native recycling remounted a local message');assert(list.scrollTop===savedTop,'Native recycling changed local scroll position');
++  const pane=d.createElement('div');pane.id='pane-side';d.body.append(pane);pane.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked while navigation was pending');view.setOfficial(false);
+   item=native('999@c.us','Contact B');await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(!original.isConnected,'Old conversation leaked into the new one');
+   item=native('123@c.us','Contact A');const back=view.observe([{id:item.dataset.id,source:item.textContent,metadata:'return'}],[item]);assert(d.querySelector('article')===original,'Cached conversation was not reused before IPC');assert(list.scrollTop===savedTop,'Returning to a chat lost scroll position');await back;await tick();assert(list.scrollTop===savedTop,'DB refresh moved the restored conversation');
+   // At the top, loading older records must preserve the first visible message.
+@@ -29,6 +35,6 @@ module.exports=async function verifyPersistentLayout(install){
+   // Simulated renderer restart: retained disk records are supplied together,
    // and neither translation generation nor original-DOM patching is needed.
    view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
-   return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true};
+-  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true};
 - }finally{view?.destroy();iframe.remove()}
++  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true,officialMedia:true};
 + }finally{view?.destroy();host.remove()}
  };
 diff --git a/scripts/local-chat-view.dom.cjs b/scripts/local-chat-view.dom.cjs
-index f9091dc..5dc47bb 100644
+index f9091dc..0ac4bdf 100644
 --- a/scripts/local-chat-view.dom.cjs
 +++ b/scripts/local-chat-view.dom.cjs
 @@ -7,8 +7,8 @@ function setup(t,{records=[entry],fail=false}={}){const dom=new JSDOM('<main id=
@@ -145,7 +155,7 @@ index f9091dc..5dc47bb 100644
  });
  test('saved translations keep the same message/translation elements through scrolling and refresh',async t=>{
   const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article'),translation=article.querySelector('.haituo-local-message-translation');
-@@ -40,8 +40,8 @@ test('prepending older pages keeps already loaded bilingual nodes and order',asy
+@@ -40,8 +40,10 @@ test('prepending older pages keeps already loaded bilingual nodes and order',asy
   const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article');x.ipc.invoke=async()=>({chat:'123@c.us',messages:[{...entry,id:'false_123@c.us_older'},entry],total:2,hasOlder:false});await x.view.observe([{id:'false_123@c.us_older',source:'Hello'},{id,source:'Hello'}],[x.element]);const nodes=[...x.w.document.querySelectorAll('article')];assert.equal(nodes[1],article);assert.equal(nodes[0].querySelector('.haituo-local-message-translation').textContent,'你好');
  });
  test('navigation keeps native messages hidden instead of restoring an original-only frame',async t=>{
@@ -156,6 +166,8 @@ index f9091dc..5dc47bb 100644
 - const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.view.destroy();assert.equal(x.scroller.style.visibility,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.head.querySelector('style'),null);
 + const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.view.destroy();assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.head.querySelector('style'),null);
  });
++test('official media view works before any text record exists and remains visible across DOM mutations',async t=>{const x=setup(t);x.view.setOfficial(true);x.w.document.querySelector('#main').append(x.w.document.createElement('span'));await new Promise(r=>setImmediate(r));assert.equal(x.scroller.style.opacity,'');const style=x.w.document.head.querySelector('style');assert.equal(style.media,'not all');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat button').textContent,'返回本机双语记录');x.w.document.querySelector('#haituo-local-bilingual-chat button').click();assert.equal(style.media,'all')});
++test('official media view can be opened while navigation waits for a text-less chat',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const pane=x.w.document.createElement('div');pane.id='pane-side';x.w.document.body.append(pane);pane.dispatchEvent(new x.w.Event('pointerdown',{bubbles:true}));x.view.setOfficial(true);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.head.querySelector('style').media,'not all');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none');x.w.document.querySelector('#haituo-local-bilingual-chat button').click();assert.equal(x.w.document.head.querySelector('style').media,'all');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none')});
 diff --git a/scripts/whatsapp-records-scanner.dom.cjs b/scripts/whatsapp-records-scanner.dom.cjs
 index 966fc7c..5258c45 100644
 --- a/scripts/whatsapp-records-scanner.dom.cjs
@@ -181,10 +193,18 @@ index c707665..959643b 100644
      e.on(`focus`, t), e.on(`blur`, t), e.once(`ready-to-show`, t);
      let r = setInterval(t, 1e4);
 diff --git a/src/app/js/caisheng-webview-preload.js b/src/app/js/caisheng-webview-preload.js
-index 25cbe5b..aa21c63 100644
+index 25cbe5b..cf1b54f 100644
 --- a/src/app/js/caisheng-webview-preload.js
 +++ b/src/app/js/caisheng-webview-preload.js
-@@ -1616,9 +1616,11 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+@@ -1609,16 +1609,18 @@ function haituoCurrentWebMessage(item) {
+ function haituoLocalChatConversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
+ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate}){
+  const sessions=new Map,hiddenRoots=new Map;
+- let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false;
++ let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false,officialOverride=false;
+  const root=document.createElement('section');root.id='haituo-local-bilingual-chat';root.setAttribute('aria-label','海拓本机双语聊天记录');
+  Object.assign(root.style,{position:'fixed',zIndex:'1000',display:'none',boxSizing:'border-box',background:'var(--conversation-panel-background,#efeae2)',color:'var(--primary,#111b21)',overflow:'hidden',flexDirection:'column'});
+  const bar=document.createElement('div'),toggle=document.createElement('button'),label=document.createElement('span'),status=document.createElement('div');
   Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
   label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
   Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
@@ -198,7 +218,7 @@ index 25cbe5b..aa21c63 100644
   (document.head||document.documentElement).append(privacy);
   bar.append(label,toggle);root.append(bar,status);document.body.append(root);
   function state(chat){if(!sessions.has(chat)){
-@@ -1627,8 +1629,8 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+@@ -1627,19 +1629,20 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
    list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
    sessions.set(chat,value);
   }return sessions.get(chat)}
@@ -209,29 +229,59 @@ index 25cbe5b..aa21c63 100644
   function bounds(){
    if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
    const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
-@@ -1636,7 +1638,7 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+   const top=header?.bottom>r.top?header.bottom:r.top,bottom=footer?.top>top?Math.min(footer.top,r.bottom):r.bottom;return{left:r.left,top,width:r.width,height:Math.max(0,bottom-top)};
   }
   function position(){
-   if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
 -  const official=!!current?.official&&!waiting;privacy.disabled=official;
-+  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
++  if(destroyed)return;
++  const official=officialOverride||!!current?.official&&!waiting;privacy.media=official?'not all':'all';
++  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
    if(official)restoreNative();else hideNative(nativeRoot);
++  const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
    Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
-   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
-@@ -1648,7 +1650,7 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+-  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+   if(current)current.list.style.display=!official&&!waiting&&current.ready?'block':'none';
+   status.style.display=official&&!current?.error?'none':'block';
+   status.textContent=current?.error||(waiting||!current?.ready?'正在读取本机双语记录…':`已保存 ${current.total} 条本机记录；图片、语音请切换官方视图。`);
+@@ -1648,8 +1651,8 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
    if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
    position();
   }
 - function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.disabled=true;root.style.display='none';return;}position()}
-+ function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
-  toggle.onclick=()=>setOfficial(!current?.official);
+- toggle.onclick=()=>setOfficial(!current?.official);
++ function setOfficial(value){officialOverride=!!value;if(current&&!waiting)current.official=!!value;position()}
++ toggle.onclick=()=>setOfficial(!(officialOverride||!!current?.official&&!waiting));
   function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
   function updateNode(value,record){
+   const target=targetFor(record.source),translation=record.translations?.[target]?.text||'';let node=value.nodes.get(record.id);
+@@ -1711,11 +1714,11 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+   try{if(value.older){await enqueue(value,async()=>{const page=await ipc.invoke('haituo:local-chat-page',value.chat,{before:value.ordered[0],limit:200});apply(value,page,{prepend:true})})}else if(nativeRoot&&current===value){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight)}}catch(error){value.error=error.message;position()}finally{value.loading=false}
+  }
+  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
+- function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
++ function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;officialOverride=false;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
+  document.addEventListener('pointerdown',navigate,true);
+  // Cover first load and keyboard navigation in the same mutation microtask,
+  // before the browser paints newly created native original-only messages.
+- const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
++ const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;officialOverride=false;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
+  observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
+  return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
+ }
 diff --git a/src/app/js/haituo-local-chat-view.js b/src/app/js/haituo-local-chat-view.js
-index 6e979bb..d91fb99 100644
+index 6e979bb..e5cff86 100644
 --- a/src/app/js/haituo-local-chat-view.js
 +++ b/src/app/js/haituo-local-chat-view.js
-@@ -9,9 +9,11 @@ function install({document,window,ipc,targetFor,retranslate}){
+@@ -2,16 +2,18 @@
+ function conversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
+ function install({document,window,ipc,targetFor,retranslate}){
+  const sessions=new Map,hiddenRoots=new Map;
+- let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false;
++ let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false,officialOverride=false;
+  const root=document.createElement('section');root.id='haituo-local-bilingual-chat';root.setAttribute('aria-label','海拓本机双语聊天记录');
+  Object.assign(root.style,{position:'fixed',zIndex:'1000',display:'none',boxSizing:'border-box',background:'var(--conversation-panel-background,#efeae2)',color:'var(--primary,#111b21)',overflow:'hidden',flexDirection:'column'});
+  const bar=document.createElement('div'),toggle=document.createElement('button'),label=document.createElement('span'),status=document.createElement('div');
   Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
   label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
   Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
@@ -245,7 +295,7 @@ index 6e979bb..d91fb99 100644
   (document.head||document.documentElement).append(privacy);
   bar.append(label,toggle);root.append(bar,status);document.body.append(root);
   function state(chat){if(!sessions.has(chat)){
-@@ -20,8 +22,8 @@ function install({document,window,ipc,targetFor,retranslate}){
+@@ -20,19 +22,20 @@ function install({document,window,ipc,targetFor,retranslate}){
    list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
    sessions.set(chat,value);
   }return sessions.get(chat)}
@@ -256,21 +306,43 @@ index 6e979bb..d91fb99 100644
   function bounds(){
    if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
    const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
-@@ -29,7 +31,7 @@ function install({document,window,ipc,targetFor,retranslate}){
+   const top=header?.bottom>r.top?header.bottom:r.top,bottom=footer?.top>top?Math.min(footer.top,r.bottom):r.bottom;return{left:r.left,top,width:r.width,height:Math.max(0,bottom-top)};
   }
   function position(){
-   if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
 -  const official=!!current?.official&&!waiting;privacy.disabled=official;
-+  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
++  if(destroyed)return;
++  const official=officialOverride||!!current?.official&&!waiting;privacy.media=official?'not all':'all';
++  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
    if(official)restoreNative();else hideNative(nativeRoot);
++  const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
    Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
-   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
-@@ -41,7 +43,7 @@ function install({document,window,ipc,targetFor,retranslate}){
+-  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+   if(current)current.list.style.display=!official&&!waiting&&current.ready?'block':'none';
+   status.style.display=official&&!current?.error?'none':'block';
+   status.textContent=current?.error||(waiting||!current?.ready?'正在读取本机双语记录…':`已保存 ${current.total} 条本机记录；图片、语音请切换官方视图。`);
+@@ -41,8 +44,8 @@ function install({document,window,ipc,targetFor,retranslate}){
    if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
    position();
   }
 - function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.disabled=true;root.style.display='none';return;}position()}
-+ function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
-  toggle.onclick=()=>setOfficial(!current?.official);
+- toggle.onclick=()=>setOfficial(!current?.official);
++ function setOfficial(value){officialOverride=!!value;if(current&&!waiting)current.official=!!value;position()}
++ toggle.onclick=()=>setOfficial(!(officialOverride||!!current?.official&&!waiting));
   function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
   function updateNode(value,record){
+   const target=targetFor(record.source),translation=record.translations?.[target]?.text||'';let node=value.nodes.get(record.id);
+@@ -104,11 +107,11 @@ function install({document,window,ipc,targetFor,retranslate}){
+   try{if(value.older){await enqueue(value,async()=>{const page=await ipc.invoke('haituo:local-chat-page',value.chat,{before:value.ordered[0],limit:200});apply(value,page,{prepend:true})})}else if(nativeRoot&&current===value){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight)}}catch(error){value.error=error.message;position()}finally{value.loading=false}
+  }
+  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
+- function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
++ function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;officialOverride=false;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
+  document.addEventListener('pointerdown',navigate,true);
+  // Cover first load and keyboard navigation in the same mutation microtask,
+  // before the browser paints newly created native original-only messages.
+- const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
++ const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;officialOverride=false;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
+  observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
+  return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
+ }

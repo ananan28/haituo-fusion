@@ -15,6 +15,7 @@ module.exports=async function verifyPersistentLayout(install){
   let item=native('123@c.us','Contact A');
   const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
+  view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked before text loaded');view.setOfficial(false);
   const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
   assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
   const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
@@ -22,6 +23,7 @@ module.exports=async function verifyPersistentLayout(install){
   list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
   // Recycle official nodes while leaving the local message object untouched.
   item=native('123@c.us','Contact A');await tick();assert(d.querySelector('article')===original,'Native recycling remounted a local message');assert(list.scrollTop===savedTop,'Native recycling changed local scroll position');
+  const pane=d.createElement('div');pane.id='pane-side';d.body.append(pane);pane.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked while navigation was pending');view.setOfficial(false);
   item=native('999@c.us','Contact B');await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(!original.isConnected,'Old conversation leaked into the new one');
   item=native('123@c.us','Contact A');const back=view.observe([{id:item.dataset.id,source:item.textContent,metadata:'return'}],[item]);assert(d.querySelector('article')===original,'Cached conversation was not reused before IPC');assert(list.scrollTop===savedTop,'Returning to a chat lost scroll position');await back;await tick();assert(list.scrollTop===savedTop,'DB refresh moved the restored conversation');
   // At the top, loading older records must preserve the first visible message.
@@ -33,6 +35,6 @@ module.exports=async function verifyPersistentLayout(install){
   // Simulated renderer restart: retained disk records are supplied together,
   // and neither translation generation nor original-DOM patching is needed.
   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
-  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true};
+  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true,officialMedia:true};
  }finally{view?.destroy();host.remove()}
 };

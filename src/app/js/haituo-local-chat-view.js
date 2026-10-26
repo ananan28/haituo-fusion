@@ -2,7 +2,7 @@
 function conversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
 function install({document,window,ipc,targetFor,retranslate}){
  const sessions=new Map,hiddenRoots=new Map;
- let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false;
+ let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false,officialOverride=false;
  const root=document.createElement('section');root.id='haituo-local-bilingual-chat';root.setAttribute('aria-label','海拓本机双语聊天记录');
  Object.assign(root.style,{position:'fixed',zIndex:'1000',display:'none',boxSizing:'border-box',background:'var(--conversation-panel-background,#efeae2)',color:'var(--primary,#111b21)',overflow:'hidden',flexDirection:'column'});
  const bar=document.createElement('div'),toggle=document.createElement('button'),label=document.createElement('span'),status=document.createElement('div');
@@ -30,11 +30,12 @@ function install({document,window,ipc,targetFor,retranslate}){
   const top=header?.bottom>r.top?header.bottom:r.top,bottom=footer?.top>top?Math.min(footer.top,r.bottom):r.bottom;return{left:r.left,top,width:r.width,height:Math.max(0,bottom-top)};
  }
  function position(){
-  if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
-  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
-  if(official)restoreNative();else hideNative(nativeRoot);
-  Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
+  if(destroyed)return;
+  const official=officialOverride||!!current?.official&&!waiting;privacy.media=official?'not all':'all';
   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+  if(official)restoreNative();else hideNative(nativeRoot);
+  const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+  Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
   if(current)current.list.style.display=!official&&!waiting&&current.ready?'block':'none';
   status.style.display=official&&!current?.error?'none':'block';
   status.textContent=current?.error||(waiting||!current?.ready?'正在读取本机双语记录…':`已保存 ${current.total} 条本机记录；图片、语音请切换官方视图。`);
@@ -43,8 +44,8 @@ function install({document,window,ipc,targetFor,retranslate}){
   if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
   position();
  }
- function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
- toggle.onclick=()=>setOfficial(!current?.official);
+ function setOfficial(value){officialOverride=!!value;if(current&&!waiting)current.official=!!value;position()}
+ toggle.onclick=()=>setOfficial(!(officialOverride||!!current?.official&&!waiting));
  function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
  function updateNode(value,record){
   const target=targetFor(record.source),translation=record.translations?.[target]?.text||'';let node=value.nodes.get(record.id);
@@ -106,11 +107,11 @@ function install({document,window,ipc,targetFor,retranslate}){
   try{if(value.older){await enqueue(value,async()=>{const page=await ipc.invoke('haituo:local-chat-page',value.chat,{before:value.ordered[0],limit:200});apply(value,page,{prepend:true})})}else if(nativeRoot&&current===value){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight)}}catch(error){value.error=error.message;position()}finally{value.loading=false}
  }
  const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
- function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
+ function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;officialOverride=false;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
  document.addEventListener('pointerdown',navigate,true);
  // Cover first load and keyboard navigation in the same mutation microtask,
  // before the browser paints newly created native original-only messages.
- const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
+ const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;officialOverride=false;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
  observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
  return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
 }
