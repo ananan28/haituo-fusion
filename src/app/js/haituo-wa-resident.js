@@ -1,12 +1,12 @@
 'use strict';
 const {conversationContext,messageOutgoing,shortMessageId}=require('./haituo-wa-identity.js');
-function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,keepPosition=(_node,work)=>work()}){
+function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,workspaceId='isolated',keepPosition=(_node,work)=>work()}){
  const norm=s=>String(s||'').normalize('NFKC').replace(/\s+/gu,' ').trim(),memory=new Map,live=new Map,pending=new Map,queue=new Map,hidden=new WeakMap,slots=new WeakMap,rendering=new WeakSet,ownedHosts=new WeakSet;
  const counters={cacheHits:0,lookups:0,translationRequests:0,hookReady:false,errors:0,firstNodesBeforeHook:0,rehydrates:0,slotReattachments:0};const warmed=new Map;let generation=0,scope='',bytes=0,stopped=false,queued=false,touch=0;
  const own='.ht-translation-slot,.haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error',quotes='[data-testid*="quoted" i],[aria-label*="Quoted" i],[aria-label*="引用"]';
  const textSelector='.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
  const byteSize=value=>new window.TextEncoder().encode(JSON.stringify(value)).length;
- const key=(room,lang,source)=>JSON.stringify([room,lang,norm(source)]);
+ const key=(room,lang,source)=>JSON.stringify([String(workspaceId),room,lang,norm(source)]);
  function read(node){if(!node||node.ownerDocument!==document||!node.isConnected)return;const id=node.getAttribute('data-id'),room=conversationContext(document,id,node);if(!room){if(shortMessageId(id)&&node.dataset.haituoTranslationStatus!=='chat-unresolved')node.dataset.haituoTranslationStatus='chat-unresolved';return;}node.removeAttribute('data-haituo-translation-status');
  const selected=[...(node.matches(textSelector)?[node]:[]),...node.querySelectorAll(textSelector)].filter(n=>!n.closest(own)&&!n.closest(quotes));const roots=selected.filter(n=>!selected.some(p=>p!==n&&p.contains(n)));
  const source=roots.map(n=>{const clone=n.cloneNode(true);clone.querySelectorAll(own+','+quotes).forEach(n=>n.remove());return(clone.textContent||'').trim()}).filter(Boolean).join('\n\n').trim();if(!source||source.length>30000)return;

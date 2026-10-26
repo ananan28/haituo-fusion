@@ -5,7 +5,7 @@ resident=(root/'src/app/js/haituo-wa-resident.js').read_text(encoding='utf-8').r
 identity=(root/'src/app/js/haituo-wa-identity.js').read_text(encoding='utf-8').replace("'use strict';\n",'',1)
 identity=identity[:identity.index('module.exports=')]
 helper="""function haituoLocalChatConversation(id,node){return conversationContext(document,id,node)}
-function haituoInstallLocalChatView(options){return installResident({...options,translate:(text,id,chatId)=>translateMessage(text,false,id,false,chatId),enabled:(_text,id,outgoing)=>outgoing?settings.backTranslationEnabled!==false:incomingTranslationOn()})}
+function haituoInstallLocalChatView(options){return installResident({...options,workspaceId:new URL(location.href).searchParams.get('haituoWorkspace')||'isolated-webview-'+webFrame.routingId,translate:(text,id,chatId)=>translateMessage(text,false,id,false,chatId),enabled:(_text,id,outgoing)=>outgoing?settings.backTranslationEnabled!==false:incomingTranslationOn()})}
 """
 p=root/'src/app/js/caisheng-webview-preload.js';source=p.read_text(encoding='utf-8')
 start=source.index('function haituoLocalChatConversation(');end=source.index('let haituoLocalBilingualView;',start)

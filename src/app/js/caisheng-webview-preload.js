@@ -1615,43 +1615,31 @@ function haituoCurrentWebMessage(item) {
     return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId;
 }
 function haituoLocalChatConversation(id,node){return conversationContext(document,id,node)}
-function haituoInstallLocalChatView(options){return installResident({...options,translate:(text,id,chatId)=>translateMessage(text,false,id,false,chatId),enabled:(_text,id,outgoing)=>outgoing?settings.backTranslationEnabled!==false:incomingTranslationOn()})}
+function haituoInstallLocalChatView(options){return installResident({...options,workspaceId:new URL(location.href).searchParams.get('haituoWorkspace')||'isolated-webview-'+webFrame.routingId,translate:(text,id,chatId)=>translateMessage(text,false,id,false,chatId),enabled:(_text,id,outgoing)=>outgoing?settings.backTranslationEnabled!==false:incomingTranslationOn()})}
 // Conversation identity and message identity are distinct in current WhatsApp Web.
 // This module is also embedded verbatim into the sandboxed isolated preload.
 function legacyChat(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_\s]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
 function shortMessageId(id){return typeof id==='string'&&/^[a-f0-9]{8,128}$/iu.test(id)}
 function normalizeChat(value,allowPhone=false){if(typeof value!=='string'||value.length>1024)return null;const text=value.replace(/[\u200e\u200f\u202a-\u202e]/gu,'').trim(),legacy=legacyChat(text);if(legacy)return legacy;
+ if(text.startsWith('header:')&&text.length>7&&text.length<=519&&!/[\u0000-\u001f\u007f]/u.test(text))return text;
  if(/^[A-Za-z0-9.-]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid)$/u.test(text))return text;
  if(allowPhone&&/^(?:\+?[0-9][0-9 ()-]{4,30}[0-9])$/u.test(text)){const digits=text.replace(/\D/gu,'');if(digits.length>=7&&digits.length<=15)return digits+'@c.us'}return null;
 }
 function requestChat(messageId,context){const intrinsic=legacyChat(messageId),explicit=normalizeChat(context);if(intrinsic){if(context!==undefined&&context!==null&&explicit!==intrinsic)throw Error('WhatsApp 消息与会话归属不一致');return intrinsic}if(shortMessageId(messageId)&&explicit)return explicit;throw Error('WhatsApp 短消息缺少有效会话归属')}
 function conversationContext(document,messageId,node){const intrinsic=legacyChat(messageId);if(intrinsic)return intrinsic;if(messageId!==undefined&&!shortMessageId(messageId))return null;
  const main=node?.closest?.('#main')||document.querySelector('#main');if(!main||node&&!main.contains(node))return null;
- const attrs=['cid','data-chat-id','data-conversation-id','data-chat-jid','data-jid','data-peer-id'];
- const fromNode=element=>{if(!element)return null;for(const attr of attrs){const id=normalizeChat(element.getAttribute(attr),true);if(id)return id}return null};
- const direct=fromNode(main);if(direct)return direct;
- const header=main.querySelector('header');if(!header)return null;
- const headerNodes=[header,...header.querySelectorAll(attrs.map(a=>'['+a+']').join(','))];const headerIds=new Set(headerNodes.map(fromNode).filter(Boolean));if(headerIds.size===1)return [...headerIds][0];if(headerIds.size>1)return null;
- // Phone labels identify a chat; ordinary display names do not. Never use a
- // contact name alone as a database key or retain the previous chat as fallback.
- const labels=[...header.querySelectorAll('[title],[aria-label]')].flatMap(n=>[n.getAttribute('title'),n.getAttribute('aria-label')]).filter(Boolean);
- labels.push(...String(header.innerText||header.textContent||'').split(/\n/u));
- const phones=new Set(labels.filter(s=>/^\s*\+/u.test(s)).map(s=>normalizeChat(s,true)).filter(Boolean));if(phones.size===1)return [...phones][0];if(phones.size>1)return null;
- // Selected conversation data is useful only if its label matches this header.
- // A sidebar selection changing ahead of the header must not reuse another chat.
- const clean=s=>String(s||'').trim().replace(/\s+/gu,' ');
- const headerLabels=new Set(labels.map(clean).filter(Boolean)),selected=[];
- for(const row of document.querySelectorAll('#pane-side [aria-selected="true"]')){const names=[...row.querySelectorAll('[title]')].map(n=>clean(n.getAttribute('title')));if(!names.some(n=>headerLabels.has(n)))continue;for(const n of [row,...row.querySelectorAll(attrs.map(a=>'['+a+']').join(','))]){const room=fromNode(n)||normalizeChat(n.getAttribute('data-id'));if(room)selected.push(room)}}
- const rooms=new Set(selected);return rooms.size===1?[...rooms][0]:null;
+ const header=main.querySelector('[data-testid="conversation-header"],header');if(!header)return null;
+ const label=String(header.innerText||header.textContent||'').replace(/[\u200e\u200f\u202a-\u202e]/gu,'').trim();if(!label||label.length>512||/[\u0000-\u001f\u007f]/u.test(label))return null;
+ const phone=normalizeChat(label,true);return phone||normalizeChat('header:'+label);
 }
 function messageOutgoing(node,id){if(typeof id==='string'&&/^(?:true|false)_/u.test(id))return id.startsWith('true_');return !!node?.closest?.('.message-out,[data-from-me="true"],[data-message-direction="outgoing"],[data-direction="out"]')}
-function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,keepPosition=(_node,work)=>work()}){
+function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,workspaceId='isolated',keepPosition=(_node,work)=>work()}){
  const norm=s=>String(s||'').normalize('NFKC').replace(/\s+/gu,' ').trim(),memory=new Map,live=new Map,pending=new Map,queue=new Map,hidden=new WeakMap,slots=new WeakMap,rendering=new WeakSet,ownedHosts=new WeakSet;
  const counters={cacheHits:0,lookups:0,translationRequests:0,hookReady:false,errors:0,firstNodesBeforeHook:0,rehydrates:0,slotReattachments:0};const warmed=new Map;let generation=0,scope='',bytes=0,stopped=false,queued=false,touch=0;
  const own='.ht-translation-slot,.haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error',quotes='[data-testid*="quoted" i],[aria-label*="Quoted" i],[aria-label*="引用"]';
  const textSelector='.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
  const byteSize=value=>new window.TextEncoder().encode(JSON.stringify(value)).length;
- const key=(room,lang,source)=>JSON.stringify([room,lang,norm(source)]);
+ const key=(room,lang,source)=>JSON.stringify([String(workspaceId),room,lang,norm(source)]);
  function read(node){if(!node||node.ownerDocument!==document||!node.isConnected)return;const id=node.getAttribute('data-id'),room=conversationContext(document,id,node);if(!room){if(shortMessageId(id)&&node.dataset.haituoTranslationStatus!=='chat-unresolved')node.dataset.haituoTranslationStatus='chat-unresolved';return;}node.removeAttribute('data-haituo-translation-status');
  const selected=[...(node.matches(textSelector)?[node]:[]),...node.querySelectorAll(textSelector)].filter(n=>!n.closest(own)&&!n.closest(quotes));const roots=selected.filter(n=>!selected.some(p=>p!==n&&p.contains(n)));
  const source=roots.map(n=>{const clone=n.cloneNode(true);clone.querySelectorAll(own+','+quotes).forEach(n=>n.remove());return(clone.textContent||'').trim()}).filter(Boolean).join('\n\n').trim();if(!source||source.length>30000)return;

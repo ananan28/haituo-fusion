@@ -1,5 +1,6 @@
 'use strict';
 const {createHash}=require('node:crypto');
+const {normalizeChat}=require('./haituo-wa-identity.js');
 const norm=s=>String(s||'').normalize('NFKC').replace(/\s+/gu,' ').trim();
 const digest=s=>createHash('sha256').update(norm(s)).digest('hex');
 function createStore({database:db,now=Date.now}){
@@ -12,7 +13,7 @@ function createStore({database:db,now=Date.now}){
  CREATE TABLE IF NOT EXISTS haituo_wa_legacy_import(account_id TEXT NOT NULL,chat_id TEXT NOT NULL,PRIMARY KEY(account_id,chat_id));`))();
  function prepare(sql){const statement=db.prepare(sql),keys=new Set([...sql.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)/gu)].map(match=>match[1]));const clean=value=>Object.fromEntries(Object.entries(value||{}).filter(([name])=>keys.has(name)));return{get:values=>statement.get(clean(values)),all:values=>statement.all(clean(values)),run:values=>statement.run(clean(values))}}
  const jobs=new Map,migrations=new Map,revisions=new Map;
- function scope(account,port,chat,lang){if(typeof account!=='string'||!account||account.length>512||typeof port!=='string'||!port||port.length>512||typeof chat!=='string'||!/^[^\s_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid)$/u.test(chat)||typeof lang!=='string'||!lang||lang.length>64)throw Error('译文缓存归属无效');return{account:createHash('sha256').update(account).digest('hex'),port,chat,lang}}
+ function scope(account,port,chat,lang){if(typeof account!=='string'||!account||account.length>512||typeof port!=='string'||!port||port.length>512||typeof chat!=='string'||!normalizeChat(chat)||typeof lang!=='string'||!lang||lang.length>64)throw Error('译文缓存归属无效');return{account:createHash('sha256').update(account).digest('hex'),port,chat,lang}}
  function text(source){if(typeof source!=='string'||!norm(source)||source.length>30000)throw Error('原文无效');return{source:source,hash:digest(source)}}
  const read=prepare('SELECT * FROM translation_cache WHERE account_id=$account AND chat_id=$chat AND lang=$lang AND source_hash=$hash');
  const write=prepare(`INSERT INTO translation_cache(account_id,chat_id,lang,source_hash,source_text,answer,source_revision,updated_at) VALUES($account,$chat,$lang,$hash,$source,$answer,$hash,$at) ON CONFLICT(account_id,chat_id,lang,source_hash) DO UPDATE SET source_text=excluded.source_text,answer=excluded.answer,source_revision=excluded.source_revision,updated_at=excluded.updated_at WHERE excluded.updated_at>=translation_cache.updated_at`);
