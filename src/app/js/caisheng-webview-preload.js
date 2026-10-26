@@ -1640,7 +1640,10 @@ function haituoInstallMessageScanner() {
         const visibleMessages = [ ...new Set(messageCandidates) ].filter(e => {
             const t = e.getBoundingClientRect();
             return e.isConnected && (isTelegram()||messageContainer()?.contains(e)) && t.width > 0 && t.height > 0 && t.bottom > 72 && t.top < innerHeight - 86;
-        }).slice(-24);
+        });
+        // WhatsApp must repair every visible row, including virtual-list replicas.
+        // Keep the pre-existing Telegram bound unchanged.
+        if(isTelegram())visibleMessages.splice(0,Math.max(0,visibleMessages.length-24));
         for (const e of visibleMessages) {
             const voiceTrigger = e.querySelector('audio,button[aria-label*="voice" i],button[aria-label*="audio" i],button[aria-label*="语音"],button[aria-label*="播放"],[data-icon*="audio-play" i],[data-icon*="ptt" i],[data-testid*="audio" i],[data-testid*="voice" i],[class*="icon-voice" i],.bubble.is-voice');
             if (voiceTrigger && webTranslationActive() && !voiceProcessed.has(voiceTrigger) && !e.querySelector(".haituo-voice-transcribe,.haituo-voice-result")) {
@@ -1730,8 +1733,12 @@ function haituoInstallMessageScanner() {
             }
             const mount = haituoWhatsAppTranslationMount(e, roots);
             if (e.dataset.haituoTranslationDone === "1" && (haituoLocalBilingualView?.isActive() || e.querySelector(".haituo-wa-message-translation"))) continue;
-            if (!incomingTranslationOn() && e.dataset.haituoAttachmentMiss === "1") continue;
-            if (e.dataset.haituoTranslationPending === "1" || Number(e.dataset.haituoTranslationRetryAt || 0) > Date.now()) continue;
+            const memoKey=sessionKey(n,haituoMessageTarget(n));
+            const memoHit=isWhatsApp()&&sessionTranslations.has(memoKey);
+            // Virtual rows retain data-* flags after their child DOM is replaced.
+            // A memory hit repairs missing DOM regardless of pending/retry flags.
+            if (!memoHit && !incomingTranslationOn() && e.dataset.haituoAttachmentMiss === "1") continue;
+            if (!memoHit && (e.dataset.haituoTranslationPending === "1" || Number(e.dataset.haituoTranslationRetryAt || 0) > Date.now())) continue;
             e.dataset.haituoTranslationPending = "1";
             if (!mount || !e.contains(mount)) {
                 delete e.dataset.haituoTranslationPending;
@@ -1823,7 +1830,7 @@ function haituoInstallMessageScanner() {
         // Memory hits are attached in this scan, before any await/provider IPC.
         const missing=[];
         for(const item of translationTargets){const saved=isWhatsApp()?sessionTranslations.get(item.memoKey):undefined;if(saved){item.r=saved;delete item.e.dataset.haituoTranslationPending;item.e.dataset.haituoTranslationDone='1';applyTranslation(item)}else if(!cacheOnly&&!scrolling)missing.push(item);else delete item.e.dataset.haituoTranslationPending}
-        const translated = [], queue = missing.slice(0, 24);
+        const translated = [], queue = isWhatsApp()?missing:missing.slice(0,24);
         let queueIndex = 0;
         const worker = async () => {
             while (queueIndex < queue.length) {
