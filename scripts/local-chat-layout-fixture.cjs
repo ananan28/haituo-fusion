@@ -12,7 +12,7 @@ module.exports=async function verifyPersistentLayout(install){
   const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
   const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
-  assert(w.getComputedStyle(item).visibility==='hidden','Native original flashed during storage read');await first;await tick();
+  assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
   const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
   assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
   list.scrollTop=2400;await tick();const savedTop=list.scrollTop;

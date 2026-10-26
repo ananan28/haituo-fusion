@@ -28911,6 +28911,9 @@ async function J_(e) {
     }), s_.add(e), e.on(`closed`, () => s_.delete(e));
     let t = () => {
         e.webContents.send(`set-window-focus`, e.isFocused());
+        // Embedded views share the visible host's focus, including transitions
+        // that do not resize or move the host window.
+        if(process.env.HAITUO_INPROCESS===`1` && e===Z)globalThis.caishengBridge?.syncVisibility?.(Zg?.id);
     };
     e.on(`focus`, t), e.on(`blur`, t), e.once(`ready-to-show`, t);
     let r = setInterval(t, 1e4);

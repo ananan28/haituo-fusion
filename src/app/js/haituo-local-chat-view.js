@@ -9,9 +9,11 @@ function install({document,window,ipc,targetFor,retranslate}){
  Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
  label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
  Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
- const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{visibility:hidden!important}';
+ const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{opacity:0!important}';
  // Until a complete local page is available, never reveal an original-only
- // WhatsApp frame. This stylesheet also covers replacement native DOM roots.
+ // WhatsApp frame. Opacity preserves innerText/layout for the native scanner;
+ // visibility:hidden would make Chromium return empty message text.
+ // This stylesheet also covers replacement native DOM roots.
  (document.head||document.documentElement).append(privacy);
  bar.append(label,toggle);root.append(bar,status);document.body.append(root);
  function state(chat){if(!sessions.has(chat)){
@@ -20,8 +22,8 @@ function install({document,window,ipc,targetFor,retranslate}){
   list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
   sessions.set(chat,value);
  }return sessions.get(chat)}
- function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.visibility);node.style.visibility='hidden'}
- function restoreNative(){for(const [node,visibility] of hiddenRoots)node.style.visibility=visibility;hiddenRoots.clear()}
+ function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.opacity);node.style.opacity='0'}
+ function restoreNative(){for(const [node,opacity] of hiddenRoots)node.style.opacity=opacity;hiddenRoots.clear()}
  function bounds(){
   if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
   const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
@@ -29,7 +31,7 @@ function install({document,window,ipc,targetFor,retranslate}){
  }
  function position(){
   if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
-  const official=!!current?.official&&!waiting;privacy.disabled=official;
+  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
   if(official)restoreNative();else hideNative(nativeRoot);
   Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
@@ -41,7 +43,7 @@ function install({document,window,ipc,targetFor,retranslate}){
   if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
   position();
  }
- function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.disabled=true;root.style.display='none';return;}position()}
+ function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
  toggle.onclick=()=>setOfficial(!current?.official);
  function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
  function updateNode(value,record){
