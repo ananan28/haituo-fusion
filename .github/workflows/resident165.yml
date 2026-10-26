@@ -25,7 +25,7 @@ jobs:
         run: |
           git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
           python scripts/sync-local-chat-view.py
-          git diff --exit-code 42e7aac6074979f5e654880efbc993799944c8f2 -- src/app/bundles/preload src/app/bundles/workers src/app/js/haituo-signal-message-record.js src/app/js/haituo-scroll.js
+          python scripts/check-signal-frozen.py
           node --check src/app/bundles/main.js
           node --check src/app/js/caisheng-webview-preload.js
           node --test scripts/*.test.cjs

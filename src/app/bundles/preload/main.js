@@ -21493,9 +21493,7 @@ http://jedwatson.github.io/classnames
         return !1;
     }
     function HaituoPolishOutgoingEnglish(source, text) {
-        if (!/[\u3400-\u9fff]/u.test(source) || !/^[\x00-\x7f\s\p{P}]+$/u.test(text)) return text;
-        let value = text.replace(/^It is\b/u, `It's`).replace(/^I am\b/u, `I'm`).replace(/^I will\b/u, `I'll`).replace(/^You are\b/u, `You're`).replace(/^We are\b/u, `We're`).replace(/\bdo not\b/giu, `don't`).replace(/\bcannot\b/giu, `can't`).replace(/\bwill not\b/giu, `won't`);
-        return /^又是(?:一个|个)?/u.test(source) && (value = value.replace(/^It's\s+another\s+/iu, `Another `).replace(/^It is\s+another\s+/iu, `Another `)), value;
+        return text;
     }
     function haituoProviderConfigured(settings, provider) {
         if(settings.translationPools)return true;
@@ -209520,7 +209518,7 @@ function haituoCachedSignalTranslation(text) {
                 }), (0, u6.jsx)(`button`, {
                     type: `button`,
                     disabled: l || !haituoQuickText.trim(),
-                    title: `调用 AI 结合最近聊天上下文，生成自然口语化译文`,
+                    title: `调用 AI 忠实原意，精准直译`,
                     "aria-label": `AI 重译`,
                     style: { width: `auto`, minWidth: `68px`, padding: `0 12px`, borderRadius: `10px`, fontSize: `14px`, fontWeight: 700, lineHeight: 1 },
                     onClick: () => void haituoQuickTranslate(!0),

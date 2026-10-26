@@ -548,10 +548,7 @@ async function translate(e) {
 }
 
 function polishOutgoingEnglish(source, text) {
-    if (!HAN.test(source) || !/^[\x00-\x7f\s\p{P}]+$/u.test(text)) return text;
-    let value = text.replace(/^It is\b/u, "It's").replace(/^I am\b/u, "I'm").replace(/^I will\b/u, "I'll").replace(/^You are\b/u, "You're").replace(/^We are\b/u, "We're").replace(/\bdo not\b/giu, "don't").replace(/\bcannot\b/giu, "can't").replace(/\bwill not\b/giu, "won't");
-    /^又是(?:一个|个)?/u.test(source) && (value = value.replace(/^It's\s+another\s+/iu, "Another ").replace(/^It is\s+another\s+/iu, "Another "));
-    return value;
+    return text;
 }
 
 async function translateMessage(e, t = !1, messageId, attachmentOnly = !1) {
@@ -1195,7 +1192,7 @@ function showPanel(e) {
             return;
         }
         event.isComposing || event.key === "Process" || (quickSpaceCount = 0);
-    }, !0), quickTranslate.type = quickRetranslate.type = "button", quickTranslate.textContent = "翻译", quickRetranslate.textContent = "AI重译", quickRetranslate.title = "AI 重译：结合最近聊天上下文，生成自然口语化译文", quickRetranslate.setAttribute("aria-label", "AI 重译"), quickTranslate.onclick = () => runQuick(!1), quickRetranslate.onclick = () => runQuick(!0);
+    }, !0), quickTranslate.type = quickRetranslate.type = "button", quickTranslate.textContent = "翻译", quickRetranslate.textContent = "AI重译", quickRetranslate.title = "AI 重译：忠实原意，精准直译", quickRetranslate.setAttribute("aria-label", "AI 重译"), quickTranslate.onclick = () => runQuick(!1), quickRetranslate.onclick = () => runQuick(!0);
     for (const button of [ quickTranslate, quickRetranslate ]) Object.assign(button.style, { height: "42px", alignSelf: "stretch", padding: "0 14px", whiteSpace: "nowrap" });
     Object.assign(quickRetranslate.style, { width: "auto", minWidth: "68px", padding: "0 12px", borderRadius: "10px", fontSize: "14px", fontWeight: "700", lineHeight: "1" });
     quickRow.append(quick, quickTranslate, quickRetranslate), panel.append(controls, quickRow), document.body.append(panel), haituoSyncOutgoingControls(), positionTranslator(e);
@@ -1798,7 +1795,7 @@ function haituoInstallMessageScanner() {
                 copyTranslationText(translationText.textContent, "译文");
             }, "🌐")), o.append(translationText, actions), mount.append(o);
                 const retryButton = document.createElement("button");
-                retryButton.type = "button", retryButton.textContent = "✨", retryButton.title = "AI 重译：忠实原意，不做口语化改写", retryButton.setAttribute("aria-label", "AI 重译"), Object.assign(retryButton.style, {
+                retryButton.type = "button", retryButton.textContent = "✨", retryButton.title = "AI 重译：忠实原意，精准直译", retryButton.setAttribute("aria-label", "AI 重译"), Object.assign(retryButton.style, {
                     margin: "0",
                     width: "28px",
                     minWidth: "28px",
