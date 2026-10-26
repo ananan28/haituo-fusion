@@ -24813,12 +24813,12 @@ async function Xp(e) {
     if (chunkLimit && t.length > chunkLimit) {
         const chunks = haituoSplitTranslationText(t, chunkLimit), translated = [];
         for (const chunk of chunks) {
-            const part = { ...e, text: chunk.text }, key = haituoTranslationCacheKey(part), cache = loadHaituoTranslationCache();
+            const part = { ...e, text: chunk.text }, key = haituoTranslationCacheKey(part), cache = e.__haituoWhatsAppSession ? (HaituoWhatsAppSessionCache.get(e.__haituoWhatsAppSession)||(()=>{const cache={};HaituoWhatsAppSessionCache.set(e.__haituoWhatsAppSession,cache);return cache})()) : loadHaituoTranslationCache();
             const existing = cache[key];
             if (!e.__haituoForceChunks && existing?.text?.trim()) { translated.push({ text: existing.text, gap: chunk.gap }); continue; }
             const result = await Xp(part);
             cache[key] = { ...result, updatedAt: Date.now() };
-            saveHaituoTranslationCache();
+            if(!e.__haituoWhatsAppSession)saveHaituoTranslationCache();
             translated.push({ text: result.text, gap: chunk.gap });
         }
         return {
@@ -25583,18 +25583,14 @@ function haituoTranslateAttached(event, request, work) {
         account = HaituoWorkspaceBySession.get(event.sender.session);
         if (!platform || !account) throw Error(`无法确认消息所属账号，已停止保存译文`);
     }
+    // WhatsApp rollback: provider/session cache only; no message/SQLCipher attachment writes.
+    if(platform === `whatsapp`)return work();
     HaituoMessageAttachments ||= require('../js/haituo-message-translations.js').createStore({
         directory: (0,s.join)(p.app.getPath(`appData`), `Haituo`, `message-translations-v1`),
         read: haituoProtectedRead, write: haituoProtectedWrite
     });
     // Do not allow an old text-only shared cache to choose a different message's attachment.
     request.messageScope = `${platform}:${account}:${request.messageId}`;
-    if (platform === `whatsapp` && request.localMessageRecord === !0) {
-        const records=haituoLocalChatStore(),chat=require('../js/haituo-wa-identity.js').requestChat(request.messageId,request.chatId);
-        if(!chat)throw Error(`WhatsApp 消息归属无效`);
-        request.messageScope = `${platform}:${account}:${chat}:${request.messageId}`;
-        return records.content.translate(account,account,chat,request,work);
-    }
     if (platform === `signal` && request.localMessageRecord === !0) {
         // 1.6.1 records are read only for one-way migration into the original
         // Signal message. New results are committed by the native model writer.
@@ -25652,9 +25648,10 @@ async function haituoTranslateLongMessage(config, request) {
 }
 
 function haituoExistingChatTranslation(e) {
-    if (e.messageScope || e.purpose !== `chat` || e.forceRefresh || !String(e.text || ``).trim()) return null;
-    const cache = loadHaituoTranslationCache(), shared = cache[haituoSharedChatCacheKey(e)];
+    if (e.messageScope && !e.__haituoWhatsAppSession || e.purpose !== `chat` || e.forceRefresh || !String(e.text || ``).trim()) return null;
+    const cache = e.__haituoWhatsAppSession ? HaituoWhatsAppSessionCache.get(e.__haituoWhatsAppSession)||{} : loadHaituoTranslationCache(), shared = cache[haituoSharedChatCacheKey(e)];
     if (shared?.text?.trim() && (String(e.text).split(/\r?\n/u).length < 8 || haituoLongMessageComplete(e.text, shared.text))) return { ...shared, cached: !0 };
+    if(e.__haituoWhatsAppSession)return null;
     // Earlier releases keyed every translation by provider. Reuse a successful older result.
     let best = null;
     for (const [key, value] of Object.entries(cache)) {
@@ -25674,13 +25671,15 @@ function haituoExistingChatTranslation(e) {
 }
 
 function haituoRememberChatTranslation(request, result) {
-    if (request.messageScope || request.purpose !== `chat` || !result?.text?.trim() || result.cached || result.skipSharedCache) return;
-    const cache = loadHaituoTranslationCache();
+    if (request.messageScope && !request.__haituoWhatsAppSession || request.purpose !== `chat` || !result?.text?.trim() || result.cached || result.skipSharedCache) return;
+    const cache = request.__haituoWhatsAppSession ? (HaituoWhatsAppSessionCache.get(request.__haituoWhatsAppSession)||(()=>{const cache={};HaituoWhatsAppSessionCache.set(request.__haituoWhatsAppSession,cache);return cache})()) : loadHaituoTranslationCache();
     cache[haituoSharedChatCacheKey(request)] = { text: result.text, provider: result.provider, updatedAt: Date.now() };
-    saveHaituoTranslationCache();
+    if(!request.__haituoWhatsAppSession)saveHaituoTranslationCache();
 }
 
 const HaituoTranslationInFlight = new Map;
+// WhatsApp observer rollback: RAM only, separate from Signal/disk cache.
+const HaituoWhatsAppSessionCache = new Map;
 
 const HaituoRequestQueue = [];
 const HaituoWebContentsByWorkspace = new Map;
@@ -25832,7 +25831,7 @@ async function haituoTranslateWithMode(config, request) {
 }
 
 async function cachedHaituoTranslate(e, t = !1) {
-    const n = haituoTranslationCacheKey(e), r = loadHaituoTranslationCache();
+    const n = haituoTranslationCacheKey(e), r = e.__haituoWhatsAppSession ? (HaituoWhatsAppSessionCache.get(e.__haituoWhatsAppSession)||(()=>{const cache={};HaituoWhatsAppSessionCache.set(e.__haituoWhatsAppSession,cache);return cache})()) : loadHaituoTranslationCache();
     if (!t && r[n] && typeof r[n].text === `string`) return {
         ...r[n],
         text: r[n].text.replace(/^(?:目标语言|Target language)\s*[:：]\s*[A-Za-z-]+\s*(?:\r?\n)+/iu, ``).trim(),
@@ -25850,7 +25849,7 @@ async function cachedHaituoTranslate(e, t = !1) {
             text: a.text,
             provider: a.provider,
             updatedAt: Date.now()
-        }, saveHaituoTranslationCache();
+        };if(!e.__haituoWhatsAppSession)saveHaituoTranslationCache();else{const keys=Object.keys(r);for(const key of keys.slice(0,Math.max(0,keys.length-2000)))delete r[key]}
         return {
             ...a,
             cached: !1
@@ -25971,22 +25970,7 @@ function tm() {
         Jp(e.senderFrame?.url ?? ``);
         let t = $p().refreshShortcut ?? $p().shortcut;
         return typeof t == `string` ? t : `ctrl-r`;
-    }), p.ipcMain.removeHandler(`haituo:wa-cache-lookup`), p.ipcMain.handle(`haituo:wa-cache-lookup`,async(event,request)=>{
-        const account=haituoLocalChatAccount(event);
-        if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);
-        const store=haituoLocalChatStore().content,rows=await store.lookup(account,account,request.chat,request.lang,request.sources);
-        return rows.map((row,index)=>{if(request.outgoing?.[index]&&$p().backTranslationEnabled!==!1){const original=store.sentGet(account,account,request.chat,row.source);if(original)return{...row,state:`hit`,text:original,sentSource:!0}}return row});
-    }), p.ipcMain.removeHandler(`haituo:wa-sent-source`),p.ipcMain.handle(`haituo:wa-sent-source`,(event,request)=>{const account=haituoLocalChatAccount(event);if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);haituoLocalChatStore().content.sentPut(account,account,request.chat,request.original,request.sentText);return!0;
-    }), p.ipcMain.removeHandler(`haituo:wa-cache-warm`), p.ipcMain.handle(`haituo:wa-cache-warm`,async(event,request)=>{
-        const account=haituoLocalChatAccount(event);if(!request||Object.hasOwn(request,`accountId`)||Object.hasOwn(request,`account_id`)||Object.hasOwn(request,`portId`))throw Error(`账号由主进程确定`);
-        const store=haituoLocalChatStore().content;await store.migrate(account,account,request.chat);return store.warm(account,account,request.chat,request.lang,{before:request.before});
-    }), p.ipcMain.removeHandler(`haituo:wa-cache-flush`), p.ipcMain.handle(`haituo:wa-cache-flush`,event=>{haituoLocalChatAccount(event);haituoLocalChatStore().content.flush();return true;
-    }), p.ipcMain.removeAllListeners(`haituo:local-chat-read`), p.ipcMain.on(`haituo:local-chat-read`,(event,request)=>{
-        try{event.returnValue={ok:!0,page:haituoLocalChatStore().page(haituoLocalChatAccount(event),request?.chat,{ids:request?.ids})}}
-        catch(error){event.returnValue={ok:!1,error:`本机译文读取失败，原对话保持可用`}}
-    }), p.ipcMain.removeHandler(`haituo:local-chat-observe`), p.ipcMain.handle(`haituo:local-chat-observe`,(event,items)=>haituoLocalChatStore().observe(haituoLocalChatAccount(event),items)),
-    p.ipcMain.removeHandler(`haituo:local-chat-page`), p.ipcMain.handle(`haituo:local-chat-page`,(event,chat,options)=>haituoLocalChatStore().page(haituoLocalChatAccount(event),chat,options)),
-    p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
+    }), p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
         Jp(e.senderFrame?.url ?? ``);
         let n = $p(), r = haituoUnredactConfigPatch(t ?? {}), selectedProvider = r.provider;
         // The configured pool is the single ordered route for chat, input and
@@ -25999,6 +25983,11 @@ function tm() {
         // request.provider, so leaving "auto" here sent chat/input to the
         // free-only branch and ignored the provider the user configured.
         r.provider = typeof selectedProvider == `string` && selectedProvider && selectedProvider !== `auto` ? selectedProvider : `google-free`;
+        // Mode is derived from the authenticated sender, never a renderer account field.
+        const waSession=/^https:\/\/web\.whatsapp\.com(?:\/|$)/iu.test(String(e.senderFrame?.url||``))?HaituoWorkspaceBySession.get(e.sender.session):null;
+        delete r.__haituoWhatsAppSession;
+        if(waSession){r.__haituoWhatsAppSession=waSession;r.messageScope=`whatsapp-session:${waSession}`;}
+        if(waSession){const saved=haituoExistingChatTranslation(r);if(saved)return saved;}
         let a = {
             ...n,
             ...r,

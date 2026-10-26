@@ -35,6 +35,8 @@ function makeCtx(storedConfig = {}) {
     haituoUnredactConfigPatch: patch => patch,
     haituoTranslateWithMode: (...args) => { calls.push(args); return Promise.resolve({ text: 'ok', provider: 'stub' }); },
     haituoRememberChatTranslation: () => {},
+    HaituoWorkspaceBySession: {get:()=>'test-workspace'},
+    haituoExistingChatTranslation:()=>null,
     haituoRecordTranslationStatus: () => {},
     haituoTranslationCacheKey: () => 'k',
     HaituoNetwork: { retryTranslation: fn => fn() },
@@ -81,10 +83,10 @@ async function dispatch(ctx, channel, payload) {
   assert.ok(handler, `handler ${channel} registered`);
   if (channel === 'caisheng:webview-translate') {
     // Signature: (event, text, targetLanguage, options).
-    await handler({ senderFrame: { url: 'https://web.whatsapp.com/' } }, payload.text, payload.targetLanguage, payload);
+    await handler({ senderFrame: { url: 'https://web.whatsapp.com/' }, sender:{session:{}} }, payload.text, payload.targetLanguage, payload);
     return;
   }
-  await handler({ senderFrame: { url: 'https://web.whatsapp.com/' } }, payload);
+  await handler({ senderFrame: { url: 'https://web.whatsapp.com/' }, sender:{session:{}} }, payload);
 }
 
 test('P0-03: chat translation with explicit provider stays pool-managed (strictProvider false)', async () => {

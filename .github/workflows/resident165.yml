@@ -1,4 +1,4 @@
-name: Haituo WhatsApp 1.6.5 diagnostic build - NOT A RELEASE
+name: Haituo WhatsApp 1.6.5 observer rollback diagnostic - NOT A RELEASE
 on:
   push:
     branches: ['impl/1.6.5-whatsapp-resident']
@@ -24,10 +24,6 @@ jobs:
       - name: Apply isolated WhatsApp implementation
         run: |
           git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
-          if [ ! -f src/app/js/haituo-wa-resident.js ]; then
-            git apply --check scripts/wa-resident-165.patch
-            git apply scripts/wa-resident-165.patch
-          fi
           python scripts/sync-local-chat-view.py
           git diff --exit-code 42e7aac6074979f5e654880efbc993799944c8f2 -- src/app/bundles/preload src/app/bundles/workers src/app/js/haituo-signal-message-record.js src/app/js/haituo-scroll.js
           node --check src/app/bundles/main.js
@@ -36,7 +32,7 @@ jobs:
       - name: Install isolated DOM test dependencies
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Synthetic WhatsApp coverage and frozen Signal component regression
-        run: node --test scripts/wa-resident.dom.cjs scripts/signal-attachments.dom.cjs
+        run: node --test scripts/wa-rollback.dom.cjs scripts/signal-attachments.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
       - name: Commit exact diagnostic client source
