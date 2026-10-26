@@ -12,3 +12,15 @@ test('known empty invokes one initial translation; repeated mount does not invok
 test('disabled translation displays known-empty original and makes no API call',async t=>{const x=setup(t,{hit:false,translate:false}),row=x.add();await tick();assert.equal(row.querySelector('.ht-translation-slot').dataset.htState,'empty');assert.equal(x.api(),0);assert.equal(row.querySelector('.selectable-text').style.visibility,'')});
 test('copy interception retains selected original and strips translation slot',async t=>{const x=setup(t),row=x.add();await tick();const range=x.w.document.createRange();range.selectNodeContents(row);x.w.getSelection().addRange(range);let copied;const event=new x.w.Event('copy',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{setData:(_type,text)=>copied=text}});row.dispatchEvent(event);assert.equal(copied,'Hello');assert.equal(row.cloneNode(true).textContent,'Hello')});
 test('fragment/replaceChildren/connected text setters do not drop a cached translation',async t=>{const x=setup(t);x.add();await tick();for(let i=0;i<10;i++){const row=x.add();row.querySelector('.selectable-text').textContent='Hello';assert.equal(row.querySelector('.ht-translation-slot').dataset.htState,'hit');assert.equal(row.querySelectorAll('.ht-translation-slot').length,1);row.remove()}assert.equal(x.api(),0)});
+
+test('blank guest panel runs in host world, follows account visibility and manual retry',async t=>{
+ const {createBootstrap}=require('../src/app/js/haituo-wa-bootstrap.js'),{EventEmitter}=require('node:events'),path=require('node:path');
+ const d=new JSDOM('<section><webview data-haituo-active="true"></webview></section>',{runScripts:'outside-only'}),w=d.window,node=w.document.querySelector('webview'),session={};t.after(()=>w.close());
+ const urls=[],guest=new EventEmitter;Object.assign(guest,{id:7,session,getURL:()=> 'about:blank',isDestroyed:()=>false,loadURL:async url=>urls.push(url)});node.getWebContentsId=()=>7;node.loadURL=async url=>urls.push(url);
+ const errors=[],host={isDestroyed:()=>false,executeJavaScript:async source=>w.eval(source)};let check;
+ const controller=createBootstrap({preloadPath:path.resolve(__dirname,'../src/app/js/caisheng-webview-preload.js'),timers:{setTimeout(fn){check=fn;return 1},clearTimeout(){}},log:line=>errors.push(line)});
+ controller.installSession(session,'https://web.whatsapp.com/?haituoWorkspace=dedicated');controller.attach(guest,host);check();await Promise.resolve();
+ const panel=w.document.querySelector('[data-haituo-wa-startup="7"]');assert(panel);assert(panel.textContent.includes('about:blank'));assert(node.getAttribute('preload').startsWith('file:///'));assert(!errors.some(x=>x.includes('panel failed')));
+ panel.querySelector('button').click();assert.equal(urls.length,2);node.dataset.haituoActive='false';await Promise.resolve();assert.equal(panel.style.display,'none');
+ node.dataset.haituoActive='true';await Promise.resolve();assert.equal(panel.style.display,'block');guest.emit('destroyed');
+});

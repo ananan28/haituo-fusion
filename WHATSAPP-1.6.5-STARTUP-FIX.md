@@ -15,6 +15,6 @@ A guest startup watchdog requires both successful page load and the preload/hook
 
 ## Verification
 
-Local: 383 unit checks and 15 synthetic DOM/Signal-component regressions pass. New native CI step uses the packaged app and its actual sandboxed preload in a real Electron webview with an offline synthetic HTTPS page, asserting navigation, preload path, security preferences, handshake and main-world hooks before the first page script. It is not a logged-in WhatsApp test.
+Local: 384 unit checks and 16 synthetic DOM/Signal-component regressions pass. New native CI step uses the packaged app and its actual sandboxed preload in a real Electron webview with an offline synthetic HTTPS page, asserting navigation, preload path, security preferences, handshake and main-world hooks before the first page script. It is not a logged-in WhatsApp test.
 
 Real-account startup, first-frame translation trace, native copy/forward/quote/search and the six real-account acceptance groups remain UNTESTED until the user retests. Run with --remote-debugging-port=9444 to inspect the guest URL and host preload attribute. No claim that the reported Electron failure is fixed is made until target-OS native checks and user reproduction both succeed.
