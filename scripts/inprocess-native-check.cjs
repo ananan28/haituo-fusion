@@ -19,6 +19,10 @@ function collectStartupLogs(){
  for(const root of roots)if(fs.existsSync(root))for(const name of fs.readdirSync(root))if(/\.(?:log|json)$/.test(name))try{const body=fs.readFileSync(path.join(root,name),'utf8').replace(/Bearer\s+[A-Za-z0-9_.-]+/g,'Bearer [redacted]');fs.writeFileSync(path.join(out,'startup-'+report.startupLogs.length+'.log'),body);report.startupLogs.push({name,tail:body.split('\n').slice(-45).join('\n')})}catch{}
 }
 async function stop(){if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}await pause(700);if(!mac&&proc?.pid){cp.spawnSync('taskkill',['/PID',String(proc.pid),'/T','/F'],{timeout:10000,stdio:'ignore'})}if(mac){const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){const pid=Number(line.trim().split(/\s+/)[0]);try{process.kill(pid,'SIGTERM')}catch{}}}if(log!==undefined){fs.closeSync(log);log=undefined}}
+function windowsProcessInventory(){
+ const script="[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:HAITUO_QA_PROCESS_EXE } | ForEach-Object { $kind='main'; if($_.CommandLine -match '--type=renderer'){$kind='renderer'}elseif($_.CommandLine -match '--type=gpu-process'){$kind='gpu'}elseif($_.CommandLine -match '--type=utility'){$kind='utility'}elseif($_.CommandLine -match '--caisheng-profile='){$kind='signal-backend'}; [PSCustomObject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;kind=$kind;workingSetMB=[Math]::Round([double]$_.WorkingSetSize/1MB,1)} }) | ConvertTo-Json -Compress";
+ const text=cp.execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',timeout:15000,env:{...process.env,HAITUO_QA_PROCESS_EXE:app}}).trim().replace(/^\uFEFF/,'');const rows=JSON.parse(text||'[]');return Array.isArray(rows)?rows:[rows];
+}
 async function check(id,work){try{const result=await work();report.checks.push({id,ok:true,result})}catch(e){report.checks.push({id,ok:false,error:String(e.stack||e)})}}
 (async()=>{try{
  await check('MAIN-DEFAULT-EMBEDDED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
@@ -52,6 +56,10 @@ async function check(id,work){try{const result=await work();report.checks.push({
    throw Error('Child profile never reached initialized renderer; inspect child stderr/startup log');
   });
   if(childClient){
+   if(!mac)await check('CHILD-LAUNCH-IDEMPOTENT-PROCESS-INVENTORY',async()=>{
+    await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);
+    const rows=windowsProcessInventory(),backends=rows.filter(x=>x.kind==='signal-backend');if(backends.length!==1)throw Error('Repeated launch did not retain exactly one backend: '+JSON.stringify(rows));return{backends:backends.length,processes:rows};
+   });
    await check('CHILD-FOCUS-SERVICE',async()=>{
     // Let the hidden backend's legacy 10s focus timer fire; it must not
     // overwrite the actual parent/view focus state. Reset document activity on
@@ -97,5 +105,6 @@ async function check(id,work){try{const result=await work();report.checks.push({
   });
   await check('SWITCH-BACK-TO-MAIN',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await pause(200);if(!await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]')?.getAttribute('aria-pressed')==='true'`))throw Error('Main tab was not selected');return{selectedInUI:true}});
   await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
+  if(!mac)await check('STOPPED-PROFILE-HAS-NO-BACKEND-PROCESS',async()=>{const rows=windowsProcessInventory();if(rows.some(x=>x.kind==='signal-backend'))throw Error('Stopped profile still owns a backend process');return{backends:0,processes:rows}});
  }
 }catch(error){report.fatal=String(error.stack||error)}finally{collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();

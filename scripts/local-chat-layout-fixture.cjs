@@ -1,40 +1,26 @@
 'use strict';
-module.exports=async function verifyPersistentLayout(install){
- // Keep production CSP intact (Signal intentionally forbids frames). Use a
- // shadow root for a real layout surface whose styles cannot affect the app.
+module.exports=async function verifyNativeInline(install,keepPosition){
  const host=document.createElement('div');Object.assign(host.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647'});document.body.append(host);
- const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial';
- shadow.append(body);body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';
- const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)};
- const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
- let view;
+ const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');shadow.append(body);body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial;background:#161717;color:white';
+ body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}.message-in{min-height:100px;padding:10px;box-sizing:border-box}</style><main id="main"><header>Native WhatsApp</header><div id="native"></div><footer><button>Native send</button></footer></main>';
+ const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)},tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
+ const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}}}),all=Array.from({length:600},(_,i)=>record('123@c.us',i)),db=new Map(all.map(r=>[r.id,r]));let reads=0,view;
+ const bubble=r=>'<div class="message-in" data-id="'+r.id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">'+r.source+'</span></div></div>';
+ const native=d.querySelector('#native'),footer=d.querySelector('footer'),show=items=>{native.innerHTML=items.map(bubble).join('')};show(all.slice(0,100));
+ const ipc={sendSync(method,{chat,ids}){reads++;return{ok:true,page:{chat,messages:ids.map(id=>db.get(id)).filter(Boolean)}}},async invoke(method,items){return{chat:items[0].id.split('_')[1],messages:all.slice(-200),total:600,hasOlder:true}}};
+ const config={document:d,window:w,ipc,keepPosition,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network request')}};
  try{
-  const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}},metadata:'10:00'});
-  const all=Array.from({length:600},(_,i)=>record('123@c.us',i)),other=[record('999@c.us',1)];let reads=0;
-  const native=(chat,title)=>{d.querySelector('header span').setAttribute('title',title);d.querySelector('#native').innerHTML='<div data-id="false_'+chat+'_599">Original 599</div>';return d.querySelector('#native [data-id]')};
-  let item=native('123@c.us','Contact A');
-  const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
-  view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
-  view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked before text loaded');view.setOfficial(false);
-  const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
-  assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
-  const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
-  assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
-  list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
-  // Recycle official nodes while leaving the local message object untouched.
-  item=native('123@c.us','Contact A');await tick();assert(d.querySelector('article')===original,'Native recycling remounted a local message');assert(list.scrollTop===savedTop,'Native recycling changed local scroll position');
-  const pane=d.createElement('div');pane.id='pane-side';d.body.append(pane);pane.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked while navigation was pending');view.setOfficial(false);
-  item=native('999@c.us','Contact B');await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(!original.isConnected,'Old conversation leaked into the new one');
-  item=native('123@c.us','Contact A');const back=view.observe([{id:item.dataset.id,source:item.textContent,metadata:'return'}],[item]);assert(d.querySelector('article')===original,'Cached conversation was not reused before IPC');assert(list.scrollTop===savedTop,'Returning to a chat lost scroll position');await back;await tick();assert(list.scrollTop===savedTop,'DB refresh moved the restored conversation');
-  // At the top, loading older records must preserve the first visible message.
-  list.scrollTop=0;list.dispatchEvent(new w.Event('scroll'));for(let i=0;i<20&&d.querySelectorAll('article').length<400;i++)await tick();await tick();
-  assert(d.querySelectorAll('article').length===400,'Older page did not load');assert(original.isConnected&&original.querySelector('.haituo-local-message-translation')===translation,'Older paging recreated a saved translation');
-  assert(Math.abs(original.getBoundingClientRect().top-list.getBoundingClientRect().top)<40,'Older paging moved the visible anchor');
-  all[200].translations['zh-CN'].text='后台完成的旧消息译文';const older=d.querySelector('article'),oldTranslation=older.querySelector('.haituo-local-message-translation');await view.refresh(all[200].id);assert(oldTranslation.textContent==='后台完成的旧消息译文','Targeted refresh missed older history');assert(d.querySelectorAll('.haituo-wa-message-translation').length===0,'Legacy translation attachment was used');
-  view.destroy();view=null;
-  // Simulated renderer restart: retained disk records are supplied together,
-  // and neither translation generation nor original-DOM patching is needed.
-  view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
-  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true,officialMedia:true};
+  const original=native.firstElementChild;view=install(config);
+  assert(d.querySelector('#native')===native&&native.firstElementChild===original,'The native conversation was replaced');assert(d.querySelector('footer')===footer,'Native controls were replaced');assert(!d.querySelector('#haituo-local-bilingual-chat'),'A replacement chat overlay was created');
+  assert(original.querySelector('[data-haituo-saved-text]')?.textContent==='已保存译文 0','Saved translation was not present at initial render');assert(w.getComputedStyle(native).opacity==='1'&&w.getComputedStyle(native).visibility==='visible','Native conversation was masked');await tick();
+  native.scrollTop=2400;await tick();const before=native.scrollTop,translation=original.querySelector('.haituo-wa-message-translation');await view.observe(all.slice(0,24),[...native.children]);await tick();assert(native.scrollTop===before,'Read-only refresh moved the native scroll position');assert(native.firstElementChild===original&&original.querySelector('.haituo-wa-message-translation')===translation,'Refresh recreated native messages or translation nodes');
+  show(all.slice(200,300));native.scrollTop=2400;await tick();assert(native.firstElementChild.querySelector('[data-haituo-saved-text]')?.textContent==='已保存译文 200','Native virtualized history lost its saved translation');assert(native.scrollTop===2400,'Translation hydration moved the virtualized history');
+  const visible=[...native.children].find(n=>n.getBoundingClientRect().bottom>native.getBoundingClientRect().top),anchorTop=visible.getBoundingClientRect().top;all[200].translations['zh-CN'].text='Long translated text '.repeat(300);await view.refresh(all[200].id);await tick();assert(Math.abs(visible.getBoundingClientRect().top-anchorTop)<2,'A longer saved translation moved the visible native message');all[200].translations['zh-CN'].text='已保存译文 200';await view.refresh(all[200].id);await tick();
+  const other=record('999@c.us',1);db.set(other.id,other);show([other]);await tick();await view.refresh(all[200].id);assert(native.firstElementChild.getAttribute('data-id')===other.id,'A late old-chat result changed the native chat');assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 1','A translation crossed conversations');
+  show(all.slice(200,300));native.scrollTop=2400;await tick();assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 200','Returning to native history lost its translation');assert(native.scrollTop===2400,'Returning to history moved the native scroll position');
+  native.innerHTML='<div data-id="false_123@c.us_photo"><img alt="Native photo"><button>Open native photo</button></div>';await tick();assert(w.getComputedStyle(native).opacity==='1'&&d.querySelector('img').isConnected,'Image-only conversation was hidden');assert(!d.querySelector('#haituo-local-bilingual-chat'),'Image-only chat created a replacement view');
+  view.destroy();view=null;show(all.slice(400,500));view=install(config);assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 400','Restart could not display a saved translation without network');
+  view.destroy();view=null;show([record('888@c.us',1)]);view=install({...config,ipc:{...ipc,sendSync(){throw Error('Storage unavailable')}}});await tick();assert(native.textContent.includes('Original 1')&&w.getComputedStyle(native).opacity==='1','Storage failure concealed native messages');
+  return{records:600,reads,nativeInterface:true,nativeControls:true,longWrapAnchor:true,retainedScroll:true,beforeNextPaint:true,offlineReload:true,imageOnly:true,storageFailureVisible:true};
  }finally{view?.destroy();host.remove()}
 };

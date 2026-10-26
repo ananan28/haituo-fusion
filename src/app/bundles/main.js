@@ -25956,6 +25956,7 @@ function tm() {
         return true;
     }), p.ipcMain.removeHandler(`caisheng:set-translation-config`), p.ipcMain.handle(`caisheng:set-translation-config`, async (e, t) => (Jp(e.senderFrame?.url ?? ``), (() => {
         const patch = haituoUnredactConfigPatch(t);
+        haituoRequireResolvedSecrets(t,patch);
         if (typeof patch.__v == `number` && patch.__v < HaituoConfigVersion) throw Error(`设置已被其他窗口更新，请重试`);
         return haituoApplyTranslationConfig({ ...$p(), ...patch, ...(typeof t?.darkTheme === `boolean` && !t?.nativeTheme ? {nativeTheme:t.darkTheme ? `dark` : `light`} : {}) });
     })())), p.ipcMain.removeHandler(`caisheng:get-translation-config`), p.ipcMain.handle(`caisheng:get-translation-config`, e => (Jp(e.senderFrame?.url ?? ``), 
@@ -25970,6 +25971,9 @@ function tm() {
         Jp(e.senderFrame?.url ?? ``);
         let t = $p().refreshShortcut ?? $p().shortcut;
         return typeof t == `string` ? t : `ctrl-r`;
+    }), p.ipcMain.removeAllListeners(`haituo:local-chat-read`), p.ipcMain.on(`haituo:local-chat-read`,(event,request)=>{
+        try{event.returnValue={ok:!0,page:haituoLocalChatStore().page(haituoLocalChatAccount(event),request?.chat,{ids:request?.ids})}}
+        catch(error){event.returnValue={ok:!1,error:`本机译文读取失败，原对话保持可用`}}
     }), p.ipcMain.removeHandler(`haituo:local-chat-observe`), p.ipcMain.handle(`haituo:local-chat-observe`,(event,items)=>haituoLocalChatStore().observe(haituoLocalChatAccount(event),items)),
     p.ipcMain.removeHandler(`haituo:local-chat-page`), p.ipcMain.handle(`haituo:local-chat-page`,(event,chat,options)=>haituoLocalChatStore().page(haituoLocalChatAccount(event),chat,options)),
     p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
@@ -28283,8 +28287,19 @@ function haituoShortcutConfig(source) {
         screenshotCopyShortcut: String(source?.screenshotCopyShortcut || 'CommandOrControl+Alt+S').trim()
     };
 }
+function haituoRequireResolvedSecrets(incoming, clean) {
+    const masked=value=>typeof value===`string`&&value.startsWith(HaituoRedactedSecret);
+    const valid=value=>typeof value===`string`&&!!value.trim()&&!masked(value);
+    const reject=()=>{throw Error(`已保存的密钥占位信息已过期，本次设置未保存；请重新打开设置后再试，原配置已保留`)};
+    for(const field of HaituoSecretConfigFields)if(masked(incoming?.[field])&&!valid(clean?.[field]))reject();
+    const check=(before,after,field)=>{if(!Array.isArray(before))return;const hasMask=before.some(item=>masked(field?item?.[field]:item));if(hasMask&&(!Array.isArray(after)||before.length!==after.length))reject();before.forEach((item,index)=>{if(masked(field?item?.[field]:item)&&!valid(field?after?.[index]?.[field]:after?.[index]))reject()})};
+    check(incoming?.openaiApiKeys,clean?.openaiApiKeys,null);
+    for(const field of [`openaiApiProfiles`,`screenshotApiPool`])check(incoming?.[field],clean?.[field],`apiKey`);
+    for(const group of [`primary`,`backup`])check(incoming?.translationPools?.[group],clean?.translationPools?.[group],`apiKey`);
+}
 function haituoApplyTranslationConfig(t) {
-    t = haituoUnredactConfigPatch(t);
+    const cleaned=haituoUnredactConfigPatch(t);haituoRequireResolvedSecrets(t,cleaned);
+    t = { ...$p(), ...cleaned };
     if ($u !== `signal-main` && process.connected) return haituoRequestGlobalSettings(t);
     if (haituoScreenshotController) {
         // Re-registering on every save made an occupied screenshot shortcut

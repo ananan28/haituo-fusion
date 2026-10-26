@@ -58,6 +58,7 @@ const childHandlerCode = sliceFn(
 ).trim();
 const shortcutConfigCode = sliceBalanced('function haituoShortcutConfig');
 const applyCode = sliceBalanced('function haituoApplyTranslationConfig');
+const secretGuardCode = sliceFn('const HaituoRedactedSecret', 'function haituoRedactTranslationConfig') + sliceBalanced('function haituoRequireResolvedSecrets');
 const emCode = sliceFn('function em(e) {', 'function tm() {');
 const settingsReadCode = sliceFn('function $p() {', 'function rmRefresh');
 
@@ -210,7 +211,7 @@ function makeSetHandlerCtx() {
   ctx.__handled = handled;
   ctx.__applied = applied;
   vm.createContext(ctx);
-  vm.runInContext(versionCode + setHandlerCode + ';', ctx);
+  vm.runInContext(secretGuardCode + versionCode + setHandlerCode + ';', ctx);
   return ctx;
 }
 
@@ -310,7 +311,7 @@ function makeApplyCtx() {
   ctx.__persisted = persisted;
   ctx.__broadcasts = broadcasts;
   vm.createContext(ctx);
-  vm.runInContext(versionCode + shortcutConfigCode + applyCode + emCode, ctx);
+  vm.runInContext(secretGuardCode + versionCode + shortcutConfigCode + applyCode + emCode, ctx);
   vm.runInContext(`$u = 'signal-main';`, ctx);
   return ctx;
 }

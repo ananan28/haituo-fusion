@@ -1,0 +1,10 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../src/app/bundles/main.js'),'utf8').replace(/\r\n/g,'\n');
+const start=source.indexOf('function haituoRequireResolvedSecrets('),end=source.indexOf('function haituoApplyTranslationConfig(',start);
+const context={HaituoRedactedSecret:'__HAITUO_REDACTED__',HaituoSecretConfigFields:['apiKey','groqApiKey']};vm.createContext(context);vm.runInContext(source.slice(start,end),context);const check=context.haituoRequireResolvedSecrets,S='__HAITUO_REDACTED__';
+test('saving an unrelated setting does not require resubmitting any saved API keys',()=>assert.doesNotThrow(()=>check({nativeTheme:'light'},{nativeTheme:'light'})));
+test('unresolved saved primary or backup credentials reject the whole save instead of clearing keys',()=>{for(const group of ['primary','backup'])assert.throws(()=>check({translationPools:{[group]:[{apiKey:S+':translationPools.'+group+'.0'}]}},{translationPools:{[group]:[{apiKey:''}]}}),/原配置已保留/)});
+test('dropped saved profile and screenshot entries cannot silently replace the persisted arrays',()=>{for(const name of ['openaiApiProfiles','screenshotApiPool'])assert.throws(()=>check({[name]:[{apiKey:S+':'+name+'.0'}]},{[name]:[]}),/原配置已保留/)});
+test('a resolved masked key and an explicit user-cleared plain key are distinguishable',()=>{assert.doesNotThrow(()=>check({apiKey:S+':apiKey'},{apiKey:'fixture-only'}));assert.doesNotThrow(()=>check({apiKey:''},{apiKey:''}));assert.throws(()=>check({apiKey:S+':apiKey'},{}),/原配置已保留/)});
+test('the central config applier merges a partial save with existing persisted fields',()=>assert.match(source,/t = \{ \.\.\.\$p\(\), \.\.\.cleaned \}/));

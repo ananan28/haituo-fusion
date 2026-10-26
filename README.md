@@ -1,6 +1,6 @@
 # 海拓独立开发工程
 
-本工程同时构建 Windows x64 1.6.3 和 macOS ARM64 1.6.3。所有应用代码、资源、随附 JavaScript 依赖和构建脚本都在本目录内。移动整个目录，或提交到你自己的新仓库即可继续开发，不需要以前的仓库、电脑、source.zip 分卷或已安装的海拓。
+本工程同时构建 Windows x64 1.6.4 和 macOS ARM64 1.6.4。所有应用代码、资源、随附 JavaScript 依赖和构建脚本都在本目录内。移动整个目录，或提交到你自己的新仓库即可继续开发，不需要以前的仓库、电脑、source.zip 分卷或已安装的海拓。
 
 ## 新电脑构建
 
@@ -18,7 +18,7 @@ Mac，在项目目录终端执行：
 python3 scripts/build.py --target macos --test
 ```
 
-首次构建需要联网下载固定版本的 Electron、打包工具及原生依赖。Windows 输出 `windows/out/Haituo-1.6.3-Windows-x64-Setup.exe`；Mac 输出 `macos/out/海拓-1.6.3-arm64.dmg`。构建不发布任何版本。Mac 使用本地临时签名；本工程不包含开发者证书或 Apple 公证凭据。
+首次构建需要联网下载固定版本的 Electron、打包工具及原生依赖。Windows 输出 `windows/out/Haituo-1.6.4-Windows-x64-Setup.exe`；Mac 输出 `macos/out/海拓-1.6.4-arm64.dmg`。构建不发布任何版本。Mac 使用本地临时签名；本工程不包含开发者证书或 Apple 公证凭据。
 
 ## 修改代码
 
@@ -36,12 +36,12 @@ python3 scripts/build.py --target macos --test
 
 `--test` 包含实际启动及窗口回归验证；它使用临时数据目录，不登录你的账号。需要人工完成真实账号的收发消息、API 认证、语音转文/翻译、音频外放和数据库升级验证。
 
-## 1.6.3 行为及验证边界
+## 1.6.4 行为及验证边界
 
 默认保持禁止直接发送中文。关闭后原生发送中文需要确认；快速输入回车先翻译填入并显示回译，再使用原生发送按钮发送，与 1.3.5 保持一致。
 
-本轮消息记录持久化及子 Signal 融合候选功能见 CHANGELOG-1.6.3.md、INPROCESS-1.6.3.md。运行 `node --test scripts/translation-validation.test.cjs scripts/network.test.cjs`，再在对应系统运行 `python scripts/build.py --target windows --test` 或 `python3 scripts/build.py --target macos --test`。
+本轮消息记录持久化及子 Signal 融合候选功能见 CHANGELOG-1.6.4.md、INPROCESS-1.6.4.md。运行 `node --test scripts/translation-validation.test.cjs scripts/network.test.cjs`，再在对应系统运行 `python scripts/build.py --target windows --test` 或 `python3 scripts/build.py --target macos --test`。
 
-子 Signal 界面默认嵌在主窗口内部，后台进程和数据库仍按账号隔离，无需启动参数。WhatsApp 本机文字视图按会话保留双语节点和滚动位置；媒体操作使用官方视图。客户聊天消息采用忠实直译，主动发送的输入翻译风格保持原逻辑。真实账号、语音外放、旧数据库升级、删除记录保留及全面加密仍需单独验证/实现。不能将安装包构建通过等同于所有历史问题已解决。
+子 Signal 界面默认嵌在主窗口内部，后台进程和数据库仍按账号隔离，无需启动参数。WhatsApp 保留原对话界面，译文直接显示在原消息下面；不创建替代聊天列表、遮罩或视图切换。客户聊天消息采用忠实直译，主动发送的输入翻译风格保持原逻辑。真实账号、语音外放、旧数据库升级、删除记录保留及全面加密仍需单独验证/实现。不能将安装包构建通过等同于所有历史问题已解决。
 
 maintenance/ 是历史补丁参考，不要重复应用到当前 src/app。
