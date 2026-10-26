@@ -25590,8 +25590,9 @@ function haituoTranslateAttached(event, request, work) {
     // Do not allow an old text-only shared cache to choose a different message's attachment.
     request.messageScope = `${platform}:${account}:${request.messageId}`;
     if (platform === `whatsapp` && request.localMessageRecord === !0) {
-        const records=haituoLocalChatStore(),chat=require('../js/haituo-local-chat-records.js').conversation(request.messageId);
+        const records=haituoLocalChatStore(),chat=require('../js/haituo-wa-identity.js').requestChat(request.messageId,request.chatId);
         if(!chat)throw Error(`WhatsApp 消息归属无效`);
+        request.messageScope = `${platform}:${account}:${chat}:${request.messageId}`;
         return records.content.translate(account,account,chat,request,work);
     }
     if (platform === `signal` && request.localMessageRecord === !0) {

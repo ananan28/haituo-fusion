@@ -23,14 +23,14 @@ async function check(id,work){try{const result=await work();report.checks.push({
  if(client){
   report.bootstrap=await evaluate(`({startApp:typeof window.startApp,body:document.body.innerText.slice(-1200)})`);
   for(const rate of [1,6])await check('WHATSAPP-NATIVE-SYNTHETIC-RESIDENT-'+rate+'X',async()=>{
-   const resident=fs.readFileSync(path.resolve('src/app/js/haituo-wa-resident.js'),'utf8'),hooks=fs.readFileSync(path.resolve('src/app/js/haituo-wa-node-hooks.js'),'utf8');
+   const identity=fs.readFileSync(path.resolve('src/app/js/haituo-wa-identity.js'),'utf8'),resident=fs.readFileSync(path.resolve('src/app/js/haituo-wa-resident.js'),'utf8').replace("const {conversationContext,messageOutgoing,shortMessageId}=require('./haituo-wa-identity.js');\n",''),hooks=fs.readFileSync(path.resolve('src/app/js/haituo-wa-node-hooks.js'),'utf8');
    const fixture=require('./wa-native-layout-fixture.cjs').toString();
    const webSource=fs.readFileSync(path.resolve('src/app/js/caisheng-webview-preload.js'),'utf8'),positionSource=webSource.slice(webSource.indexOf('function haituoTranslationScroller('),webSource.indexOf('// Apply only to WhatsApp.'));
    await client.call('Emulation.setCPUThrottlingRate',{rate});
    // CPU-throttled 1000-record/80-frame work has its own bounded budget;
    // ordinary CDP commands retain 7s. Never retry a failed assertion.
    const started=Date.now(),timeoutMs=rate===6?30000:7000;
-   try{const result=await evaluate(`(async()=>{const resident={exports:{}},hooks={exports:{}};((module)=>{${resident}\n})(resident);((module)=>{${hooks}\n})(hooks);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(resident.exports.installResident,hooks.exports.installHooks,keep)})()`,undefined,timeoutMs);return{...result,wallTimeMs:Date.now()-started,timeoutMs}}
+   try{const result=await evaluate(`(async()=>{const resident={exports:{}},hooks={exports:{}};((module)=>{${identity}\n${resident}\n})(resident);((module)=>{${hooks}\n})(hooks);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(resident.exports.installResident,hooks.exports.installHooks,keep)})()`,undefined,timeoutMs);return{...result,wallTimeMs:Date.now()-started,timeoutMs}}
    finally{await client.call('Emulation.setCPUThrottlingRate',{rate:1})}
   });
   await check('SETTINGS-OPEN',async()=>{await evaluate(`document.querySelector('.CaishengPlatformShell__settingsButton')?.click()`);await pause(500);const s=await evaluate(snapshot);if(!s.settings)throw Error('settings absent');return s});
