@@ -86,6 +86,8 @@ jobs:
       - name: Native sandboxed WhatsApp webview startup regression
         timeout-minutes: 3
         run: node scripts/wa-guest-native-check.cjs
+      - name: Native settings and offline restart regression
+        run: node scripts/native-attachments-check.cjs
       - name: Package Windows source for immediate diagnostic delivery
         if: matrix.target == 'windows'
         run: python scripts/package-source.py --target windows
@@ -96,8 +98,6 @@ jobs:
           path: |
             windows/out/*Setup.exe
             source-packages/*.zip
-      - name: Native settings and offline restart regression
-        run: node scripts/native-attachments-check.cjs
       - name: Runtime dependency and transport checks
         run: python scripts/build.py --target ${{ matrix.target }} --runtime-tests-only
       - name: Package corresponding client source

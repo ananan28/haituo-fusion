@@ -7,9 +7,9 @@ function installHooks({document,window}){
  function reconcile(values){if(busy)return;busy=true;try{for(const value of values)visit(value);for(const reference of roots){const root=reference.deref();if(!root)roots.delete(reference);else if(root.host.isConnected)visit(root)}}finally{busy=false}}
  function wrap(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.value)return;Object.defineProperty(proto,key,{...descriptor,value:function(...args){const fragmentNodes=args.flatMap(value=>value?.nodeType===11?[...value.childNodes]:[]);const parent=this.parentNode;const result=Reflect.apply(descriptor.value,this,args);reconcile([this,parent,...args,...fragmentNodes]);return result}})}
  function setter(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.set)return;Object.defineProperty(proto,key,{...descriptor,set(value){Reflect.apply(descriptor.set,this,[value]);reconcile([this,this.parentNode])}})}
- for(const name of ['appendChild','insertBefore','replaceChild'])wrap(window.Node.prototype,name);
+ for(const name of ['appendChild','insertBefore','replaceChild','removeChild'])wrap(window.Node.prototype,name);
  for(const proto of [window.Element.prototype,window.Document.prototype,window.DocumentFragment.prototype])for(const name of ['append','prepend','replaceChildren'])wrap(proto,name);
- for(const proto of [window.Element.prototype,window.CharacterData.prototype])for(const name of ['before','after','replaceWith'])wrap(proto,name);
+ for(const proto of [window.Element.prototype,window.CharacterData.prototype])for(const name of ['before','after','replaceWith','remove'])wrap(proto,name);
  for(const name of ['insertAdjacentHTML','setAttribute','removeAttribute'])wrap(window.Element.prototype,name);
  wrap(window.Range.prototype,'insertNode');
  for(const name of ['textContent','nodeValue'])setter(window.Node.prototype,name);
