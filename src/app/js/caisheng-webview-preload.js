@@ -116,6 +116,7 @@ let panel, settingsPanel, translatorFooter, backTranslationPreview, backTranslat
     model: "gpt-4.1-mini",
     region: "",
     targetLanguage: "en",
+    myLanguage: "zh",
     blockChineseOutgoing: !0,
     accountLabelColor: "#30343b",
     chatTextColor: "",
@@ -560,7 +561,7 @@ async function translateMessage(e, t = !1, messageId, attachmentOnly = !1) {
     const content = String(e || "").replace(/https?:\/\/\S+|www\.\S+/giu, " ");
     const han = (content.match(/\p{Script=Han}/gu) || []).length;
     const latin = (content.match(/[a-z]+(?:['’][a-z]+)?/giu) || []).length;
-    const n = han > latin ? settings.targetLanguage || "en" : "zh-CN", context = recentMessageNodes().slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), o = await ipcRenderer.invoke("caisheng:translate", {
+    const n = isWhatsApp() ? haituoMessageTarget(e,messageId) : han > latin ? settings.targetLanguage || "en" : "zh-CN", context = recentMessageNodes().slice(-10).map(node => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join("\n").slice(-6000), o = await ipcRenderer.invoke("caisheng:translate", {
         text: e,
         targetLanguage: n,
         provider: t ? "smart-retranslate" : settings.chatTranslationProvider || "google-free",
@@ -1613,27 +1614,8 @@ function haituoCurrentWebMessage(item) {
     return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId;
 }
 function haituoLocalChatConversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
-function haituoInstallLocalChatView(options){return installResident({...options,translate:(text,id)=>translateMessage(text,false,id),enabled:()=>incomingTranslationOn(),installMainWorld:()=>contextBridge.executeInMainWorld({func:function(){(// Runs in the page main world. No IPC, account IDs, source cache or credentials.
-function installHooks({document,window}){
- if(window.__haituoWACreationHooks){document.dispatchEvent(new window.CustomEvent('haituo:wa-hooks-ready'));return;}window.__haituoWACreationHooks=true;
- let busy=false;const roots=new Set,own='.ht-translation-slot';
- function visit(value){if(!value||!value.nodeType)return;const element=value.nodeType===1?value:value.parentElement;if(element?.closest(own))return;const items=new Set;if(element?.closest('[data-id]'))items.add(element.closest('[data-id]'));if(element?.matches('[data-id]'))items.add(element);for(const node of value.querySelectorAll?.('[data-id]')||[])items.add(node);for(const node of items)if(node.isConnected&&!node.closest(own))document.dispatchEvent(new window.CustomEvent('haituo:wa-render-node',{detail:node}));}
- function reconcile(values){if(busy)return;busy=true;try{for(const value of values)visit(value);for(const reference of roots){const root=reference.deref();if(!root)roots.delete(reference);else if(root.host.isConnected)visit(root)}}finally{busy=false}}
- function wrap(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.value)return;Object.defineProperty(proto,key,{...descriptor,value:function(...args){const fragmentNodes=args.flatMap(value=>value?.nodeType===11?[...value.childNodes]:[]);const parent=this.parentNode;const result=Reflect.apply(descriptor.value,this,args);if((key==='setAttribute'||key==='removeAttribute')&&/^(?:data-translation-cache-hit|data-haituo-translation-.+|data-ht-.+)$/.test(String(args[0])))return result;reconcile([this,parent,...args,...fragmentNodes]);return result}})}
- function setter(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.set)return;Object.defineProperty(proto,key,{...descriptor,set(value){Reflect.apply(descriptor.set,this,[value]);reconcile([this,this.parentNode])}})}
- for(const name of ['appendChild','insertBefore','replaceChild','removeChild'])wrap(window.Node.prototype,name);
- for(const proto of [window.Element.prototype,window.Document.prototype,window.DocumentFragment.prototype])for(const name of ['append','prepend','replaceChildren'])wrap(proto,name);
- for(const proto of [window.Element.prototype,window.CharacterData.prototype])for(const name of ['before','after','replaceWith','remove'])wrap(proto,name);
- for(const name of ['insertAdjacentHTML','setAttribute','removeAttribute'])wrap(window.Element.prototype,name);
- wrap(window.Range.prototype,'insertNode');
- for(const name of ['textContent','nodeValue'])setter(window.Node.prototype,name);
- setter(window.CharacterData.prototype,'data');for(const name of ['innerHTML','outerHTML','className'])setter(window.Element.prototype,name);setter(window.ShadowRoot.prototype,'innerHTML');
- const attach=Object.getOwnPropertyDescriptor(window.Element.prototype,'attachShadow');Object.defineProperty(window.Element.prototype,'attachShadow',{...attach,value:function(options){const root=Reflect.apply(attach.value,this,[options]);if(!this.closest(own))roots.add(new WeakRef(root));return root}});
- const observer=new window.MutationObserver(events=>{const values=[];for(const event of events){if(event.target.nodeType===1&&event.target.closest(own))continue;values.push(event.target,...event.addedNodes||[])}reconcile(values)});
- observer.observe(document,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id','data-pre-plain-text','data-mid','data-timestamp','cid','class']});
- document.dispatchEvent(new window.CustomEvent('haituo:wa-hooks-ready'));reconcile([document]);
-})( {document,window});return true}})})}
-function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,keepPosition=(_node,work)=>work(),installMainWorld}){
+function haituoInstallLocalChatView(options){return installResident({...options,translate:(text,id)=>translateMessage(text,false,id),enabled:(_text,id)=>id?.startsWith('true_')?settings.backTranslationEnabled!==false:incomingTranslationOn()})}
+function installResident({document,window,ipc,targetFor,translate,enabled=()=>true,keepPosition=(_node,work)=>work()}){
  const norm=s=>String(s||'').normalize('NFKC').replace(/\s+/gu,' ').trim(),memory=new Map,live=new Map,pending=new Map,queue=new Map,hidden=new WeakMap,slots=new WeakMap,rendering=new WeakSet,ownedHosts=new WeakSet;
  const counters={cacheHits:0,lookups:0,translationRequests:0,hookReady:false,errors:0,firstNodesBeforeHook:0,rehydrates:0,slotReattachments:0};const warmed=new Map;let generation=0,scope='',bytes=0,stopped=false,queued=false,touch=0;
  const own='.ht-translation-slot,.haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error',quotes='[data-testid*="quoted" i],[aria-label*="Quoted" i],[aria-label*="引用"]';
@@ -1645,14 +1627,14 @@ function installResident({document,window,ipc,targetFor,translate,enabled=()=>tr
  const selected=[...(node.matches(textSelector)?[node]:[]),...node.querySelectorAll(textSelector)].filter(n=>!n.closest(own)&&!n.closest(quotes));const roots=selected.filter(n=>!selected.some(p=>p!==n&&p.contains(n)));
  const source=roots.map(n=>{const clone=n.cloneNode(true);clone.querySelectorAll(own+','+quotes).forEach(n=>n.remove());return(clone.textContent||'').trim()}).filter(Boolean).join('\n\n').trim();if(!source||source.length>30000)return;
  let mount=roots.at(-1)?.closest('[data-pre-plain-text]')||roots.at(-1)?.parentElement;while(mount&&mount!==node&&!roots.every(root=>mount.contains(root)))mount=mount.parentElement;if(!mount||!node.contains(mount))return;
- const lang=targetFor(source);return{node,id,chat:room,source,lang,roots,mount,key:key(room,lang,source)};}
+ const lang=targetFor(source,id);return{node,id,chat:room,source,lang,roots,mount,key:key(room,lang,source)};}
  function remember(k,value){const old=memory.get(k);if(old)bytes-=old.size;const entry={...value,touched:++touch,hits:old?.hits||0};entry.size=byteSize(entry);memory.set(k,entry);bytes+=entry.size;
  const pinned=new Set([...live].filter(([node])=>node.isConnected).map(([,item])=>item.key));while(memory.size>1000||bytes>8*1024*1024){const candidates=[...memory].filter(([key])=>!pinned.has(key)).sort((a,b)=>a[1].hits-b[1].hits||a[1].touched-b[1].touched);if(!candidates.length)break;const [oldKey,oldValue]=candidates[0];bytes-=oldValue.size;memory.delete(oldKey)}return entry;}
  function forget(k){const old=memory.get(k);if(old)bytes-=old.size;memory.delete(k)}
  function mask(item,on){for(const root of item.roots){if(on&&!hidden.has(root)){hidden.set(root,root.style.visibility);root.style.visibility='hidden'}else if(!on&&hidden.has(root)){root.style.visibility=hidden.get(root);hidden.delete(root)}}}
  function slotFor(item){let state=slots.get(item.node);
  if(state?.key!==item.key){slots.delete(item.node);state?.host.remove();state=undefined}
- if(!state){item.node.querySelectorAll('.ht-translation-slot').forEach(old=>old.remove());const host=document.createElement('div');host.className='ht-translation-slot haituo-wa-message-translation';host.dataset.htSlot='1';Object.assign(host.style,{display:'block',visibility:'visible',textAlign:'right',color:'inherit',userSelect:'none',overflowAnchor:'none',whiteSpace:'pre-wrap',overflowWrap:'anywhere',marginTop:'6px'});host.setAttribute('contenteditable','false');host.setAttribute('aria-hidden','true');state={host,shadow:host.attachShadow({mode:'closed'}),key:item.key,status:''};slots.set(item.node,state);ownedHosts.add(host)}
+ if(!state){item.node.querySelectorAll('.ht-translation-slot').forEach(old=>old.remove());const host=document.createElement('div');host.className='ht-translation-slot haituo-wa-message-translation';host.dataset.htSlot='1';Object.assign(host.style,{display:'block',visibility:'visible',textAlign:'right',color:'inherit',userSelect:'none',overflowAnchor:'none',whiteSpace:'pre-wrap',overflowWrap:'anywhere',marginTop:'6px'});host.setAttribute('contenteditable','false');host.setAttribute('aria-hidden','true');state={host,shadow:host,key:item.key,status:''};slots.set(item.node,state);ownedHosts.add(host)}
  // React may clone a light-DOM slot shell without its closed shadow root.
  for(const other of item.node.querySelectorAll('.ht-translation-slot'))if(other!==state.host)other.remove();
  // A WeakMap entry is not evidence that WhatsApp kept its host in the DOM.
@@ -1668,7 +1650,7 @@ function installResident({document,window,ipc,targetFor,translate,enabled=()=>tr
  }finally{rendering.delete(item.node)}}
  function update(k,entry){remember(k,entry);for(const [node,item] of live)if(!node.isConnected)live.delete(node);else if(item.key===k){const next=read(node);if(next&&next.key===k)keepPosition(node,()=>render(next,entry))}}
  function scheduleWarm(item){const id=JSON.stringify([item.chat,item.lang]);if(warmed.has(id))return;warmed.set(id,{next:undefined,busy:true});const work=async()=>{try{const page=await ipc.invoke('haituo:wa-cache-warm',{chat:item.chat,lang:item.lang});if(stopped)return;warmed.set(id,{next:page.next,busy:false});for(const row of page.entries||[]){const k=key(item.chat,item.lang,row.source);if(!memory.has(k))update(k,{state:'hit',text:row.text})}}catch{warmed.set(id,{next:undefined,busy:false})}};if(window.requestIdleCallback)window.requestIdleCallback(work,{timeout:3000});else window.setTimeout(work,0);}
- function process(node){if(stopped||!node||rendering.has(node))return;const item=read(node);if(!item){const previous=live.get(node);if(previous)mask(previous,false);live.delete(node);const old=slots.get(node);slots.delete(node);old?.host.remove();node.removeAttribute?.('data-translation-cache-hit');return;}if(!counters.hookReady)counters.firstNodesBeforeHook++;scope=JSON.stringify([item.chat]);for(const [old] of live)if(!old.isConnected)live.delete(old);scheduleWarm(item);live.set(node,item);const cached=memory.get(item.key);
+ function process(node){if(stopped||!node||rendering.has(node))return;const item=read(node);if(!item){const previous=live.get(node);if(previous)mask(previous,false);live.delete(node);const old=slots.get(node);slots.delete(node);old?.host.remove();node.removeAttribute?.('data-translation-cache-hit');return;}scope=JSON.stringify([item.chat]);for(const [old] of live)if(!old.isConnected)live.delete(old);scheduleWarm(item);live.set(node,item);const cached=memory.get(item.key);
  if(cached?.state==='hit'){cached.hits++;cached.touched=++touch;counters.cacheHits++;
  const state=slots.get(node),hosts=node.querySelectorAll('.ht-translation-slot');
  if(state?.key===item.key&&state.status==='hit'&&state.text===cached.text&&state.host.isConnected&&state.host.parentElement===item.mount&&state.shadow.firstChild&&hosts.length===1&&hosts[0]===state.host&&node.dataset.translationCacheHit==='true'&&state.host.dataset.translationCacheHit==='true'&&node.dataset.haituoTranslationSource===item.source&&node.dataset.haituoTranslationMessageId===item.id&&node.dataset.haituoTranslationTarget===item.lang&&!item.roots.some(root=>hidden.has(root)))return;
@@ -1679,58 +1661,44 @@ function installResident({document,window,ipc,targetFor,translate,enabled=()=>tr
  const grouped=new Map;for(const item of items){const group=JSON.stringify([item.chat,item.lang]);if(!grouped.has(group))grouped.set(group,[]);grouped.get(group).push(item)}
  for(const group of grouped.values())for(let start=0;start<group.length;start+=100){const batch=group.slice(start,start+100);for(const item of batch)pending.set(item.key,true);const timer=window.setTimeout(()=>{if(token===generation)for(const item of batch)update(item.key,{state:'error'})},2000);
  try{counters.lookups++;const rows=await ipc.invoke('haituo:wa-cache-lookup',{chat:batch[0].chat,lang:batch[0].lang,sources:batch.map(x=>x.source),outgoing:batch.map(x=>x.id.startsWith('true_'))});if(token!==generation||stopped)continue;
- for(const [index,item] of batch.entries()){const row=rows[index];if(!row||norm(row.source)!==norm(item.source))throw Error('译文响应归属错误');if(row.state==='hit'){update(item.key,{state:'hit',text:row.text});continue}update(item.key,{state:row.state==='stale'?'stale':'empty'});if(enabled(item.source))runTranslation(item,token)}
+ for(const [index,item] of batch.entries()){const row=rows[index];if(!row||norm(row.source)!==norm(item.source))throw Error('译文响应归属错误');if(row.state==='hit'){update(item.key,{state:'hit',text:row.text});continue}update(item.key,{state:row.state==='stale'?'stale':'empty'});if(enabled(item.source,item.id))runTranslation(item,token)}
  }catch{if(token===generation&&!stopped){counters.errors++;for(const item of batch)update(item.key,{state:'error'})}}finally{window.clearTimeout(timer);for(const item of batch)pending.delete(item.key)}}
  }
  async function runTranslation(item,token){if(pending.get(item.key)==='translation')return;pending.set(item.key,'translation');update(item.key,{state:'translating'});counters.translationRequests++;const timer=window.setTimeout(()=>{if(token===generation&&!stopped)update(item.key,{state:'error',originalAllowed:true})},2000);
  try{const result=await translate(item.source,item.id,false);if(token===generation&&!stopped){if(!result?.trim())throw Error('译文为空');update(item.key,{state:'hit',text:result})}}catch{if(token===generation&&!stopped){counters.errors++;update(item.key,{state:'error',originalAllowed:true})}}finally{window.clearTimeout(timer);if(token===generation)pending.delete(item.key)}}
- function onNode(event){process(event.detail)}function onReady(){counters.hookReady=true}
  const onCopy=event=>{const selection=window.getSelection();if(!selection?.rangeCount)return;const parts=[];let touches=false;for(let i=0;i<selection.rangeCount;i++){const range=selection.getRangeAt(i);for(const host of document.querySelectorAll('.ht-translation-slot'))try{if(range.intersectsNode(host))touches=true}catch{}const fragment=range.cloneContents();fragment.querySelectorAll('.ht-translation-slot').forEach(node=>node.remove());parts.push(fragment.textContent||'')}if(touches&&event.clipboardData){event.clipboardData.setData('text/plain',parts.join('\n'));event.preventDefault();event.stopImmediatePropagation()}};
  document.addEventListener('copy',onCopy,true);
- document.addEventListener('haituo:wa-render-node',onNode);document.addEventListener('haituo:wa-hooks-ready',onReady);
- const init=installMainWorld?.();if(init?.catch)init.catch(()=>{counters.errors++});
- for(const node of document.querySelectorAll('#main [data-id]'))process(node);
+ counters.hookReady=true; // isolated observer readiness, no page-world hooks
  let rehydrateFrame=null,rehydrateTimer=null;
  function rehydrateVisible(){if(stopped)return;counters.rehydrates++;for(const [node] of live)if(!node.isConnected)live.delete(node);const height=window.innerHeight||document.documentElement?.clientHeight||0,width=window.innerWidth||document.documentElement?.clientWidth||0;for(const node of document.querySelectorAll('[data-id]')){if(node.closest(own))continue;const box=node.getBoundingClientRect();if(box.width>0&&box.height>0&&box.bottom>=-80&&box.top<=height+80&&box.right>=0&&box.left<=width)process(node)}}
  function scheduleRehydrate(){if(stopped)return;if(rehydrateFrame===null)rehydrateFrame=window.requestAnimationFrame(()=>{rehydrateFrame=null;rehydrateVisible()});if(rehydrateTimer!==null)window.clearTimeout(rehydrateTimer);rehydrateTimer=window.setTimeout(()=>{rehydrateTimer=null;rehydrateVisible()},100)}
  // Observe actual DOM in the isolated preload as well as synchronous main-world
  // hooks. Removed hosts, node reuse and connected text edits must not depend on
  // a cross-world CustomEvent arriving for every DOM operation.
- const residentObserver=new window.MutationObserver(records=>{if(stopped)return;const candidates=new Set;let changed=false;for(const record of records){const target=record.target.nodeType===1?record.target:record.target.parentElement;if(target?.closest(own))continue;if(record.type==='childList'&&!record.removedNodes.length&&record.addedNodes.length&&[...record.addedNodes].every(node=>node.nodeType===1&&ownedHosts.has(node)))continue;changed=true;for(let node=target?.closest('[data-id]');node;node=node.parentElement?.closest('[data-id]'))candidates.add(node);for(const added of record.addedNodes||[]){if(added.nodeType===1&&added.matches('[data-id]'))candidates.add(added);for(const node of added.querySelectorAll?.('[data-id]')||[])candidates.add(node)}}if(!changed)return;for(const node of candidates)process(node);scheduleRehydrate()});
- residentObserver.observe(document,{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['data-id','data-pre-plain-text','class']});
+ const residentObserver=new window.MutationObserver(records=>{if(stopped)return;
+  // Own render writes must not form a mutation feedback loop. Every external
+  // child/text/attribute change reconciles ALL visible message rows.
+  const external=records.some(record=>{const target=record.target.nodeType===1?record.target:record.target.parentElement;if(target?.closest(own))return false;
+   if(record.type==='attributes'&&/^(?:data-translation-cache-hit|data-haituo-translation-.+|data-ht-.+)$/u.test(record.attributeName||''))return false;
+   if(record.type==='childList'&&!record.removedNodes.length&&record.addedNodes.length&&[...record.addedNodes].every(n=>n.nodeType===1&&ownedHosts.has(n)))return false;
+   return true});if(external){rehydrateVisible();scheduleRehydrate()}});
+ residentObserver.observe(document,{childList:true,characterData:true,subtree:true,attributes:true});
+ for(const node of document.querySelectorAll('#main [data-id]'))process(node);
  const onWheel=()=>scheduleRehydrate(),onScrollEnd=()=>{rehydrateVisible();scheduleRehydrate()};
  const onScroll=event=>{rehydrateVisible();scheduleRehydrate();const root=event.target;if(!root||!root.clientHeight||root.scrollTop>root.clientHeight*2)return;for(const [id,page] of warmed){if(page.busy||page.next===null||page.next===undefined)continue;const [room,lang]=JSON.parse(id);page.busy=true;ipc.invoke('haituo:wa-cache-warm',{chat:room,lang,before:page.next}).then(next=>{if(stopped)return;warmed.set(id,{next:next.next,busy:false});for(const row of next.entries||[]){const k=key(room,lang,row.source);if(!memory.has(k))update(k,{state:'hit',text:row.text})}}).catch(()=>{page.busy=false})}};
  document.addEventListener('scroll',onScroll,true);document.addEventListener('wheel',onWheel,{capture:true,passive:true});document.addEventListener('scrollend',onScrollEnd,true);
  const flush=()=>ipc.invoke('haituo:wa-cache-flush').catch(()=>{});window.addEventListener('pagehide',flush);const visibility=()=>{if(document.hidden)flush()};document.addEventListener('visibilitychange',visibility);
- return{isActive:()=>!stopped,isManaged:()=>!stopped,counters,rehydrate:rehydrateVisible,refreshTargets(){generation++;for(const [node,item] of live){mask(item,false);slots.get(node)?.host.remove()}live.clear();pending.clear();queue.clear();for(const node of document.querySelectorAll('#main [data-id]'))process(node)},async observe(){for(const node of document.querySelectorAll('#main [data-id]'))process(node)},async refresh(id){for(const [node,item] of live)if(item.id===id){forget(item.key);pending.delete(item.key);process(node)}},showError(_error,id){for(const item of live.values())if(item.id===id)update(item.key,{state:'error'})},destroy(){stopped=true;generation++;residentObserver.disconnect();if(rehydrateFrame!==null)window.cancelAnimationFrame(rehydrateFrame);if(rehydrateTimer!==null)window.clearTimeout(rehydrateTimer);document.removeEventListener('wheel',onWheel,true);document.removeEventListener('scrollend',onScrollEnd,true);document.removeEventListener('scroll',onScroll,true);document.removeEventListener('copy',onCopy,true);document.removeEventListener('haituo:wa-render-node',onNode);document.removeEventListener('haituo:wa-hooks-ready',onReady);window.removeEventListener('pagehide',flush);document.removeEventListener('visibilitychange',visibility);for(const item of live.values()){mask(item,false);item.node.removeAttribute('data-translation-cache-hit');slots.get(item.node)?.host.remove()}memory.clear();live.clear();pending.clear()}};
-}
-
-
-// Runs in the page main world. No IPC, account IDs, source cache or credentials.
-function installHooks({document,window}){
- if(window.__haituoWACreationHooks){document.dispatchEvent(new window.CustomEvent('haituo:wa-hooks-ready'));return;}window.__haituoWACreationHooks=true;
- let busy=false;const roots=new Set,own='.ht-translation-slot';
- function visit(value){if(!value||!value.nodeType)return;const element=value.nodeType===1?value:value.parentElement;if(element?.closest(own))return;const items=new Set;if(element?.closest('[data-id]'))items.add(element.closest('[data-id]'));if(element?.matches('[data-id]'))items.add(element);for(const node of value.querySelectorAll?.('[data-id]')||[])items.add(node);for(const node of items)if(node.isConnected&&!node.closest(own))document.dispatchEvent(new window.CustomEvent('haituo:wa-render-node',{detail:node}));}
- function reconcile(values){if(busy)return;busy=true;try{for(const value of values)visit(value);for(const reference of roots){const root=reference.deref();if(!root)roots.delete(reference);else if(root.host.isConnected)visit(root)}}finally{busy=false}}
- function wrap(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.value)return;Object.defineProperty(proto,key,{...descriptor,value:function(...args){const fragmentNodes=args.flatMap(value=>value?.nodeType===11?[...value.childNodes]:[]);const parent=this.parentNode;const result=Reflect.apply(descriptor.value,this,args);if((key==='setAttribute'||key==='removeAttribute')&&/^(?:data-translation-cache-hit|data-haituo-translation-.+|data-ht-.+)$/.test(String(args[0])))return result;reconcile([this,parent,...args,...fragmentNodes]);return result}})}
- function setter(proto,key){const descriptor=Object.getOwnPropertyDescriptor(proto,key);if(!descriptor?.set)return;Object.defineProperty(proto,key,{...descriptor,set(value){Reflect.apply(descriptor.set,this,[value]);reconcile([this,this.parentNode])}})}
- for(const name of ['appendChild','insertBefore','replaceChild','removeChild'])wrap(window.Node.prototype,name);
- for(const proto of [window.Element.prototype,window.Document.prototype,window.DocumentFragment.prototype])for(const name of ['append','prepend','replaceChildren'])wrap(proto,name);
- for(const proto of [window.Element.prototype,window.CharacterData.prototype])for(const name of ['before','after','replaceWith','remove'])wrap(proto,name);
- for(const name of ['insertAdjacentHTML','setAttribute','removeAttribute'])wrap(window.Element.prototype,name);
- wrap(window.Range.prototype,'insertNode');
- for(const name of ['textContent','nodeValue'])setter(window.Node.prototype,name);
- setter(window.CharacterData.prototype,'data');for(const name of ['innerHTML','outerHTML','className'])setter(window.Element.prototype,name);setter(window.ShadowRoot.prototype,'innerHTML');
- const attach=Object.getOwnPropertyDescriptor(window.Element.prototype,'attachShadow');Object.defineProperty(window.Element.prototype,'attachShadow',{...attach,value:function(options){const root=Reflect.apply(attach.value,this,[options]);if(!this.closest(own))roots.add(new WeakRef(root));return root}});
- const observer=new window.MutationObserver(events=>{const values=[];for(const event of events){if(event.target.nodeType===1&&event.target.closest(own))continue;values.push(event.target,...event.addedNodes||[])}reconcile(values)});
- observer.observe(document,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id','data-pre-plain-text','data-mid','data-timestamp','cid','class']});
- document.dispatchEvent(new window.CustomEvent('haituo:wa-hooks-ready'));reconcile([document]);
+ return{isActive:()=>!stopped,isManaged:()=>!stopped,counters,rehydrate:rehydrateVisible,refreshTargets(){generation++;for(const [node,item] of live){mask(item,false);slots.get(node)?.host.remove()}live.clear();pending.clear();queue.clear();for(const node of document.querySelectorAll('#main [data-id]'))process(node)},async observe(){for(const node of document.querySelectorAll('#main [data-id]'))process(node)},async refresh(id){for(const [node,item] of live)if(item.id===id){forget(item.key);pending.delete(item.key);process(node)}},showError(_error,id){for(const item of live.values())if(item.id===id)update(item.key,{state:'error'})},destroy(){stopped=true;generation++;residentObserver.disconnect();if(rehydrateFrame!==null)window.cancelAnimationFrame(rehydrateFrame);if(rehydrateTimer!==null)window.clearTimeout(rehydrateTimer);document.removeEventListener('wheel',onWheel,true);document.removeEventListener('scrollend',onScrollEnd,true);document.removeEventListener('scroll',onScroll,true);document.removeEventListener('copy',onCopy,true);window.removeEventListener('pagehide',flush);document.removeEventListener('visibilitychange',visibility);for(const item of live.values()){mask(item,false);item.node.removeAttribute('data-translation-cache-hit');slots.get(item.node)?.host.remove()}memory.clear();live.clear();pending.clear()}};
 }
 
 
 let haituoLocalBilingualView;
 if(isWhatsApp()){haituoLocalBilingualView=haituoInstallLocalChatView({document,window,ipc:ipcRenderer,targetFor:haituoMessageTarget,keepPosition:haituoKeepTranslationPosition});ipcRenderer.send('haituo-wa-preload-ready',{hooksReady:haituoLocalBilingualView.counters.hookReady});}
-function haituoMessageTarget(text) {
+function haituoMessageTarget(text,messageId) {
+    // Message direction, not guessed script: English incoming must target my
+    // language even when the sending target is English. Outgoing backtranslation
+    // also targets my language, while composer translation still uses targetLanguage.
+    if(isWhatsApp())return settings.myLanguage==='zh'?'zh-CN':settings.myLanguage||'zh-CN';
     const value=String(text).replace(/https?:\/\/\S+|www\.\S+/giu,` `);
     return (value.match(/\p{Script=Han}/gu)||[]).length > (value.match(/[a-z]+(?:['’][a-z]+)?/giu)||[]).length ? settings.targetLanguage || `en` : `zh-CN`;
 }
