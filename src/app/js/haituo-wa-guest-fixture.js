@@ -10,7 +10,7 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
  guestSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
  guestSession.protocol.handle('https',()=>new Response('<!doctype html><html><body><div id="main">Guest startup fixture</div><script>window.firstScript={hooksReady:window.__haituoWACreationHooks===true,nodeIntegration:typeof require};document.body.dataset.firstScript="ran";</script></body></html>',{headers:{'content-type':'text/html'}}));
  bootstrap.installSession(guestSession,'https://web.whatsapp.com/haituo-startup-fixture');
- host=new BrowserWindow({show:true,width:800,height:600,webPreferences:{webviewTag:true,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ host=new BrowserWindow({show:true,width:800,height:600,webPreferences:{partition:partition+'-host',webviewTag:true,sandbox:true,contextIsolation:true,nodeIntegration:false}});
  // The production global guard permits guests only in the real main window.
  // This isolated offline fixture replaces that guard on THIS temporary host
  // only, with an exact URL/partition/preload allowlist. Production is unchanged.
