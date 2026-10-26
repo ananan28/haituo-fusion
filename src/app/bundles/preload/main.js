@@ -209536,7 +209536,7 @@ function haituoCachedSignalTranslation(text) {
                     }),
                     children: [ (0, u6.jsx)(`option`, {
                         value: `google-free`,
-                        children: `输入翻译：Google 免密钥 + AI 润色（非官方，默认）`
+                        children: `输入翻译：Google 免密钥翻译（非官方，默认）`
                     }), (0, u6.jsx)(`option`, {
                         value: `groq`,
                         children: haituoProviderOptionLabel(a, `groq`, `Groq gpt-oss-120b`)
@@ -209548,7 +209548,7 @@ function haituoCachedSignalTranslation(text) {
                         children: haituoProviderOptionLabel(a, `google-cloud`, `Google Cloud 官方翻译`)
                     }), (0, u6.jsx)(`option`, {
                         value: `mymemory`,
-                        children: `MyMemory 免费口语版`
+                        children: `MyMemory 免费翻译`
                     }), (0, u6.jsx)(`option`, {
                         value: `libre`,
                         children: haituoProviderOptionLabel(a, `libre`, `LibreTranslate`)
@@ -209570,7 +209570,7 @@ function haituoCachedSignalTranslation(text) {
                     }) ]
                 }), (0, u6.jsxs)(`select`, {
                     "aria-label": `聊天消息翻译服务`, value: a.chatTranslationProvider ?? `google-free`, onChange: e => h({ chatTranslationProvider: e.target.value }),
-                    children: [ (0, u6.jsx)(`option`, { value: `google-free`, children: `聊天翻译：Google 免密钥 + AI 润色（非官方，默认）` }), (0, u6.jsx)(`option`, { value: `google-cloud`, children: haituoProviderOptionLabel(a, `google-cloud`, `聊天翻译：Google Cloud 官方 API`) }), (0, u6.jsx)(`option`, { value: `openai`, children: haituoProviderOptionLabel(a, `openai`, `聊天翻译：OpenAI`) }), (0, u6.jsx)(`option`, { value: `deepl`, children: haituoProviderOptionLabel(a, `deepl`, `聊天翻译：DeepL`) }), (0, u6.jsx)(`option`, { value: `groq`, children: haituoProviderOptionLabel(a, `groq`, `聊天翻译：Groq AI`) }) ]
+                    children: [ (0, u6.jsx)(`option`, { value: `google-free`, children: `聊天翻译：Google 免密钥翻译（非官方，默认）` }), (0, u6.jsx)(`option`, { value: `google-cloud`, children: haituoProviderOptionLabel(a, `google-cloud`, `聊天翻译：Google Cloud 官方 API`) }), (0, u6.jsx)(`option`, { value: `openai`, children: haituoProviderOptionLabel(a, `openai`, `聊天翻译：OpenAI`) }), (0, u6.jsx)(`option`, { value: `deepl`, children: haituoProviderOptionLabel(a, `deepl`, `聊天翻译：DeepL`) }), (0, u6.jsx)(`option`, { value: `groq`, children: haituoProviderOptionLabel(a, `groq`, `聊天翻译：Groq AI`) }) ]
                 }), (0, u6.jsxs)(`select`, {
                     "aria-label": `语音转文字服务`, value: a.voiceTranscriptionProvider ?? `groq`, onChange: e => h({ voiceTranscriptionProvider: e.target.value }),
                     children: [ (0, u6.jsx)(`option`, { value: `groq`, children: haituoProviderOptionLabel(a, `groq`, `音转文：Groq Whisper`) }), (0, u6.jsx)(`option`, { value: `openai`, children: haituoProviderOptionLabel(a, `openai`, `音转文：OpenAI Whisper`) }), (0, u6.jsx)(`option`, { value: `keppl`, children: haituoProviderOptionLabel(a, `keppl`, `音转文：Keppl Whisper`) }) ]
@@ -230760,7 +230760,7 @@ function haituoCachedSignalTranslation(text) {
                             }),
                             children: [ (0, O9.jsx)(`option`, {
                                 value: `google-free`,
-                                children: `Google 免密钥 + AI 润色（非官方，默认）`
+                                children: `Google 免密钥翻译（非官方，默认）`
                             }), (0, O9.jsx)(`option`, {
                                 value: `groq`,
                                 children: haituoProviderOptionLabel(m, `groq`, `Groq AI`)
@@ -230784,13 +230784,13 @@ function haituoCachedSignalTranslation(text) {
                                 children: haituoProviderOptionLabel(m, `google-cloud`, `Google Cloud 官方翻译`)
                             }), (0, O9.jsx)(`option`, {
                                 value: `mymemory`,
-                                children: `MyMemory 免费口语翻译`
+                                children: `MyMemory 免费翻译`
                             }) ]
                         }) ]
                     }), (0, O9.jsxs)(`label`, {
                         children: [ (0, O9.jsx)(`span`, { children: `聊天消息翻译服务` }), (0, O9.jsxs)(`select`, {
                             value: m.chatTranslationProvider ?? `google-free`, onChange: e => N({ chatTranslationProvider: e.target.value }),
-                            children: [ (0, O9.jsx)(`option`, { value: `google-free`, children: `Google 免密钥 + AI 润色（非官方，默认）` }), (0, O9.jsx)(`option`, { value: `openai`, children: haituoProviderOptionLabel(m, `openai`, `OpenAI`) }), (0, O9.jsx)(`option`, { value: `deepl`, children: haituoProviderOptionLabel(m, `deepl`, `DeepL`) }), (0, O9.jsx)(`option`, { value: `groq`, children: haituoProviderOptionLabel(m, `groq`, `Groq AI`) }), (0, O9.jsx)(`option`, { value: `deepseek`, children: haituoProviderOptionLabel(m, `deepseek`, `DeepSeek`) }), (0, O9.jsx)(`option`, { value: `google-cloud`, children: haituoProviderOptionLabel(m, `google-cloud`, `Google Cloud`) }), (0, O9.jsx)(`option`, { value: `mymemory`, children: `MyMemory 免费口语翻译` }) ]
+                            children: [ (0, O9.jsx)(`option`, { value: `google-free`, children: `Google 免密钥翻译（非官方，默认）` }), (0, O9.jsx)(`option`, { value: `openai`, children: haituoProviderOptionLabel(m, `openai`, `OpenAI`) }), (0, O9.jsx)(`option`, { value: `deepl`, children: haituoProviderOptionLabel(m, `deepl`, `DeepL`) }), (0, O9.jsx)(`option`, { value: `groq`, children: haituoProviderOptionLabel(m, `groq`, `Groq AI`) }), (0, O9.jsx)(`option`, { value: `deepseek`, children: haituoProviderOptionLabel(m, `deepseek`, `DeepSeek`) }), (0, O9.jsx)(`option`, { value: `google-cloud`, children: haituoProviderOptionLabel(m, `google-cloud`, `Google Cloud`) }), (0, O9.jsx)(`option`, { value: `mymemory`, children: `MyMemory 免费翻译` }) ]
                         }) ]
                     }), (0, O9.jsxs)(`label`, {
                         children: [ (0, O9.jsx)(`span`, { children: `语音转文字服务` }), (0, O9.jsxs)(`select`, {

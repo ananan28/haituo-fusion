@@ -22,6 +22,11 @@ async function check(id,work){try{const result=await work();report.checks.push({
  let initial;await check('FRESH-START',async()=>{initial=await start();if(!initial.installed||initial.loading)throw Error('Fresh launch did not reach Signal install/inbox: '+JSON.stringify(initial));return initial});
  if(client){
   report.bootstrap=await evaluate(`({startApp:typeof window.startApp,body:document.body.innerText.slice(-1200)})`);
+  await check('WHATSAPP-CHROMIUM-PERSISTENT-LAYOUT',async()=>{
+   const viewSource=fs.readFileSync(path.resolve('src/app/js/haituo-local-chat-view.js'),'utf8');
+   const fixture=require('./local-chat-layout-fixture.cjs').toString();
+   return evaluate(`(async()=>{const local={exports:{}};((module)=>{${viewSource}\n})(local);return (${fixture})(local.exports.install)})()`);
+  });
   await check('SETTINGS-OPEN',async()=>{await evaluate(`document.querySelector('.CaishengPlatformShell__settingsButton')?.click()`);await pause(500);const s=await evaluate(snapshot);if(!s.settings)throw Error('settings absent');return s});
   report.settingsInventory=await evaluate(`[...document.querySelectorAll('.CaishengPlatformShell__settings input,.CaishengPlatformShell__settings select,.CaishengPlatformShell__settings details,.CaishengPlatformShell__settings button')].map(e=>({tag:e.tagName,type:e.type,key:e.dataset.haituoSetting||e.name||'',label:e.closest('label')?.innerText?.slice(0,160)||e.innerText?.slice(0,100),options:e.tagName==='SELECT'?[...e.options].map(o=>({value:o.value,label:o.label})):undefined}))`);
   await check('COLOR-INPUTS-VALID',async()=>{const values=await evaluate(`[...document.querySelectorAll('.CaishengPlatformShell__settings input[type=color]')].map(el=>({value:el.value,attribute:el.getAttribute('value')}))`);if(!values.length||values.some(x=>!/^#[0-9a-f]{6}$/i.test(x.value)||(x.attribute!==null&&!/^#[0-9a-f]{6}$/i.test(x.attribute))))throw Error('Invalid HTML color input '+JSON.stringify(values));return{count:values.length}});

@@ -53,7 +53,9 @@ function createStore(options){
    }
   })();return page(account,chat);
  }
- function page(account,chat,{before,limit=200}={}){const scope=identity(account,chat);let rank=Number.MAX_VALUE;if(before){const anchor=one.get({...scope,id:before});if(!anchor)throw Error('消息分页位置无效');rank=anchor.messageIndex;}
+ function page(account,chat,{before,limit=200,ids}={}){const scope=identity(account,chat);
+  if(ids!==undefined){if(!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>conversation(id)!==chat))throw Error('消息查询归属无效');return{chat,messages:[...new Set(ids)].map(id=>one.get({...scope,id})).filter(Boolean).map(row=>JSON.parse(row.messageJson)),total:Number(db.prepare('SELECT COUNT(*) AS total FROM haituo_local_messages WHERE account=$account AND chatId=$chat').get(scope).total)};}
+  let rank=Number.MAX_VALUE;if(before){const anchor=one.get({...scope,id:before});if(!anchor)throw Error('消息分页位置无效');rank=anchor.messageIndex;}
   const count=db.prepare('SELECT COUNT(*) AS total FROM haituo_local_messages WHERE account=$account AND chatId=$chat').get(scope).total;
   const rows=db.prepare('SELECT messageJson FROM haituo_local_messages WHERE account=$account AND chatId=$chat AND messageIndex<$rank ORDER BY messageIndex DESC,messageKey DESC LIMIT $limit').all({...scope,rank,limit:Math.max(1,Math.min(200,Number(limit)||200))});
   const values=rows.map(row=>JSON.parse(row.messageJson)).reverse();let hasOlder=false;if(values.length){const first=one.get({...scope,id:values[0].id});hasOlder=!!db.prepare('SELECT 1 AS found FROM haituo_local_messages WHERE account=$account AND chatId=$chat AND messageIndex<$rank LIMIT 1').get({...scope,rank:first.messageIndex});}

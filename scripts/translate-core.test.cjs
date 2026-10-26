@@ -243,3 +243,19 @@ test('CACHE-01: cache key changes with model and with context', () => {
   assert.notEqual(keyOf(base), keyOf({ ...base, context: ' Earlier chat context ' }), 'context must be in key');
   assert.equal(keyOf(base), keyOf({ ...base }), 'same inputs → same key');
 });
+
+test('customer chat and forced retranslation share the direct-translation policy on every AI route',async()=>{
+ const ctx=makeCtx(),sent=[];ctx.__setYp(async(_url,init)=>{sent.push(JSON.parse(init.body));return{choices:[{finish_reason:'stop',message:{content:'忠实译文'}}]}});
+ for(const provider of ['openai','deepseek','groq','qwen','glm'])for(const forceRefresh of [false,true]){
+  const result=await vm.runInContext(`Xp(${JSON.stringify({text:'ATM I am NOT sure rn 😂',purpose:'chat',targetLanguage:'zh-CN',provider,apiKey:'fixture',forceRefresh})})`,ctx);assert.equal(result.text,'忠实译文');
+ }
+ assert.equal(sent.length,10);for(const body of sent){const prompt=body.messages[0].content;assert.match(prompt,/directly and faithfully/);assert.match(prompt,/otherwise retain the original abbreviation without guessing/);assert.match(prompt,/Do not embellish/);assert.doesNotMatch(prompt,/write natural conversational American English/);assert.equal(body.temperature,.1);assert.ok(body.messages[1].content.endsWith('ATM I am NOT sure rn 😂'));}
+});
+test('free customer-chat results are never changed by contractions or greeting rewrites',()=>{
+ const ctx={};vm.createContext(ctx);vm.runInContext(sliceFn('function haituoNaturalizeFreeTranslation(', 'async function Xp('),ctx);
+ for(const text of ['I am not sure.','How are you doing today?','It is another day.','ATM rn','you are happy'])assert.equal(ctx.haituoNaturalizeFreeTranslation('今天过得怎么样','en',text,'chat'),text);
+});
+test('new translation requests cannot reuse the old colloquial API/shared-chat cache namespace',()=>{
+ const ctx=makeCtx();const key=vm.runInContext(`haituoTranslationCacheKey({text:'hello',purpose:'chat'})`,ctx);assert.ok(key.includes('literal-chat-v1'));assert.ok(!key.includes('free-ai-chat-v6'));
+ assert.match(bundle,/literal-chat-message-v1/);
+});

@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process');
-process.env.HAITUO_INPROCESS='1';
+delete process.env.HAITUO_INPROCESS; // Verify ordinary launch defaults to embedded views.
 const mac=process.platform==='darwin',out=path.resolve('audit-results'),profile=process.env.HAITUO_NATIVE_PROFILE||(process.env.GITHUB_ACTIONS==='true'?path.join(process.env.RUNNER_TEMP||os.tmpdir(),'haituo-native-162'):fs.mkdtempSync(path.join(os.tmpdir(),'haituo-fresh-')));
 fs.mkdirSync(out,{recursive:true});fs.mkdirSync(profile,{recursive:true});const report={platform:process.platform,checks:[],errors:[],settingsInventory:[]};
 const app=path.resolve(mac?'macos/out/海拓-darwin-arm64/海拓.app':'windows/out/win-unpacked/海拓.exe');
@@ -21,7 +21,7 @@ function collectStartupLogs(){
 async function stop(){if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}await pause(700);if(!mac&&proc?.pid){cp.spawnSync('taskkill',['/PID',String(proc.pid),'/T','/F'],{timeout:10000,stdio:'ignore'})}if(mac){const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){const pid=Number(line.trim().split(/\s+/)[0]);try{process.kill(pid,'SIGTERM')}catch{}}}if(log!==undefined){fs.closeSync(log);log=undefined}}
 async function check(id,work){try{const result=await work();report.checks.push({id,ok:true,result})}catch(e){report.checks.push({id,ok:false,error:String(e.stack||e)})}}
 (async()=>{try{
- await check('MAIN-GATED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
+ await check('MAIN-DEFAULT-EMBEDDED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
  if(client){
   await check('CHILD-PROFILE-CREATE',async()=>apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`));
   await check('CHILD-PROFILE-SELECT',async()=>apiEvaluate(`window.SignalContext.caishengSyncSignalProfile({id:'signal-ci-inprocess',x:0,y:70,width:900,height:650,keepVisible:true})`));
