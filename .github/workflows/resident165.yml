@@ -83,6 +83,9 @@ jobs:
       - name: Frozen Signal profile/startup regression
         timeout-minutes: 4
         run: node scripts/inprocess-native-check.cjs
+      - name: Native sandboxed WhatsApp webview startup regression
+        timeout-minutes: 3
+        run: node scripts/wa-guest-native-check.cjs
       - name: Native settings and offline restart regression
         run: node scripts/native-attachments-check.cjs
       - name: Runtime dependency and transport checks

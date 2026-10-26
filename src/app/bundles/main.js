@@ -25684,7 +25684,7 @@ const HaituoTranslationInFlight = new Map;
 const HaituoRequestQueue = [];
 const HaituoWebContentsByWorkspace = new Map;
 const HaituoWorkspaceBySession = new WeakMap;
-const HaituoWABootstrap=require('../js/haituo-wa-bootstrap.js').createBootstrap({app:p.app,webContents:p.webContents,log:message=>X.info(message)});
+const HaituoWABootstrap=require('../js/haituo-wa-bootstrap.js').createBootstrap({app:p.app,webContents:p.webContents,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),log:message=>X.info(message)});
 let HaituoActiveRequests = 0;
 let HaituoOpenAIKeyCursor = 0;
 
@@ -29049,6 +29049,7 @@ async function nv() {
         Z.webContents.on(`before-mouse-event`,(_event,mouse)=>{if(mouse.type===`mouseDown`)process.send?.({type:`haituo-account-user-activation`})});
     }})(), Z.setMenuBarVisibility(!1), Z.webContents.on(`before-input-event`, rmRefresh), Z.webContents.on(`did-attach-webview`, (e, t) => {
         t.setBackgroundThrottling(!1);
+        HaituoWABootstrap.attach(t, Z.webContents);
         HaituoNetwork.installWebRecovery(t, void 0, message => X.info(`haituo: ${message}`));
         const workspaceId = HaituoWorkspaceBySession.get(t.session);
         workspaceId && (HaituoWebContentsByWorkspace.set(workspaceId, t), t.once(`destroyed`, () => HaituoWebContentsByWorkspace.get(workspaceId) === t && HaituoWebContentsByWorkspace.delete(workspaceId)));
@@ -29158,7 +29159,9 @@ async function nv() {
         t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`),
         p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler);
         if (c === `whatsapp`) {
-            HaituoWABootstrap.installSession(p.session.fromPartition(r.partition??``));
+            try { HaituoWABootstrap.prepare(t,r); }
+            catch(error) { X.error(`WhatsApp preload validation failed: ${error.message}`); e.preventDefault(); return; }
+            HaituoWABootstrap.installSession(p.session.fromPartition(r.partition??``),r.src);
             let e = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36`, t = p.session.fromPartition(r.partition ?? ``);
             t.preconnect({ url: `https://web.whatsapp.com`, numSockets: 6 });
             t.setUserAgent(e, `zh-CN,zh`), t.setPermissionCheckHandler(haituoMediaPermissionCheckHandler),
@@ -32222,3 +32225,5 @@ if ($u === 'signal-main') p.app.whenReady().then(() => {
     haituoScreenshotController = require('../js/haituo-screenshot.js').createController({electron:p,getConfig:$p,requestJSON:Yp,getAppWindow:()=>Z,openSettings:async()=>{Z?.show();Z?.focus();await Z?.webContents.executeJavaScript(`(()=>{if(!document.querySelector('.CaishengPlatformShell__settings'))document.querySelector('.CaishengPlatformShell__settingsButton')?.click();setTimeout(()=>{document.querySelectorAll('[data-haituo-shot-drawer],[data-haituo-shot-api-drawer]').forEach(el=>el.open=true);document.querySelector('[data-haituo-setting="screenshots-0-apiKey"]')?.scrollIntoView({block:'center'})},250)})()`)}});
     try { haituoScreenshotController.configure($p()); } catch (error) { X.warn('截图快捷键注册失败：'+error.message); }
 });
+
+if(process.env.HAITUO_WA_GUEST_TEST==='1'&&$u==='signal-main')p.app.whenReady().then(()=>require('../js/haituo-wa-guest-fixture.js').run({electron:p,bootstrap:HaituoWABootstrap,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),reportPath:process.env.HAITUO_WA_GUEST_REPORT}));
