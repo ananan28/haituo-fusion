@@ -20,7 +20,7 @@ function createBootstrap({app,webContents,log=()=>{},preloadPath,timers={setTime
    if((!url||url==='about:blank')&&retries++<2){log('WA guest retry '+retries);contents.loadURL(target).catch(error=>log('WA guest retry failed: '+error.message));schedule()}
   }
   contents.on('ipc-message',(_event,channel,payload)=>{if(channel==='haituo-wa-preload-ready'&&payload?.hooksReady===true){ready=true;log('WA sandbox preload + synchronous main-world hooks ready');if(loaded)cancel()}});
-  contents.on('did-start-navigation',(_e,_url,_inPlace,main)=>{if(main){ready=false;loaded=false;schedule()}});
+  contents.on('did-start-navigation',(_e,_url,inPlace,main)=>{if(main&&!inPlace){ready=false;loaded=false;schedule()}});
   contents.on('did-finish-load',()=>{loaded=true;if(ready&&contents.getURL()&&contents.getURL()!=='about:blank'){cancel();host?.executeJavaScript('('+clearGuestStatus.toString()+')('+contents.id+')').catch(()=>{})}});
   contents.on('preload-error',(_event,_file,error)=>show('WhatsApp preload 启动失败：'+String(error?.message||error).slice(0,200)));
   contents.on('render-process-gone',(_event,details)=>{ready=false;loaded=false;show('WhatsApp 渲染进程退出：'+details.reason);schedule()});
