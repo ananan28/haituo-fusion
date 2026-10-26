@@ -1,0 +1,180 @@
+diff --git a/scripts/default-embedded-launch.test.cjs b/scripts/default-embedded-launch.test.cjs
+index e708a75..961f821 100644
+--- a/scripts/default-embedded-launch.test.cjs
++++ b/scripts/default-embedded-launch.test.cjs
+@@ -6,3 +6,9 @@ function launch(argv=[],env={}){const process={argv,env:{...env}};vm.runInNewCon
+ test('ordinary launch embeds child accounts on both desktop platforms without flags',()=>{assert.equal(launch(['海拓.exe']),'1');assert.equal(launch(['/Applications/海拓.app/Contents/MacOS/海拓']),'1')});
+ test('explicit troubleshooting opt-out remains available and propagates to backends',()=>{assert.equal(launch(['海拓.exe','--haituo-legacy-windows']),'0');assert.equal(launch(['海拓.exe'],{HAITUO_INPROCESS:'0'}),'0')});
+ test('old embedded shortcut flags remain compatible',()=>assert.equal(launch(['海拓.exe','--haituo-inprocess']),'1'));
++
++test('host focus notifications also synchronize embedded accounts without a layout event',()=>{
++ const start=source.indexOf('    let t = () => {\n        e.webContents.send(`set-window-focus`'),end=source.indexOf('\n    e.on(`focus`, t)',start);assert.ok(start>0&&end>start);
++ const events=[],window={isFocused:()=>true,webContents:{send:(...args)=>events.push(args)}};
++ const context={e:window,Z:window,Zg:{id:'signal-child'},process:{env:{HAITUO_INPROCESS:'1'}},caishengBridge:{syncVisibility:id=>events.push(['embedded',id])}};vm.runInNewContext(source.slice(start,end)+';t();',context);assert.deepEqual(events,[['set-window-focus',true],['embedded','signal-child']]);
++});
+diff --git a/scripts/local-chat-layout-fixture.cjs b/scripts/local-chat-layout-fixture.cjs
+index ef0260b..4bb7d37 100644
+--- a/scripts/local-chat-layout-fixture.cjs
++++ b/scripts/local-chat-layout-fixture.cjs
+@@ -12,7 +12,7 @@ module.exports=async function verifyPersistentLayout(install){
+   const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
+   view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
+   const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
+-  assert(w.getComputedStyle(item).visibility==='hidden','Native original flashed during storage read');await first;await tick();
++  assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
+   const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
+   assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
+   list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
+diff --git a/scripts/local-chat-view.dom.cjs b/scripts/local-chat-view.dom.cjs
+index f9091dc..5dc47bb 100644
+--- a/scripts/local-chat-view.dom.cjs
++++ b/scripts/local-chat-view.dom.cjs
+@@ -7,8 +7,8 @@ function setup(t,{records=[entry],fail=false}={}){const dom=new JSDOM('<main id=
+ test('own chat mounts original and saved translation together from one message record',async t=>{const x=setup(t),mounted=[];const observer=new x.w.MutationObserver(events=>{for(const event of events)for(const node of event.addedNodes)if(node.nodeName==='ARTICLE')mounted.push(node.textContent)});observer.observe(x.w.document.body,{childList:true,subtree:true});await x.view.observe([{id,source:'Hello'}],[x.element]);await new Promise(r=>setTimeout(r,0));assert.equal(mounted.length,1);assert.ok(mounted[0].includes('Hello'));assert.ok(mounted[0].includes('你好'));assert.equal(x.w.document.querySelector('.haituo-local-message-translation').textContent,'你好');assert.deepEqual(x.calls,['haituo:local-chat-observe']);observer.disconnect()});
+ test('native WhatsApp removing all old DOM nodes cannot remove the local bilingual message',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.element.remove();assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').textContent.includes('你好'),true);assert.equal(x.calls.length,1)});
+ test('repeated unchanged native snapshots do not reread DB or replace rendered message nodes',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const original=x.w.document.querySelector('article');await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.w.document.querySelector('article'),original);assert.equal(x.calls.length,1)});
+-test('official view restores source visibility and keeps the bilingual record for returning',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.visibility,'hidden');x.view.setOfficial(true);assert.equal(x.scroller.style.visibility,'');assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);x.view.setOfficial(false);assert.equal(x.scroller.style.visibility,'hidden')});
+-test('storage failure leaves official WhatsApp visible',async t=>{const x=setup(t,{fail:true});await assert.rejects(x.view.observe([{id,source:'Hello'}],[x.element]),/disk unavailable/);assert.equal(x.scroller.style.visibility,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article'),null)});
++test('official view restores source visibility and keeps the bilingual record for returning',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.opacity,'0');x.view.setOfficial(true);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);x.view.setOfficial(false);assert.equal(x.scroller.style.opacity,'0')});
++test('storage failure leaves official WhatsApp visible',async t=>{const x=setup(t,{fail:true});await assert.rejects(x.view.observe([{id,source:'Hello'}],[x.element]),/disk unavailable/);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article'),null)});
+ test('chat navigation hides previous chat immediately and late DB response cannot cross conversations',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.w.document.querySelector('#main header span').setAttribute('title','Other contact');await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').parentElement.style.display,'none')});
+ 
+ test('a pending old-chat DB response stays hidden during navigation',async t=>{const x=setup(t);let finish;x.ipc.invoke=()=>new Promise(resolve=>finish=resolve);const old=x.view.observe([{id,source:'Hello'}],[x.element]);await Promise.resolve();x.w.document.querySelector('#main header span').setAttribute('title','Other contact');await x.view.observe([{id,source:'Hello'}],[x.element]);finish({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await old;assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').parentElement.style.display,'none');assert.ok(x.w.document.querySelector('#haituo-local-bilingual-chat').textContent.includes('正在读取'));});
+@@ -24,7 +24,7 @@ test('switching away and back retains the exact bilingual nodes and scroll posit
+  await new Promise(r=>setImmediate(r));resolve({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await pending;assert.equal(x.w.document.querySelector('article'),article);
+ });
+ test('first-load native original-only messages are hidden before IPC completes',async t=>{
+- const x=setup(t);let resolve;x.ipc.invoke=()=>new Promise(r=>resolve=r);const pending=x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.visibility,'hidden');assert.equal(x.w.document.querySelector('article'),null);assert.ok(x.w.document.querySelector('#haituo-local-bilingual-chat').textContent.includes('正在读取'));await new Promise(r=>setImmediate(r));resolve({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await pending;assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);
++ const x=setup(t);let resolve;x.ipc.invoke=()=>new Promise(r=>resolve=r);const pending=x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.opacity,'0');assert.equal(x.w.document.querySelector('article'),null);assert.ok(x.w.document.querySelector('#haituo-local-bilingual-chat').textContent.includes('正在读取'));await new Promise(r=>setImmediate(r));resolve({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await pending;assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);
+ });
+ test('saved translations keep the same message/translation elements through scrolling and refresh',async t=>{
+  const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article'),translation=article.querySelector('.haituo-local-message-translation');
+@@ -40,8 +40,8 @@ test('prepending older pages keeps already loaded bilingual nodes and order',asy
+  const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article');x.ipc.invoke=async()=>({chat:'123@c.us',messages:[{...entry,id:'false_123@c.us_older'},entry],total:2,hasOlder:false});await x.view.observe([{id:'false_123@c.us_older',source:'Hello'},{id,source:'Hello'}],[x.element]);const nodes=[...x.w.document.querySelectorAll('article')];assert.equal(nodes[1],article);assert.equal(nodes[0].querySelector('.haituo-local-message-translation').textContent,'你好');
+ });
+ test('navigation keeps native messages hidden instead of restoring an original-only frame',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const pane=x.w.document.createElement('div');pane.id='pane-side';x.w.document.body.append(pane);pane.dispatchEvent(new x.w.Event('pointerdown',{bubbles:true}));assert.equal(x.scroller.style.visibility,'hidden');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex');
++ const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const pane=x.w.document.createElement('div');pane.id='pane-side';x.w.document.body.append(pane);pane.dispatchEvent(new x.w.Event('pointerdown',{bubbles:true}));assert.equal(x.scroller.style.opacity,'0');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex');
+ });
+ test('destroy restores native UI and removes all navigation listeners and styles',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.view.destroy();assert.equal(x.scroller.style.visibility,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.head.querySelector('style'),null);
++ const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.view.destroy();assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.head.querySelector('style'),null);
+ });
+diff --git a/scripts/whatsapp-records-scanner.dom.cjs b/scripts/whatsapp-records-scanner.dom.cjs
+index 966fc7c..5258c45 100644
+--- a/scripts/whatsapp-records-scanner.dom.cjs
++++ b/scripts/whatsapp-records-scanner.dom.cjs
+@@ -14,4 +14,4 @@ function setup(t,{root=true,slow=false}={}){
+ test('real WhatsApp scanner selects persistent message rendering and never appends a legacy translation',async t=>{const x=setup(t);await wait(100);assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article .haituo-local-message-translation')?.textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);assert.equal(x.count(),1)});
+ test('native WhatsApp DOM recycling cannot remove or recreate its saved bilingual node',async t=>{const x=setup(t);await wait(100);const article=x.w.document.querySelector('article');x.w.document.querySelector('#scroll').innerHTML='<div class="message-in" data-id="'+id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">Hello</span></div></div>';await wait(180);assert.equal(x.w.document.querySelector('article'),article);assert.equal(article.querySelector('.haituo-local-message-translation').textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0)});
+ test('missing native scroller uses the local conversation viewport, never the old attachment fallback',async t=>{const x=setup(t,{root:false});await wait(100);assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);assert.equal(x.w.document.querySelector('article .haituo-local-message-translation')?.textContent,'保留译文');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex')});
+-test('slow local storage never exposes an original-only native chat',async t=>{const x=setup(t,{slow:true});await wait(5);assert.equal(x.w.document.querySelector('#scroll').style.visibility,'hidden');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);await wait(140);assert.equal(x.w.document.querySelector('article .haituo-local-message-translation').textContent,'保留译文')});
++test('slow local storage never exposes an original-only native chat',async t=>{const x=setup(t,{slow:true});await wait(5);assert.equal(x.w.document.querySelector('#scroll').style.opacity,'0');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);await wait(140);assert.equal(x.w.document.querySelector('article .haituo-local-message-translation').textContent,'保留译文')});
+diff --git a/src/app/bundles/main.js b/src/app/bundles/main.js
+index c707665..959643b 100644
+--- a/src/app/bundles/main.js
++++ b/src/app/bundles/main.js
+@@ -28911,6 +28911,9 @@ async function J_(e) {
+     }), s_.add(e), e.on(`closed`, () => s_.delete(e));
+     let t = () => {
+         e.webContents.send(`set-window-focus`, e.isFocused());
++        // Embedded views share the visible host's focus, including transitions
++        // that do not resize or move the host window.
++        if(process.env.HAITUO_INPROCESS===`1` && e===Z)globalThis.caishengBridge?.syncVisibility?.(Zg?.id);
+     };
+     e.on(`focus`, t), e.on(`blur`, t), e.once(`ready-to-show`, t);
+     let r = setInterval(t, 1e4);
+diff --git a/src/app/js/caisheng-webview-preload.js b/src/app/js/caisheng-webview-preload.js
+index 25cbe5b..aa21c63 100644
+--- a/src/app/js/caisheng-webview-preload.js
++++ b/src/app/js/caisheng-webview-preload.js
+@@ -1616,9 +1616,11 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+  Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
+  label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
+  Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
+- const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{visibility:hidden!important}';
++ const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{opacity:0!important}';
+  // Until a complete local page is available, never reveal an original-only
+- // WhatsApp frame. This stylesheet also covers replacement native DOM roots.
++ // WhatsApp frame. Opacity preserves innerText/layout for the native scanner;
++ // visibility:hidden would make Chromium return empty message text.
++ // This stylesheet also covers replacement native DOM roots.
+  (document.head||document.documentElement).append(privacy);
+  bar.append(label,toggle);root.append(bar,status);document.body.append(root);
+  function state(chat){if(!sessions.has(chat)){
+@@ -1627,8 +1629,8 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+   list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
+   sessions.set(chat,value);
+  }return sessions.get(chat)}
+- function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.visibility);node.style.visibility='hidden'}
+- function restoreNative(){for(const [node,visibility] of hiddenRoots)node.style.visibility=visibility;hiddenRoots.clear()}
++ function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.opacity);node.style.opacity='0'}
++ function restoreNative(){for(const [node,opacity] of hiddenRoots)node.style.opacity=opacity;hiddenRoots.clear()}
+  function bounds(){
+   if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
+   const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
+@@ -1636,7 +1638,7 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+  }
+  function position(){
+   if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  const official=!!current?.official&&!waiting;privacy.disabled=official;
++  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
+   if(official)restoreNative();else hideNative(nativeRoot);
+   Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
+   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+@@ -1648,7 +1650,7 @@ function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate})
+   if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
+   position();
+  }
+- function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.disabled=true;root.style.display='none';return;}position()}
++ function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
+  toggle.onclick=()=>setOfficial(!current?.official);
+  function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
+  function updateNode(value,record){
+diff --git a/src/app/js/haituo-local-chat-view.js b/src/app/js/haituo-local-chat-view.js
+index 6e979bb..d91fb99 100644
+--- a/src/app/js/haituo-local-chat-view.js
++++ b/src/app/js/haituo-local-chat-view.js
+@@ -9,9 +9,11 @@ function install({document,window,ipc,targetFor,retranslate}){
+  Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
+  label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
+  Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
+- const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{visibility:hidden!important}';
++ const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{opacity:0!important}';
+  // Until a complete local page is available, never reveal an original-only
+- // WhatsApp frame. This stylesheet also covers replacement native DOM roots.
++ // WhatsApp frame. Opacity preserves innerText/layout for the native scanner;
++ // visibility:hidden would make Chromium return empty message text.
++ // This stylesheet also covers replacement native DOM roots.
+  (document.head||document.documentElement).append(privacy);
+  bar.append(label,toggle);root.append(bar,status);document.body.append(root);
+  function state(chat){if(!sessions.has(chat)){
+@@ -20,8 +22,8 @@ function install({document,window,ipc,targetFor,retranslate}){
+   list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
+   sessions.set(chat,value);
+  }return sessions.get(chat)}
+- function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.visibility);node.style.visibility='hidden'}
+- function restoreNative(){for(const [node,visibility] of hiddenRoots)node.style.visibility=visibility;hiddenRoots.clear()}
++ function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.opacity);node.style.opacity='0'}
++ function restoreNative(){for(const [node,opacity] of hiddenRoots)node.style.opacity=opacity;hiddenRoots.clear()}
+  function bounds(){
+   if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
+   const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
+@@ -29,7 +31,7 @@ function install({document,window,ipc,targetFor,retranslate}){
+  }
+  function position(){
+   if(destroyed)return;const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  const official=!!current?.official&&!waiting;privacy.disabled=official;
++  const official=!!current?.official&&!waiting;privacy.media=official?'not all':'all';
+   if(official)restoreNative();else hideNative(nativeRoot);
+   Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
+   toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+@@ -41,7 +43,7 @@ function install({document,window,ipc,targetFor,retranslate}){
+   if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
+   position();
+  }
+- function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.disabled=true;root.style.display='none';return;}position()}
++ function setOfficial(value){if(current)current.official=!!value;else if(value){restoreNative();privacy.media='not all';root.style.display='none';return;}position()}
+  toggle.onclick=()=>setOfficial(!current?.official);
+  function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
+  function updateNode(value,record){
