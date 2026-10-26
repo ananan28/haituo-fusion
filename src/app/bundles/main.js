@@ -32226,4 +32226,4 @@ if ($u === 'signal-main') p.app.whenReady().then(() => {
     try { haituoScreenshotController.configure($p()); } catch (error) { X.warn('截图快捷键注册失败：'+error.message); }
 });
 
-if(process.env.HAITUO_WA_GUEST_TEST==='1'&&$u==='signal-main')p.app.whenReady().then(()=>require('../js/haituo-wa-guest-fixture.js').run({electron:p,bootstrap:HaituoWABootstrap,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),reportPath:process.env.HAITUO_WA_GUEST_REPORT}));
+if(process.env.HAITUO_WA_GUEST_TEST==='1'&&$u==='signal-main')p.app.whenReady().then(()=>require('../js/haituo-wa-guest-fixture.js').run({electron:p,bootstrap:HaituoWABootstrap,preloadPath:require('node:path').join(p.app.getAppPath(),'js','caisheng-webview-preload.js'),reportPath:process.env.HAITUO_WA_GUEST_REPORT,waitForAppReady:async()=>{const end=Date.now()+45000;while(!Vv&&Date.now()<end)await new Promise(resolve=>setTimeout(resolve,50));if(!Vv)throw Error('Application database initialization did not start');const result=await Vv;if(!result?.ok)throw Error('Application database initialization failed');},shutdown:async()=>{await E_.close();}}));

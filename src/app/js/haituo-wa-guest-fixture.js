@@ -1,9 +1,9 @@
 'use strict';
 // Opt-in, offline native guest regression. No account, cookies or network.
-async function run({electron,bootstrap,preloadPath,reportPath}){
+async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,shutdown}){
  const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
  const {app,BrowserWindow,session}=electron;const report={scope:'REAL_ELECTRON_WEBVIEW_SYNTHETIC_PAGE',realAccount:'UNTESTED',versions:process.versions,checks:[],errors:[],events:[]};let host,timer;
- try{const partition='haituo-wa-startup-fixture-'+Date.now(),guestSession=session.fromPartition(partition);
+ try{await waitForAppReady();const partition='haituo-wa-startup-fixture-'+Date.now(),guestSession=session.fromPartition(partition);
  // Match the production WhatsApp session's ASCII browser UA. Electron's
  // default Chinese product-name UA cannot be converted to fetch Headers by
  // protocol.handle (ByteString), which would invalidate the offline fixture.
@@ -26,6 +26,6 @@ async function run({electron,bootstrap,preloadPath,reportPath}){
  });});
  const html='<!doctype html><html><body><webview style="width:780px;height:560px" partition="'+partition+'" preload="'+pathToFileURL(preloadPath).href+'" src="https://web.whatsapp.com/haituo-startup-fixture"></webview></body></html>';
  await host.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));await result;report.ok=report.checks.every(item=>item.ok)&&!report.errors.length;
- }catch(error){report.ok=false;report.fatal=String(error.stack||error)}finally{clearTimeout(timer);host?.destroy();fs.mkdirSync(path.dirname(reportPath),{recursive:true});fs.writeFileSync(reportPath,JSON.stringify(report,null,2));console.log('WA_GUEST_STARTUP_REPORT',JSON.stringify(report));app.exit(report.ok?0:1)}
+ }catch(error){report.ok=false;report.fatal=String(error.stack||error)}finally{clearTimeout(timer);try{await shutdown()}catch(error){report.ok=false;report.teardownError=String(error.stack||error)}host?.destroy();fs.mkdirSync(path.dirname(reportPath),{recursive:true});fs.writeFileSync(reportPath,JSON.stringify(report,null,2));console.log('WA_GUEST_STARTUP_REPORT',JSON.stringify(report));app.exit(report.ok?0:1)}
 }
 module.exports={run};
