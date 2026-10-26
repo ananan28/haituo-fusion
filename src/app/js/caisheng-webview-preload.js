@@ -1828,9 +1828,10 @@ function haituoInstallMessageScanner() {
         const worker = async () => {
             while (queueIndex < queue.length) {
                 const item = queue[queueIndex++];
+                if(scrolling){delete item.t.dataset.haituoTranslationPending;continue}
                 try {
                     item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly);
-                    if(isWhatsApp()&&item.r){sessionTranslations.set(item.memoKey,item.r);if(sessionTranslations.size>2000)sessionTranslations.delete(sessionTranslations.keys().next().value)}
+                    if(isWhatsApp()&&item.r)sessionTranslations.set(item.memoKey,item.r);
                     if (haituoCurrentWebMessage(item)) {
                         item.t.dataset.haituoTranslationDone = "1";
                         if (!item.r && item.attachmentOnly) item.t.dataset.haituoAttachmentMiss = "1";
