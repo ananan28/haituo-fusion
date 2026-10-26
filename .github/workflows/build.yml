@@ -1,8 +1,8 @@
-name: Build and verify Haituo 1.6.3
+name: Build and verify Haituo 1.6.4
 on:
   workflow_dispatch:
   push:
-    branches: ['build/1.6.3-persistent-chat']
+    branches: ['build/1.6.4-native-inline']
 permissions:
   contents: write
 env:
@@ -20,9 +20,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Integrate and verify persistent chats and default embedded child views
+      - name: Restore native WhatsApp UI and protect saved credentials
         run: |
-          python scripts/integrate-persistent-chat-163.py
+          python scripts/integrate-native-inline-164.py
           python scripts/sync-local-chat-view.py
           node --check src/app/bundles/main.js
           node --check src/app/bundles/preload/main.js
@@ -44,8 +44,8 @@ jobs:
           git config user.email 'haituo-build@users.noreply.github.com'
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m 'feat: native local bilingual message records and default profile views (1.6.3)'
-            git push origin HEAD:build/1.6.3-persistent-chat
+            git commit -m 'feat: native local bilingual message records and default profile views (1.6.4)'
+            git push origin HEAD:build/1.6.4-native-inline
           fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
@@ -90,14 +90,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.3-verification-${{ matrix.target }}
+          name: Haituo-1.6.4-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
             macos/verification/**
       - uses: actions/upload-artifact@v4
         with:
-          name: Haituo-1.6.3-${{ matrix.target }}
+          name: Haituo-1.6.4-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg

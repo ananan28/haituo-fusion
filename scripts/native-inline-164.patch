@@ -1,0 +1,816 @@
+diff --git a/CHANGELOG-1.6.4.md b/CHANGELOG-1.6.4.md
+new file mode 100644
+index 0000000..104461b
+--- /dev/null
++++ b/CHANGELOG-1.6.4.md
+@@ -0,0 +1,11 @@
++# 海拓 1.6.4
++
++1.6.3 的替代聊天覆盖层造成实际 WhatsApp 对话空白，已撤除。没有“官方视图”切换，没有替代聊天列表，不隐藏、透明化或遮盖原消息。
++
++译文仍保存在原有本机加密消息记录中；在 WhatsApp 原消息下显示。平台虚拟列表重建原消息 DOM 时，在绘制前按消息 ID 读取本机记录，避免等待网络重新翻译；这不等于 WhatsApp 永远不重建 DOM。原聊天、图片、语音、输入框及操作保持原界面。读取失败也保留原对话可见。
++
++设置更新合并现有配置，未传入的密钥字段不清空。密钥占位信息解析失败时拒绝整次保存，不把空密钥或缺失数组项写回配置。增加无关设置保存后 API 认证、重启后密钥保留的原生检查。不能凭代码确认用户电脑已经丢失的密钥是否仍有可恢复副本。
++
++保留 1.6.3 的客户消息忠实直译规则、子 Signal 默认融合。截图模块不在本轮改造。
++
++进程和内存问题仍需按实际账号及后台归属排查，本轮未承诺改变多进程数量，也不通过停止后台收信来降低进程数。
+diff --git a/INPROCESS-1.6.4.md b/INPROCESS-1.6.4.md
+new file mode 100644
+index 0000000..8fcfece
+--- /dev/null
++++ b/INPROCESS-1.6.4.md
+@@ -0,0 +1,9 @@
++# 1.6.4 子 Signal 默认融合
++
++正常安装、双击打开即可。Windows 和 macOS 都不需要 `--haituo-inprocess`。
++
++子账号界面为主窗口内的 WebContentsView，协议、数据库和浏览器分区仍隔离，后台仍有独立进程。旧快捷方式上的 `--haituo-inprocess` 可以删去，保留也兼容。
++
++只有排查问题时，完全退出后使用 `--haituo-legacy-windows` 或环境变量 `HAITUO_INPROCESS=0` 才使用旧窗口方式。不推荐日常使用旧方式。
++
++Windows 用户已反馈 1.6.2 在开启融合后拖动无感、不偏移；此反馈不代表所有电脑和 Mac 的全部操作均已验收。
+diff --git a/README.md b/README.md
+index dc8ce27..6d4b1d2 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 海拓独立开发工程
+ 
+-本工程同时构建 Windows x64 1.6.3 和 macOS ARM64 1.6.3。所有应用代码、资源、随附 JavaScript 依赖和构建脚本都在本目录内。移动整个目录，或提交到你自己的新仓库即可继续开发，不需要以前的仓库、电脑、source.zip 分卷或已安装的海拓。
++本工程同时构建 Windows x64 1.6.4 和 macOS ARM64 1.6.4。所有应用代码、资源、随附 JavaScript 依赖和构建脚本都在本目录内。移动整个目录，或提交到你自己的新仓库即可继续开发，不需要以前的仓库、电脑、source.zip 分卷或已安装的海拓。
+ 
+ ## 新电脑构建
+ 
+@@ -18,7 +18,7 @@ Mac，在项目目录终端执行：
+ python3 scripts/build.py --target macos --test
+ ```
+ 
+-首次构建需要联网下载固定版本的 Electron、打包工具及原生依赖。Windows 输出 `windows/out/Haituo-1.6.3-Windows-x64-Setup.exe`；Mac 输出 `macos/out/海拓-1.6.3-arm64.dmg`。构建不发布任何版本。Mac 使用本地临时签名；本工程不包含开发者证书或 Apple 公证凭据。
++首次构建需要联网下载固定版本的 Electron、打包工具及原生依赖。Windows 输出 `windows/out/Haituo-1.6.4-Windows-x64-Setup.exe`；Mac 输出 `macos/out/海拓-1.6.4-arm64.dmg`。构建不发布任何版本。Mac 使用本地临时签名；本工程不包含开发者证书或 Apple 公证凭据。
+ 
+ ## 修改代码
+ 
+@@ -36,12 +36,12 @@ python3 scripts/build.py --target macos --test
+ 
+ `--test` 包含实际启动及窗口回归验证；它使用临时数据目录，不登录你的账号。需要人工完成真实账号的收发消息、API 认证、语音转文/翻译、音频外放和数据库升级验证。
+ 
+-## 1.6.3 行为及验证边界
++## 1.6.4 行为及验证边界
+ 
+ 默认保持禁止直接发送中文。关闭后原生发送中文需要确认；快速输入回车先翻译填入并显示回译，再使用原生发送按钮发送，与 1.3.5 保持一致。
+ 
+-本轮消息记录持久化及子 Signal 融合候选功能见 CHANGELOG-1.6.3.md、INPROCESS-1.6.3.md。运行 `node --test scripts/translation-validation.test.cjs scripts/network.test.cjs`，再在对应系统运行 `python scripts/build.py --target windows --test` 或 `python3 scripts/build.py --target macos --test`。
++本轮消息记录持久化及子 Signal 融合候选功能见 CHANGELOG-1.6.4.md、INPROCESS-1.6.4.md。运行 `node --test scripts/translation-validation.test.cjs scripts/network.test.cjs`，再在对应系统运行 `python scripts/build.py --target windows --test` 或 `python3 scripts/build.py --target macos --test`。
+ 
+-子 Signal 界面默认嵌在主窗口内部，后台进程和数据库仍按账号隔离，无需启动参数。WhatsApp 本机文字视图按会话保留双语节点和滚动位置；媒体操作使用官方视图。客户聊天消息采用忠实直译，主动发送的输入翻译风格保持原逻辑。真实账号、语音外放、旧数据库升级、删除记录保留及全面加密仍需单独验证/实现。不能将安装包构建通过等同于所有历史问题已解决。
++子 Signal 界面默认嵌在主窗口内部，后台进程和数据库仍按账号隔离，无需启动参数。WhatsApp 保留原对话界面，译文直接显示在原消息下面；不创建替代聊天列表、遮罩或视图切换。客户聊天消息采用忠实直译，主动发送的输入翻译风格保持原逻辑。真实账号、语音外放、旧数据库升级、删除记录保留及全面加密仍需单独验证/实现。不能将安装包构建通过等同于所有历史问题已解决。
+ 
+ maintenance/ 是历史补丁参考，不要重复应用到当前 src/app。
+diff --git a/START-HERE.md b/START-HERE.md
+index 0c331f0..424c195 100644
+--- a/START-HERE.md
++++ b/START-HERE.md
+@@ -1,4 +1,4 @@
+-# 海拓 1.6.3 开发工程
++# 海拓 1.6.4 开发工程
+ 
+ 本包包含当前客户端的可编辑运行 JavaScript、资源、随附依赖、构建脚本和回归测试。可以复制到新电脑或新仓库，继续修改并生成 Windows x64 EXE 和 macOS ARM64 DMG；构建不会下载旧海拓仓库或旧工程压缩包。
+ 
+diff --git a/project.json b/project.json
+index 8c69dbc..ec181d0 100644
+--- a/project.json
++++ b/project.json
+@@ -1,8 +1,8 @@
+ {
+   "name": "Haituo portable development project",
+   "versions": {
+-    "windows": "1.6.3",
+-    "macos": "1.6.3"
++    "windows": "1.6.4",
++    "macos": "1.6.4"
+   },
+   "signalProtocolVersion": "8.29.0-alpha.1",
+   "tools": {
+diff --git a/scripts/config-secret-save.test.cjs b/scripts/config-secret-save.test.cjs
+new file mode 100644
+index 0000000..a65c17d
+--- /dev/null
++++ b/scripts/config-secret-save.test.cjs
+@@ -0,0 +1,10 @@
++'use strict';
++const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
++const source=fs.readFileSync(path.join(__dirname,'../src/app/bundles/main.js'),'utf8').replace(/\r\n/g,'\n');
++const start=source.indexOf('function haituoRequireResolvedSecrets('),end=source.indexOf('function haituoApplyTranslationConfig(',start);
++const context={HaituoRedactedSecret:'__HAITUO_REDACTED__',HaituoSecretConfigFields:['apiKey','groqApiKey']};vm.createContext(context);vm.runInContext(source.slice(start,end),context);const check=context.haituoRequireResolvedSecrets,S='__HAITUO_REDACTED__';
++test('saving an unrelated setting does not require resubmitting any saved API keys',()=>assert.doesNotThrow(()=>check({nativeTheme:'light'},{nativeTheme:'light'})));
++test('unresolved saved primary or backup credentials reject the whole save instead of clearing keys',()=>{for(const group of ['primary','backup'])assert.throws(()=>check({translationPools:{[group]:[{apiKey:S+':translationPools.'+group+'.0'}]}},{translationPools:{[group]:[{apiKey:''}]}}),/原配置已保留/)});
++test('dropped saved profile and screenshot entries cannot silently replace the persisted arrays',()=>{for(const name of ['openaiApiProfiles','screenshotApiPool'])assert.throws(()=>check({[name]:[{apiKey:S+':'+name+'.0'}]},{[name]:[]}),/原配置已保留/)});
++test('a resolved masked key and an explicit user-cleared plain key are distinguishable',()=>{assert.doesNotThrow(()=>check({apiKey:S+':apiKey'},{apiKey:'fixture-only'}));assert.doesNotThrow(()=>check({apiKey:''},{apiKey:''}));assert.throws(()=>check({apiKey:S+':apiKey'},{}),/原配置已保留/)});
++test('the central config applier merges a partial save with existing persisted fields',()=>assert.match(source,/t = \{ \.\.\.\$p\(\), \.\.\.cleaned \}/));
+diff --git a/scripts/inprocess-native-check.cjs b/scripts/inprocess-native-check.cjs
+index 0aeaea6..0ddd384 100644
+--- a/scripts/inprocess-native-check.cjs
++++ b/scripts/inprocess-native-check.cjs
+@@ -19,6 +19,10 @@ function collectStartupLogs(){
+  for(const root of roots)if(fs.existsSync(root))for(const name of fs.readdirSync(root))if(/\.(?:log|json)$/.test(name))try{const body=fs.readFileSync(path.join(root,name),'utf8').replace(/Bearer\s+[A-Za-z0-9_.-]+/g,'Bearer [redacted]');fs.writeFileSync(path.join(out,'startup-'+report.startupLogs.length+'.log'),body);report.startupLogs.push({name,tail:body.split('\n').slice(-45).join('\n')})}catch{}
+ }
+ async function stop(){if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}await pause(700);if(!mac&&proc?.pid){cp.spawnSync('taskkill',['/PID',String(proc.pid),'/T','/F'],{timeout:10000,stdio:'ignore'})}if(mac){const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){const pid=Number(line.trim().split(/\s+/)[0]);try{process.kill(pid,'SIGTERM')}catch{}}}if(log!==undefined){fs.closeSync(log);log=undefined}}
++function windowsProcessInventory(){
++ const script="[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:HAITUO_QA_PROCESS_EXE } | ForEach-Object { $kind='main'; if($_.CommandLine -match '--type=renderer'){$kind='renderer'}elseif($_.CommandLine -match '--type=gpu-process'){$kind='gpu'}elseif($_.CommandLine -match '--type=utility'){$kind='utility'}elseif($_.CommandLine -match '--caisheng-profile='){$kind='signal-backend'}; [PSCustomObject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;kind=$kind;workingSetMB=[Math]::Round([double]$_.WorkingSetSize/1MB,1)} }) | ConvertTo-Json -Compress";
++ const text=cp.execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',timeout:15000,env:{...process.env,HAITUO_QA_PROCESS_EXE:app}}).trim().replace(/^\uFEFF/,'');const rows=JSON.parse(text||'[]');return Array.isArray(rows)?rows:[rows];
++}
+ async function check(id,work){try{const result=await work();report.checks.push({id,ok:true,result})}catch(e){report.checks.push({id,ok:false,error:String(e.stack||e)})}}
+ (async()=>{try{
+  await check('MAIN-DEFAULT-EMBEDDED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
+@@ -52,6 +56,10 @@ async function check(id,work){try{const result=await work();report.checks.push({
+    throw Error('Child profile never reached initialized renderer; inspect child stderr/startup log');
+   });
+   if(childClient){
++   if(!mac)await check('CHILD-LAUNCH-IDEMPOTENT-PROCESS-INVENTORY',async()=>{
++    await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);
++    const rows=windowsProcessInventory(),backends=rows.filter(x=>x.kind==='signal-backend');if(backends.length!==1)throw Error('Repeated launch did not retain exactly one backend: '+JSON.stringify(rows));return{backends:backends.length,processes:rows};
++   });
+    await check('CHILD-FOCUS-SERVICE',async()=>{
+     // Let the hidden backend's legacy 10s focus timer fire; it must not
+     // overwrite the actual parent/view focus state. Reset document activity on
+@@ -97,5 +105,6 @@ async function check(id,work){try{const result=await work();report.checks.push({
+   });
+   await check('SWITCH-BACK-TO-MAIN',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await pause(200);if(!await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]')?.getAttribute('aria-pressed')==='true'`))throw Error('Main tab was not selected');return{selectedInUI:true}});
+   await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
++  if(!mac)await check('STOPPED-PROFILE-HAS-NO-BACKEND-PROCESS',async()=>{const rows=windowsProcessInventory();if(rows.some(x=>x.kind==='signal-backend'))throw Error('Stopped profile still owns a backend process');return{backends:0,processes:rows}});
+  }
+ }catch(error){report.fatal=String(error.stack||error)}finally{collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();
+diff --git a/scripts/local-chat-chromium-check.cjs b/scripts/local-chat-chromium-check.cjs
+index 8144641..3bb3687 100644
+--- a/scripts/local-chat-chromium-check.cjs
++++ b/scripts/local-chat-chromium-check.cjs
+@@ -10,5 +10,6 @@ function call(method,params={}){return new Promise((resolve,reject)=>{const id=+
+  let target,last;const deadline=Date.now()+20000;while(Date.now()<deadline){try{target=(await(await fetch('http://127.0.0.1:'+port+'/json/list')).json()).find(x=>x.type==='page');if(target)break}catch(error){last=error}await pause(100)}if(!target)throw Error('Chromium unavailable: '+last);
+  socket=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true})});socket.addEventListener('message',event=>{const message=JSON.parse(event.data),item=pending.get(message.id);if(item){pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result)}});
+  const source=fs.readFileSync(path.resolve('src/app/js/haituo-local-chat-view.js'),'utf8'),fixture=require('./local-chat-layout-fixture.cjs').toString();
+- const result=await call('Runtime.evaluate',{expression:`(async()=>{const local={exports:{}};((module)=>{${source}\n})(local);return (${fixture})(local.exports.install)})()`,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);console.log('WHATSAPP_CHROMIUM_LAYOUT_OK',JSON.stringify(result.result.value));
++   const webSource=fs.readFileSync(path.resolve('src/app/js/caisheng-webview-preload.js'),'utf8'),positionSource=webSource.slice(webSource.indexOf('function haituoTranslationScroller('),webSource.indexOf('// Apply only to WhatsApp.'));
++ const result=await call('Runtime.evaluate',{expression:`(async()=>{const local={exports:{}};((module)=>{${source}\n})(local);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(local.exports.install,keep)})()`,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);console.log('WHATSAPP_CHROMIUM_LAYOUT_OK',JSON.stringify(result.result.value));
+  }catch(error){console.error(error);process.exitCode=1}finally{try{await call('Browser.close')}catch{}try{socket?.close()}catch{}browser.kill();await pause(250);fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100})}})();
+diff --git a/scripts/local-chat-layout-fixture.cjs b/scripts/local-chat-layout-fixture.cjs
+index 919c2ff..0575ad4 100644
+--- a/scripts/local-chat-layout-fixture.cjs
++++ b/scripts/local-chat-layout-fixture.cjs
+@@ -1,40 +1,26 @@
+ 'use strict';
+-module.exports=async function verifyPersistentLayout(install){
+- // Keep production CSP intact (Signal intentionally forbids frames). Use a
+- // shadow root for a real layout surface whose styles cannot affect the app.
++module.exports=async function verifyNativeInline(install,keepPosition){
+  const host=document.createElement('div');Object.assign(host.style,{position:'fixed',left:'10px',top:'10px',width:'720px',height:'520px',zIndex:'2147483647'});document.body.append(host);
+- const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial';
+- shadow.append(body);body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}#native>div{height:35px}</style><main id="main"><header><span title="Contact A">Contact A</span></header><div id="native"></div><footer>Composer</footer></main>';
+- const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)};
+- const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
+- let view;
++ const shadow=host.attachShadow({mode:'open'}),body=document.createElement('div');shadow.append(body);body.style.cssText='width:720px;height:520px;margin:0;font:14px Arial;background:#161717;color:white';
++ body.innerHTML='<style>#main{height:500px}header,footer{height:50px}#native{height:400px;overflow-y:auto}.message-in{min-height:100px;padding:10px;box-sizing:border-box}</style><main id="main"><header>Native WhatsApp</header><div id="native"></div><footer><button>Native send</button></footer></main>';
++ const w=window,d={body,head:body,documentElement:body,createElement:document.createElement.bind(document),querySelector:shadow.querySelector.bind(shadow),querySelectorAll:shadow.querySelectorAll.bind(shadow),addEventListener:body.addEventListener.bind(body),removeEventListener:body.removeEventListener.bind(body)},tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r))),assert=(value,message)=>{if(!value)throw Error(message)};
++ const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}}}),all=Array.from({length:600},(_,i)=>record('123@c.us',i)),db=new Map(all.map(r=>[r.id,r]));let reads=0,view;
++ const bubble=r=>'<div class="message-in" data-id="'+r.id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">'+r.source+'</span></div></div>';
++ const native=d.querySelector('#native'),footer=d.querySelector('footer'),show=items=>{native.innerHTML=items.map(bubble).join('')};show(all.slice(0,100));
++ const ipc={sendSync(method,{chat,ids}){reads++;return{ok:true,page:{chat,messages:ids.map(id=>db.get(id)).filter(Boolean)}}},async invoke(method,items){return{chat:items[0].id.split('_')[1],messages:all.slice(-200),total:600,hasOlder:true}}};
++ const config={document:d,window:w,ipc,keepPosition,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network request')}};
+  try{
+-  const record=(chat,i)=>({id:'false_'+chat+'_'+i,source:'Original '+i,translations:{'zh-CN':{text:'已保存译文 '+i}},metadata:'10:00'});
+-  const all=Array.from({length:600},(_,i)=>record('123@c.us',i)),other=[record('999@c.us',1)];let reads=0;
+-  const native=(chat,title)=>{d.querySelector('header span').setAttribute('title',title);d.querySelector('#native').innerHTML='<div data-id="false_'+chat+'_599">Original 599</div>';return d.querySelector('#native [data-id]')};
+-  let item=native('123@c.us','Contact A');
+-  const ipc={invoke:async(method,input,options)=>{reads++;await tick();const chat=typeof input==='string'?input:input[0].id.split('_')[1],items=chat==='123@c.us'?all:other;let end=items.length;if(options?.before)end=items.findIndex(r=>r.id===options.before);const messages=options?.ids?items.filter(r=>options.ids.includes(r.id)):items.slice(Math.max(0,end-200),end);return{chat,messages,total:items.length,hasOlder:!options?.ids&&end>200}}};
+-  view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});
+-  view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked before text loaded');view.setOfficial(false);
+-  const first=view.observe([{id:item.dataset.id,source:item.textContent}],[item]);
+-  assert(w.getComputedStyle(item).opacity==='0','Native original flashed during storage read');assert(item.innerText==='Original 599','Load mask prevented native message text from being read');await first;await tick();
+-  const original=d.querySelector('article'),translation=original.querySelector('.haituo-local-message-translation'),list=original.parentElement;
+-  assert(original.textContent.includes('已保存译文 400'),'Initial original and saved translation were not mounted together');assert(list.clientHeight>100&&list.scrollHeight>list.clientHeight,'Fixture did not create real scrolling geometry');
+-  list.scrollTop=2400;await tick();const savedTop=list.scrollTop;
+-  // Recycle official nodes while leaving the local message object untouched.
+-  item=native('123@c.us','Contact A');await tick();assert(d.querySelector('article')===original,'Native recycling remounted a local message');assert(list.scrollTop===savedTop,'Native recycling changed local scroll position');
+-  const pane=d.createElement('div');pane.id='pane-side';d.body.append(pane);pane.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));view.setOfficial(true);assert(w.getComputedStyle(item).opacity==='1','Official media view remained masked while navigation was pending');view.setOfficial(false);
+-  item=native('999@c.us','Contact B');await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(!original.isConnected,'Old conversation leaked into the new one');
+-  item=native('123@c.us','Contact A');const back=view.observe([{id:item.dataset.id,source:item.textContent,metadata:'return'}],[item]);assert(d.querySelector('article')===original,'Cached conversation was not reused before IPC');assert(list.scrollTop===savedTop,'Returning to a chat lost scroll position');await back;await tick();assert(list.scrollTop===savedTop,'DB refresh moved the restored conversation');
+-  // At the top, loading older records must preserve the first visible message.
+-  list.scrollTop=0;list.dispatchEvent(new w.Event('scroll'));for(let i=0;i<20&&d.querySelectorAll('article').length<400;i++)await tick();await tick();
+-  assert(d.querySelectorAll('article').length===400,'Older page did not load');assert(original.isConnected&&original.querySelector('.haituo-local-message-translation')===translation,'Older paging recreated a saved translation');
+-  assert(Math.abs(original.getBoundingClientRect().top-list.getBoundingClientRect().top)<40,'Older paging moved the visible anchor');
+-  all[200].translations['zh-CN'].text='后台完成的旧消息译文';const older=d.querySelector('article'),oldTranslation=older.querySelector('.haituo-local-message-translation');await view.refresh(all[200].id);assert(oldTranslation.textContent==='后台完成的旧消息译文','Targeted refresh missed older history');assert(d.querySelectorAll('.haituo-wa-message-translation').length===0,'Legacy translation attachment was used');
+-  view.destroy();view=null;
+-  // Simulated renderer restart: retained disk records are supplied together,
+-  // and neither translation generation nor original-DOM patching is needed.
+-  view=install({document:d,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{throw Error('Unexpected network translation')}});await view.observe([{id:item.dataset.id,source:item.textContent}],[item]);await tick();assert(d.querySelector('article .haituo-local-message-translation').textContent==='已保存译文 400','Reload lost saved bilingual record');
+-  return{records:600,reads,realScrollHeight:list.scrollHeight,retainedNodes:true,retainedScroll:true,olderAnchor:true,offlineReload:true,officialMedia:true};
++  const original=native.firstElementChild;view=install(config);
++  assert(d.querySelector('#native')===native&&native.firstElementChild===original,'The native conversation was replaced');assert(d.querySelector('footer')===footer,'Native controls were replaced');assert(!d.querySelector('#haituo-local-bilingual-chat'),'A replacement chat overlay was created');
++  assert(original.querySelector('[data-haituo-saved-text]')?.textContent==='已保存译文 0','Saved translation was not present at initial render');assert(w.getComputedStyle(native).opacity==='1'&&w.getComputedStyle(native).visibility==='visible','Native conversation was masked');await tick();
++  native.scrollTop=2400;await tick();const before=native.scrollTop,translation=original.querySelector('.haituo-wa-message-translation');await view.observe(all.slice(0,24),[...native.children]);await tick();assert(native.scrollTop===before,'Read-only refresh moved the native scroll position');assert(native.firstElementChild===original&&original.querySelector('.haituo-wa-message-translation')===translation,'Refresh recreated native messages or translation nodes');
++  show(all.slice(200,300));native.scrollTop=2400;await tick();assert(native.firstElementChild.querySelector('[data-haituo-saved-text]')?.textContent==='已保存译文 200','Native virtualized history lost its saved translation');assert(native.scrollTop===2400,'Translation hydration moved the virtualized history');
++  const visible=[...native.children].find(n=>n.getBoundingClientRect().bottom>native.getBoundingClientRect().top),anchorTop=visible.getBoundingClientRect().top;all[200].translations['zh-CN'].text='Long translated text '.repeat(300);await view.refresh(all[200].id);await tick();assert(Math.abs(visible.getBoundingClientRect().top-anchorTop)<2,'A longer saved translation moved the visible native message');all[200].translations['zh-CN'].text='已保存译文 200';await view.refresh(all[200].id);await tick();
++  const other=record('999@c.us',1);db.set(other.id,other);show([other]);await tick();await view.refresh(all[200].id);assert(native.firstElementChild.getAttribute('data-id')===other.id,'A late old-chat result changed the native chat');assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 1','A translation crossed conversations');
++  show(all.slice(200,300));native.scrollTop=2400;await tick();assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 200','Returning to native history lost its translation');assert(native.scrollTop===2400,'Returning to history moved the native scroll position');
++  native.innerHTML='<div data-id="false_123@c.us_photo"><img alt="Native photo"><button>Open native photo</button></div>';await tick();assert(w.getComputedStyle(native).opacity==='1'&&d.querySelector('img').isConnected,'Image-only conversation was hidden');assert(!d.querySelector('#haituo-local-bilingual-chat'),'Image-only chat created a replacement view');
++  view.destroy();view=null;show(all.slice(400,500));view=install(config);assert(native.firstElementChild.querySelector('[data-haituo-saved-text]').textContent==='已保存译文 400','Restart could not display a saved translation without network');
++  view.destroy();view=null;show([record('888@c.us',1)]);view=install({...config,ipc:{...ipc,sendSync(){throw Error('Storage unavailable')}}});await tick();assert(native.textContent.includes('Original 1')&&w.getComputedStyle(native).opacity==='1','Storage failure concealed native messages');
++  return{records:600,reads,nativeInterface:true,nativeControls:true,longWrapAnchor:true,retainedScroll:true,beforeNextPaint:true,offlineReload:true,imageOnly:true,storageFailureVisible:true};
+  }finally{view?.destroy();host.remove()}
+ };
+diff --git a/scripts/local-chat-view.dom.cjs b/scripts/local-chat-view.dom.cjs
+index 0ac4bdf..2e93834 100644
+--- a/scripts/local-chat-view.dom.cjs
++++ b/scripts/local-chat-view.dom.cjs
+@@ -2,48 +2,22 @@
+ const {test}=require('node:test'),assert=require('node:assert/strict');
+ const {JSDOM}=require(require.resolve('jsdom',{paths:[process.env.HAITUO_QA_NODE_MODULES||'/tmp/haituo-qa/node_modules']}));
+ const {install}=require('../src/app/js/haituo-local-chat-view.js');
+-const id='false_123@c.us_one',entry={id,source:'Hello',metadata:'10:00',translations:{'zh-CN':{text:'你好'}}};
+-function setup(t,{records=[entry],fail=false}={}){const dom=new JSDOM('<main id="main"><header><span title="Contact">Contact</span></header><div id="scroll" style="overflow-y:auto"><div data-id="'+id+'"><span>Hello</span></div></div></main>',{pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window,scroller=w.document.querySelector('#scroll');Object.defineProperty(scroller,'clientHeight',{value:300});scroller.getBoundingClientRect=()=>({top:50,left:0,width:600,height:300});const calls=[];const ipc={invoke:async(method,...args)=>{calls.push(method);if(fail)throw Error('disk unavailable');return{chat:'123@c.us',messages:records,total:records.length,hasOlder:false}}};const view=install({document:w.document,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{}});t.after(()=>view.destroy());return{w,view,calls,ipc,element:w.document.querySelector('[data-id]'),scroller}}
+-test('own chat mounts original and saved translation together from one message record',async t=>{const x=setup(t),mounted=[];const observer=new x.w.MutationObserver(events=>{for(const event of events)for(const node of event.addedNodes)if(node.nodeName==='ARTICLE')mounted.push(node.textContent)});observer.observe(x.w.document.body,{childList:true,subtree:true});await x.view.observe([{id,source:'Hello'}],[x.element]);await new Promise(r=>setTimeout(r,0));assert.equal(mounted.length,1);assert.ok(mounted[0].includes('Hello'));assert.ok(mounted[0].includes('你好'));assert.equal(x.w.document.querySelector('.haituo-local-message-translation').textContent,'你好');assert.deepEqual(x.calls,['haituo:local-chat-observe']);observer.disconnect()});
+-test('native WhatsApp removing all old DOM nodes cannot remove the local bilingual message',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.element.remove();assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').textContent.includes('你好'),true);assert.equal(x.calls.length,1)});
+-test('repeated unchanged native snapshots do not reread DB or replace rendered message nodes',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const original=x.w.document.querySelector('article');await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.w.document.querySelector('article'),original);assert.equal(x.calls.length,1)});
+-test('official view restores source visibility and keeps the bilingual record for returning',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.opacity,'0');x.view.setOfficial(true);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);x.view.setOfficial(false);assert.equal(x.scroller.style.opacity,'0')});
+-test('storage failure leaves official WhatsApp visible',async t=>{const x=setup(t,{fail:true});await assert.rejects(x.view.observe([{id,source:'Hello'}],[x.element]),/disk unavailable/);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article'),null)});
+-test('chat navigation hides previous chat immediately and late DB response cannot cross conversations',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.w.document.querySelector('#main header span').setAttribute('title','Other contact');await x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').parentElement.style.display,'none')});
+-
+-test('a pending old-chat DB response stays hidden during navigation',async t=>{const x=setup(t);let finish;x.ipc.invoke=()=>new Promise(resolve=>finish=resolve);const old=x.view.observe([{id,source:'Hello'}],[x.element]);await Promise.resolve();x.w.document.querySelector('#main header span').setAttribute('title','Other contact');await x.view.observe([{id,source:'Hello'}],[x.element]);finish({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await old;assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article').parentElement.style.display,'none');assert.ok(x.w.document.querySelector('#haituo-local-bilingual-chat').textContent.includes('正在读取'));});
+-function changeChat(x,chat,title='Other'){
+- const next='false_'+chat+'_one';x.w.document.querySelector('#main header span').setAttribute('title',title);x.element.setAttribute('data-id',next);x.element.textContent='Other';return next;
++const id='false_123@c.us_one',record={id,source:'Hello',translations:{'zh-CN':{text:'你好'}}};
++const bubble=(key=id,text='Hello')=>`<div class="message-in" data-id="${key}"><div data-pre-plain-text="10:00"><span class="selectable-text">${text}</span></div></div>`;
++function setup(t,{fail=false,stored=[record]}={}){
++ const dom=new JSDOM('<main id="main"><header>Contact</header><div id="scroll">'+bubble()+'</div><footer><button>Send</button></footer></main>',{pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window,calls=[],data=new Map(stored.map(x=>[x.id,x]));
++ const ipc={sendSync(channel,{chat,ids}){calls.push(channel);if(fail)throw Error('disk unavailable');return{ok:true,page:{chat,messages:ids.map(id=>data.get(id)).filter(Boolean)}}},async invoke(channel,items){calls.push(channel);if(fail)throw Error('disk unavailable');return{chat:'123@c.us',messages:items.map(x=>data.get(x.id)||{...x,translations:{}}),hasOlder:false,total:data.size}}};
++ const original=w.document.querySelector('[data-id]'),footer=w.document.querySelector('footer'),view=install({document:w.document,window:w,ipc,targetFor:()=> 'zh-CN',retranslate:async()=>{}});t.after(()=>view.destroy());return{w,view,original,footer,data,calls,ipc};
+ }
+-test('switching away and back retains the exact bilingual nodes and scroll position before DB resolves',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article'),list=article.parentElement;list.scrollTop=173;
+- const next=changeChat(x,'999@c.us');x.ipc.invoke=async()=>({chat:'999@c.us',messages:[{...entry,id:next,source:'Other'}],total:1,hasOlder:false});await x.view.observe([{id:next,source:'Other'}],[x.element]);assert.equal(article.isConnected,false);
+- changeChat(x,'123@c.us','Contact');x.element.setAttribute('data-id',id);let resolve;x.ipc.invoke=()=>new Promise(r=>resolve=r);
+- const pending=x.view.observe([{id,source:'Hello',metadata:'new snapshot'}],[x.element]);
+- assert.equal(x.w.document.querySelector('article'),article);assert.equal(article.parentElement,list);assert.equal(list.scrollTop,173);assert.equal(article.querySelector('.haituo-local-message-translation').textContent,'你好');
+- await new Promise(r=>setImmediate(r));resolve({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await pending;assert.equal(x.w.document.querySelector('article'),article);
+-});
+-test('first-load native original-only messages are hidden before IPC completes',async t=>{
+- const x=setup(t);let resolve;x.ipc.invoke=()=>new Promise(r=>resolve=r);const pending=x.view.observe([{id,source:'Hello'}],[x.element]);assert.equal(x.scroller.style.opacity,'0');assert.equal(x.w.document.querySelector('article'),null);assert.ok(x.w.document.querySelector('#haituo-local-bilingual-chat').textContent.includes('正在读取'));await new Promise(r=>setImmediate(r));resolve({chat:'123@c.us',messages:[entry],total:1,hasOlder:false});await pending;assert.equal(x.w.document.querySelector('article').textContent.includes('你好'),true);
+-});
+-test('saved translations keep the same message/translation elements through scrolling and refresh',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article'),translation=article.querySelector('.haituo-local-message-translation');
+- article.parentElement.scrollTop=80;await x.view.refresh(id);assert.equal(x.w.document.querySelector('article'),article);assert.equal(article.querySelector('.haituo-local-message-translation'),translation);assert.equal(translation.textContent,'你好');assert.equal(x.calls.at(-1),'haituo:local-chat-page');
+-});
+-test('finishing a translation after leaving its chat updates the retained record without showing the wrong chat',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article');const next=changeChat(x,'999@c.us');x.ipc.invoke=async(method,chat,options)=>chat==='123@c.us'?{chat,messages:[{...entry,translations:{'zh-CN':{text:'后台完成'}}}],total:1}:{chat:'999@c.us',messages:[{...entry,id:next}],total:1,hasOlder:false};await x.view.observe([{id:next,source:'Other'}],[x.element]);await x.view.refresh(id);assert.equal(article.querySelector('.haituo-local-message-translation').textContent,'后台完成');assert.equal(article.isConnected,false);assert.equal(x.w.document.querySelector('article').dataset.messageId,next);
+-});
+-test('a targeted refresh updates an older loaded message outside the most recent 200',async t=>{
+- const values=Array.from({length:250},(_,i)=>({...entry,id:'false_123@c.us_'+i})),x=setup(t,{records:values});await x.view.observe([{id,source:'Hello'}],[x.element]);const first=x.w.document.querySelector('article'),node=first.querySelector('.haituo-local-message-translation');x.ipc.invoke=async(method,chat,options)=>{assert.deepEqual(options,{ids:[values[0].id]});return{chat,messages:[{...values[0],translations:{'zh-CN':{text:'旧消息新译文'}}}],total:250}};await x.view.refresh(values[0].id);assert.equal(node.textContent,'旧消息新译文');assert.equal(first,x.w.document.querySelector('article'));assert.equal(x.w.document.querySelectorAll('article').length,250);
+-});
+-test('prepending older pages keeps already loaded bilingual nodes and order',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const article=x.w.document.querySelector('article');x.ipc.invoke=async()=>({chat:'123@c.us',messages:[{...entry,id:'false_123@c.us_older'},entry],total:2,hasOlder:false});await x.view.observe([{id:'false_123@c.us_older',source:'Hello'},{id,source:'Hello'}],[x.element]);const nodes=[...x.w.document.querySelectorAll('article')];assert.equal(nodes[1],article);assert.equal(nodes[0].querySelector('.haituo-local-message-translation').textContent,'你好');
+-});
+-test('navigation keeps native messages hidden instead of restoring an original-only frame',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const pane=x.w.document.createElement('div');pane.id='pane-side';x.w.document.body.append(pane);pane.dispatchEvent(new x.w.Event('pointerdown',{bubbles:true}));assert.equal(x.scroller.style.opacity,'0');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex');
+-});
+-test('destroy restores native UI and removes all navigation listeners and styles',async t=>{
+- const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);x.view.destroy();assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.head.querySelector('style'),null);
+-});
+-test('official media view works before any text record exists and remains visible across DOM mutations',async t=>{const x=setup(t);x.view.setOfficial(true);x.w.document.querySelector('#main').append(x.w.document.createElement('span'));await new Promise(r=>setImmediate(r));assert.equal(x.scroller.style.opacity,'');const style=x.w.document.head.querySelector('style');assert.equal(style.media,'not all');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat button').textContent,'返回本机双语记录');x.w.document.querySelector('#haituo-local-bilingual-chat button').click();assert.equal(style.media,'all')});
+-test('official media view can be opened while navigation waits for a text-less chat',async t=>{const x=setup(t);await x.view.observe([{id,source:'Hello'}],[x.element]);const pane=x.w.document.createElement('div');pane.id='pane-side';x.w.document.body.append(pane);pane.dispatchEvent(new x.w.Event('pointerdown',{bubbles:true}));x.view.setOfficial(true);assert.equal(x.scroller.style.opacity,'');assert.equal(x.w.document.head.querySelector('style').media,'not all');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none');x.w.document.querySelector('#haituo-local-bilingual-chat button').click();assert.equal(x.w.document.head.querySelector('style').media,'all');assert.equal(x.w.document.querySelector('article').parentElement.style.display,'none')});
++test('native conversation and controls remain in place; saved translation is below its own original immediately',t=>{const x=setup(t);assert.equal(x.w.document.querySelector('[data-id]'),x.original);assert.equal(x.w.document.querySelector('footer'),x.footer);assert.equal(x.original.querySelector('.selectable-text').textContent,'Hello');assert.equal(x.original.querySelector('.haituo-wa-message-translation [data-haituo-saved-text]').textContent,'你好');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.querySelectorAll('style').length,0);assert.equal(x.original.style.opacity,'')});
++test('storage unavailable never hides, replaces or covers the native conversation',t=>{const x=setup(t,{fail:true});assert.equal(x.original.textContent,'Hello');assert.equal(x.original.style.opacity,'');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null);assert.equal(x.w.document.querySelectorAll('style').length,0)});
++test('saved translation on a recycled original is hydrated before the next frame without async IPC or network',async t=>{const x=setup(t);x.original.remove();const wrapper=x.w.document.createElement('div');wrapper.innerHTML=bubble();const node=wrapper.firstChild;x.w.document.querySelector('#scroll').append(node);await new Promise(r=>x.w.requestAnimationFrame(r));assert.equal(node.querySelector('[data-haituo-saved-text]').textContent,'你好');assert.equal(x.calls.includes('haituo:local-chat-observe'),false)});
++test('switching chats cannot inject an old message result into another conversation',async t=>{const x=setup(t),other='false_999@c.us_two';x.original.setAttribute('data-id',other);await new Promise(r=>setImmediate(r));x.data.set(id,{...record,translations:{'zh-CN':{text:'后台旧消息结果'}}});await x.view.refresh(id);assert.notEqual(x.original.querySelector('[data-haituo-saved-text]')?.textContent,'后台旧消息结果')});
++test('updating a translation keeps the original native bubble and existing translation node',async t=>{const x=setup(t),node=x.original.querySelector('.haituo-wa-message-translation');x.data.set(id,{...record,translations:{'zh-CN':{text:'更新译文'}}});await x.view.refresh(id);assert.equal(x.w.document.querySelector('[data-id]'),x.original);assert.equal(x.original.querySelector('.haituo-wa-message-translation'),node);assert.equal(node.querySelector('[data-haituo-saved-text]').textContent,'更新译文')});
++test('an edited source never displays the previous source translation',async t=>{const x=setup(t);x.original.querySelector('.selectable-text').textContent='Changed';await new Promise(r=>setImmediate(r));assert.equal(x.original.querySelector('.haituo-wa-message-translation'),null);assert.equal(x.original.textContent,'Changed')});
++test('image-only conversations remain completely native, with no loading UI or view switch',t=>{const x=setup(t,{stored:[]});x.w.document.querySelector('#scroll').innerHTML='<div data-id="false_123@c.us_photo"><img src="data:," alt="Photo"><button>Open image</button></div>';assert.equal(x.w.document.querySelectorAll('#haituo-local-bilingual-chat').length,0);assert.equal(x.w.document.querySelector('img').style.opacity,'');assert.equal(x.w.document.querySelector('footer'),x.footer)});
++test('a stored record with mismatched source or target is not attached to the bubble',t=>{const x=setup(t,{stored:[{...record,source:'Different'}]});assert.equal(x.original.querySelector('.haituo-wa-message-translation'),null)});
++test('repeated mutation scans do not duplicate an already displayed translation',async t=>{const x=setup(t);for(let i=0;i<8;i++)x.original.append(x.w.document.createElement('span'));await new Promise(r=>setImmediate(r));assert.equal(x.original.querySelectorAll('.haituo-wa-message-translation').length,1)});
++test('empty chat and unknown message IDs do not create overlays or modify existing content',t=>{const x=setup(t,{stored:[]});x.w.document.querySelector('#scroll').innerHTML='<div data-id="new-format">Visible original</div>';assert.equal(x.w.document.querySelector('#scroll').textContent,'Visible original');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null)});
++test('a storage read reporting failure also leaves all native content visible',t=>{const x=setup(t,{stored:[]});x.ipc.sendSync=()=>({ok:false,error:'locked'});assert.equal(x.original.textContent,'Hello');assert.equal(x.w.document.querySelector('#main').style.display,'')});
++test('destroying the translation observer never removes original messages or controls',t=>{const x=setup(t);x.view.destroy();assert.equal(x.original.isConnected,true);assert.equal(x.footer.isConnected,true)});
+diff --git a/scripts/native-attachments-check.cjs b/scripts/native-attachments-check.cjs
+index 3257218..49cfadc 100644
+--- a/scripts/native-attachments-check.cjs
++++ b/scripts/native-attachments-check.cjs
+@@ -4,7 +4,7 @@ const mac=process.platform==='darwin',out=path.resolve('audit-results'),profile=
+ fs.mkdirSync(out,{recursive:true});fs.mkdirSync(profile,{recursive:true});const report={platform:process.platform,checks:[],errors:[],settingsInventory:[]};
+ const app=path.resolve(mac?'macos/out/海拓-darwin-arm64/海拓.app':'windows/out/win-unpacked/海拓.exe');
+ const pause=ms=>new Promise(r=>setTimeout(r,ms));let proc,client,log;
+-let fixtureCalls=0; const fixtureServer=require("node:http").createServer((req,res)=>{req.resume();req.on("end",()=>{fixtureCalls++;res.setHeader("content-type","application/json");res.end(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"原消息下方的常驻译文"}}]}))})});
++let fixtureCalls=0,fixturePort;const fixtureAuths=[]; const fixtureServer=require("node:http").createServer((req,res)=>{req.resume();req.on("end",()=>{fixtureCalls++;fixtureAuths.push(req.headers.authorization);res.setHeader("content-type","application/json");res.end(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"原消息下方的常驻译文"}}]}))})});
+ async function attach(target){const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('websocket connection timeout')),5000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve()},{once:true});ws.addEventListener('error',reject,{once:true})});let sequence=0;const pending=new Map(),contexts=new Set();ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id){const item=pending.get(message.id);if(item){pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result)}}else if(message.method==='Runtime.executionContextCreated')contexts.add(message.params.context.id);else if(message.method==='Runtime.executionContextsCleared')contexts.clear();else if(message.method==='Runtime.exceptionThrown')report.errors.push(message.params.exceptionDetails);else if(message.method==='Log.entryAdded')report.errors.push(message.params.entry);else if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')report.errors.push({console:message.params.args.map(x=>x.value||x.description)})});return{ws,contexts,call(method,params={}){return new Promise((resolve,reject)=>{const id=++sequence,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method))},7000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}))})}}}
+ async function evaluate(expression,contextId){const r=await client.call('Runtime.evaluate',{expression,contextId,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value}
+ async function apiEvaluate(expression){for(const id of client.contexts){let available=false;try{available=await evaluate("typeof window.SignalContext?.caishengGetTranslationConfig==='function'",id)}catch{}if(available)return await evaluate(expression,id)}throw Error('TEST_BLOCKED: no initialized SignalContext in inspected execution worlds')}
+@@ -18,14 +18,15 @@ function collectStartupLogs(){
+ }
+ async function stop(){if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}await pause(700);if(!mac&&proc?.pid){cp.spawnSync('taskkill',['/PID',String(proc.pid),'/T','/F'],{timeout:10000,stdio:'ignore'})}if(mac){const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){const pid=Number(line.trim().split(/\s+/)[0]);try{process.kill(pid,'SIGTERM')}catch{}}}if(log!==undefined){fs.closeSync(log);log=undefined}}
+ async function check(id,work){try{const result=await work();report.checks.push({id,ok:true,result})}catch(e){report.checks.push({id,ok:false,error:String(e.stack||e)})}}
+-(async()=>{await new Promise(r=>fixtureServer.listen(0,"127.0.0.1",r));try{
++(async()=>{await new Promise(r=>fixtureServer.listen(0,"127.0.0.1",r));fixturePort=fixtureServer.address().port;try{
+  let initial;await check('FRESH-START',async()=>{initial=await start();if(!initial.installed||initial.loading)throw Error('Fresh launch did not reach Signal install/inbox: '+JSON.stringify(initial));return initial});
+  if(client){
+   report.bootstrap=await evaluate(`({startApp:typeof window.startApp,body:document.body.innerText.slice(-1200)})`);
+   await check('WHATSAPP-CHROMIUM-PERSISTENT-LAYOUT',async()=>{
+    const viewSource=fs.readFileSync(path.resolve('src/app/js/haituo-local-chat-view.js'),'utf8');
+    const fixture=require('./local-chat-layout-fixture.cjs').toString();
+-   return evaluate(`(async()=>{const local={exports:{}};((module)=>{${viewSource}\n})(local);return (${fixture})(local.exports.install)})()`);
++   const webSource=fs.readFileSync(path.resolve('src/app/js/caisheng-webview-preload.js'),'utf8'),positionSource=webSource.slice(webSource.indexOf('function haituoTranslationScroller('),webSource.indexOf('// Apply only to WhatsApp.'));
++   return evaluate(`(async()=>{const local={exports:{}};((module)=>{${viewSource}\n})(local);const keep=(()=>{${positionSource};return haituoKeepTranslationPosition})();return (${fixture})(local.exports.install,keep)})()`);
+   });
+   await check('SETTINGS-OPEN',async()=>{await evaluate(`document.querySelector('.CaishengPlatformShell__settingsButton')?.click()`);await pause(500);const s=await evaluate(snapshot);if(!s.settings)throw Error('settings absent');return s});
+   report.settingsInventory=await evaluate(`[...document.querySelectorAll('.CaishengPlatformShell__settings input,.CaishengPlatformShell__settings select,.CaishengPlatformShell__settings details,.CaishengPlatformShell__settings button')].map(e=>({tag:e.tagName,type:e.type,key:e.dataset.haituoSetting||e.name||'',label:e.closest('label')?.innerText?.slice(0,160)||e.innerText?.slice(0,100),options:e.tagName==='SELECT'?[...e.options].map(o=>({value:o.value,label:o.label})):undefined}))`);
+@@ -41,8 +42,22 @@ async function check(id,work){try{const result=await work();report.checks.push({
+    if(result.text!=='原消息下方的常驻译文'||!result.attached)throw Error('IPC did not persist attachment '+JSON.stringify(result));
+    return {attached:result.attached,calls:fixtureCalls};
+   });
++  await check('STALE-KEY-SAVE-REJECTED-WITHOUT-ERASING',async()=>{
++   const rejected=await apiEvaluate(`(async()=>{try{await window.SignalContext.caishengSetTranslationConfig({translationPools:{primary:[{provider:'custom',apiKey:'__HAITUO_REDACTED__:translationPools.primary.99',endpoint:'http://127.0.0.1:1/v1',model:'fixture-model'}],backup:[]}});return false}catch{return true}})()`);if(!rejected)throw Error('Stale key placeholder was accepted instead of preserving the existing key');return{rejected:true};
++  });
++  await check('API-KEY-KEEP-AFTER-SETTINGS-SAVE',async()=>{
++   await apiEvaluate(`window.SignalContext.caishengSetTranslationConfig({brandBadgeText:'KEY-PRESERVATION-CHECK'})`);
++   const present=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig().then(c=>!!c.translationPools?.primary?.[0]?.apiKey)`);if(!present)throw Error('An unrelated setting erased the saved API key');
++   await apiEvaluate(`window.SignalContext.caishengTranslate({text:'Key persistence verification',targetLanguage:'zh-CN',purpose:'chat',forceRefresh:true})`);
++   if(fixtureAuths.at(-1)!=='Bearer fixture-only')throw Error('Saved key was not restored for a subsequent API request');return{configured:true,authenticated:true};
++  });
+   await check('PERSIST-MARKER-SAVE',async()=>{await apiEvaluate(`window.SignalContext.caishengSetTranslationConfig({brandBadgeText:'AUDIT-RESTART-MARKER'})`);await pause(1500);const actual=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig().then(c=>({badge:c.brandBadgeText}))`);if(actual.badge!=='AUDIT-RESTART-MARKER')throw Error('Save immediately unreadable: '+JSON.stringify(actual));return actual});
+   try{const pic=await client.call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,'fresh-settings.png'),Buffer.from(pic.data,'base64'))}catch(e){report.screenshotError=String(e)}
+  }
+- fileEvidence('before-restart');collectStartupLogs();await new Promise(r=>fixtureServer.close(r));await stop();await check('RESTART-PERSISTENCE',async()=>{const state=await start();const cfg=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig().then(c=>({badge:c.brandBadgeText,blocked:c.blockChineseOutgoing}))`);const restored=await apiEvaluate(`window.SignalContext.caishengTranslate({text:'Persistent message fixture',messageId:'native-attachment-one',targetLanguage:'zh-CN',purpose:'chat'})`);if(restored.text!=='原消息下方的常驻译文'||!restored.attached||!restored.cached)throw Error('Offline attachment restore failed '+JSON.stringify(restored));if(cfg.badge!=='AUDIT-RESTART-MARKER')throw Error(JSON.stringify(cfg));fileEvidence('after-restart');return{state,config:cfg}});
++ fileEvidence('before-restart');collectStartupLogs();await new Promise(r=>fixtureServer.close(r));await stop();await check('RESTART-PERSISTENCE',async()=>{const state=await start();const cfg=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig().then(c=>({badge:c.brandBadgeText,blocked:c.blockChineseOutgoing,keyPresent:!!c.translationPools?.primary?.[0]?.apiKey}))`);const restored=await apiEvaluate(`window.SignalContext.caishengTranslate({text:'Persistent message fixture',messageId:'native-attachment-one',targetLanguage:'zh-CN',purpose:'chat'})`);if(restored.text!=='原消息下方的常驻译文'||!restored.attached||!restored.cached)throw Error('Offline attachment restore failed '+JSON.stringify(restored));if(!cfg.keyPresent)throw Error('Saved API key was lost after restart');if(cfg.badge!=='AUDIT-RESTART-MARKER')throw Error(JSON.stringify(cfg));fileEvidence('after-restart');return{state,config:cfg}});
++ await check('API-KEY-AUTHENTICATES-AFTER-RESTART',async()=>{
++  await new Promise(r=>fixtureServer.listen(fixturePort,'127.0.0.1',r));const before=fixtureCalls;
++  await apiEvaluate(`window.SignalContext.caishengTranslate({text:'Key verification after restart',targetLanguage:'zh-CN',purpose:'chat',forceRefresh:true})`);
++  if(fixtureCalls<=before||fixtureAuths.at(-1)!=='Bearer fixture-only')throw Error('The previously saved key did not authenticate after restart');return{authenticated:true};
++ });
+  }catch(e){report.fatal=String(e.stack||e)}finally{try{fixtureServer.close()}catch{}await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'fresh-native.json'),JSON.stringify(report,null,2));console.log('FRESH_NATIVE_SUMMARY',JSON.stringify({platform:report.platform,ok:report.ok,checks:report.checks,controls:report.settingsInventory.length,errors:report.errors,files:report.files,bootstrap:report.bootstrap,startupLogs:report.startupLogs}));process.exitCode=report.ok?0:1}})();
+diff --git a/scripts/startup-settings-sync.test.cjs b/scripts/startup-settings-sync.test.cjs
+index 64e891c..f32f9e2 100644
+--- a/scripts/startup-settings-sync.test.cjs
++++ b/scripts/startup-settings-sync.test.cjs
+@@ -58,6 +58,7 @@ const childHandlerCode = sliceFn(
+ ).trim();
+ const shortcutConfigCode = sliceBalanced('function haituoShortcutConfig');
+ const applyCode = sliceBalanced('function haituoApplyTranslationConfig');
++const secretGuardCode = sliceFn('const HaituoRedactedSecret', 'function haituoRedactTranslationConfig') + sliceBalanced('function haituoRequireResolvedSecrets');
+ const emCode = sliceFn('function em(e) {', 'function tm() {');
+ const settingsReadCode = sliceFn('function $p() {', 'function rmRefresh');
+ 
+@@ -210,7 +211,7 @@ function makeSetHandlerCtx() {
+   ctx.__handled = handled;
+   ctx.__applied = applied;
+   vm.createContext(ctx);
+-  vm.runInContext(versionCode + setHandlerCode + ';', ctx);
++  vm.runInContext(secretGuardCode + versionCode + setHandlerCode + ';', ctx);
+   return ctx;
+ }
+ 
+@@ -310,7 +311,7 @@ function makeApplyCtx() {
+   ctx.__persisted = persisted;
+   ctx.__broadcasts = broadcasts;
+   vm.createContext(ctx);
+-  vm.runInContext(versionCode + shortcutConfigCode + applyCode + emCode, ctx);
++  vm.runInContext(secretGuardCode + versionCode + shortcutConfigCode + applyCode + emCode, ctx);
+   vm.runInContext(`$u = 'signal-main';`, ctx);
+   return ctx;
+ }
+diff --git a/scripts/whatsapp-records-scanner.dom.cjs b/scripts/whatsapp-records-scanner.dom.cjs
+index 5258c45..5630e52 100644
+--- a/scripts/whatsapp-records-scanner.dom.cjs
++++ b/scripts/whatsapp-records-scanner.dom.cjs
+@@ -8,10 +8,10 @@ function setup(t,{root=true,slow=false}={}){
+  const dom=new JSDOM('<main id="main"><header><span title="Contact">Contact</span></header><div id="scroll" style="overflow-y:auto"><div class="message-in" data-id="'+id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">Hello</span></div></div></div></main>',{url:'https://web.whatsapp.com',runScripts:'outside-only',pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window;
+  Object.defineProperty(w.HTMLElement.prototype,'innerText',{get(){return this.textContent}});w.HTMLElement.prototype.getBoundingClientRect=function(){const top=this.tagName==='HEADER'?50:this.id==='main'?0:100,bottom=this.tagName==='HEADER'?100:this.id==='main'?700:400;return{x:0,y:top,left:0,top,right:600,bottom,width:600,height:bottom-top}};Object.defineProperty(w.document.querySelector('#scroll'),'clientHeight',{value:root?300:0});
+  const records=new Map([[id,{id,source:'Hello',translations:{'zh-CN':{text:'保留译文'}},metadata:'10:00'}]]),calls=[];let translationCalls=0;
+- const ipc={invoke:async(method,...args)=>{calls.push(method);if(slow)await wait(25);return{chat:'123@c.us',messages:method==='haituo:local-chat-page'&&args[1]?.ids?args[1].ids.map(k=>records.get(k)).filter(Boolean):[...records.values()],total:records.size,hasOlder:false}}};
++ const ipc={sendSync:(method,{chat,ids})=>({ok:true,page:{chat,messages:ids.map(id=>records.get(id)).filter(Boolean)}}),invoke:async(method,...args)=>{calls.push(method);if(slow)await wait(25);return{chat:'123@c.us',messages:method==='haituo:local-chat-page'&&args[1]?.ids?args[1].ids.map(k=>records.get(k)).filter(Boolean):[...records.values()],total:records.size,hasOlder:false}}};
+  const noop=()=>{};Object.assign(w,{ipcRenderer:ipc,isWhatsApp:()=>true,isTelegram:()=>false,haituoMessageTarget:()=> 'zh-CN',webTranslationActive:()=>true,incomingTranslationOn:()=>true,installWhatsAppNotificationBridge:noop,installWhatsAppUnreadObserver:noop,refreshSettings:async()=>{},findComposer:()=>null,syncPanel:noop,hidePanels:noop,applyWhatsAppMessageAppearance:noop,voiceProcessed:new WeakSet(),getVoiceMessageMount:e=>e,translateMessage:async()=>{translationCalls++;return '保留译文'},formatMessageParagraphs:(_s,r)=>r,translationAction:()=>w.document.createElement('button'),copyTranslationText:noop,toast:noop,haituoKeepTranslationPosition:(_n,fn)=>fn(),backTranslationComposer:null});w.eval(scanner+';haituoInstallMessageScanner();');return{w,records,calls,count:()=>translationCalls};
+ }
+-test('real WhatsApp scanner selects persistent message rendering and never appends a legacy translation',async t=>{const x=setup(t);await wait(100);assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat article .haituo-local-message-translation')?.textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);assert.equal(x.count(),1)});
+-test('native WhatsApp DOM recycling cannot remove or recreate its saved bilingual node',async t=>{const x=setup(t);await wait(100);const article=x.w.document.querySelector('article');x.w.document.querySelector('#scroll').innerHTML='<div class="message-in" data-id="'+id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">Hello</span></div></div>';await wait(180);assert.equal(x.w.document.querySelector('article'),article);assert.equal(article.querySelector('.haituo-local-message-translation').textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0)});
+-test('missing native scroller uses the local conversation viewport, never the old attachment fallback',async t=>{const x=setup(t,{root:false});await wait(100);assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);assert.equal(x.w.document.querySelector('article .haituo-local-message-translation')?.textContent,'保留译文');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat').style.display,'flex')});
+-test('slow local storage never exposes an original-only native chat',async t=>{const x=setup(t,{slow:true});await wait(5);assert.equal(x.w.document.querySelector('#scroll').style.opacity,'0');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,0);await wait(140);assert.equal(x.w.document.querySelector('article .haituo-local-message-translation').textContent,'保留译文')});
++test('WhatsApp scanner keeps the original conversation and displays saved text below its native message',async t=>{const x=setup(t);await wait(100);assert.equal(x.w.document.querySelector('#main [data-id] .haituo-wa-message-translation [data-haituo-saved-text]')?.textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,1);assert.equal(x.count(),1)});
++test('native WhatsApp DOM recycling shows the saved translation in the next native bubble',async t=>{const x=setup(t);await wait(100);const article=x.w.document.querySelector('#main [data-id]');x.w.document.querySelector('#scroll').innerHTML='<div class="message-in" data-id="'+id+'"><div data-pre-plain-text="10:00"><span class="selectable-text">Hello</span></div></div>';await wait(180);assert.notEqual(x.w.document.querySelector('#main [data-id]'),article);assert.equal(x.w.document.querySelector('#main [data-id] [data-haituo-saved-text]').textContent,'保留译文');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,1)});
++test('missing native scroller cannot create a replacement conversation viewport',async t=>{const x=setup(t,{root:false});await wait(100);assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,1);assert.equal(x.w.document.querySelector('#main [data-id] [data-haituo-saved-text]')?.textContent,'保留译文');assert.equal(x.w.document.querySelector('#haituo-local-bilingual-chat'),null)});
++test('slow storage never hides or covers the native chat',async t=>{const x=setup(t,{slow:true});await wait(5);assert.equal(x.w.document.querySelector('#scroll').style.opacity,'');assert.equal(x.w.document.querySelectorAll('.haituo-wa-message-translation').length,1);await wait(140);assert.equal(x.w.document.querySelector('#main [data-id] [data-haituo-saved-text]').textContent,'保留译文')});
+diff --git a/src/app/bundles/main.js b/src/app/bundles/main.js
+index 959643b..4dcaf6b 100644
+--- a/src/app/bundles/main.js
++++ b/src/app/bundles/main.js
+@@ -25956,6 +25956,7 @@ function tm() {
+         return true;
+     }), p.ipcMain.removeHandler(`caisheng:set-translation-config`), p.ipcMain.handle(`caisheng:set-translation-config`, async (e, t) => (Jp(e.senderFrame?.url ?? ``), (() => {
+         const patch = haituoUnredactConfigPatch(t);
++        haituoRequireResolvedSecrets(t,patch);
+         if (typeof patch.__v == `number` && patch.__v < HaituoConfigVersion) throw Error(`设置已被其他窗口更新，请重试`);
+         return haituoApplyTranslationConfig({ ...$p(), ...patch, ...(typeof t?.darkTheme === `boolean` && !t?.nativeTheme ? {nativeTheme:t.darkTheme ? `dark` : `light`} : {}) });
+     })())), p.ipcMain.removeHandler(`caisheng:get-translation-config`), p.ipcMain.handle(`caisheng:get-translation-config`, e => (Jp(e.senderFrame?.url ?? ``), 
+@@ -25970,6 +25971,9 @@ function tm() {
+         Jp(e.senderFrame?.url ?? ``);
+         let t = $p().refreshShortcut ?? $p().shortcut;
+         return typeof t == `string` ? t : `ctrl-r`;
++    }), p.ipcMain.removeAllListeners(`haituo:local-chat-read`), p.ipcMain.on(`haituo:local-chat-read`,(event,request)=>{
++        try{event.returnValue={ok:!0,page:haituoLocalChatStore().page(haituoLocalChatAccount(event),request?.chat,{ids:request?.ids})}}
++        catch(error){event.returnValue={ok:!1,error:`本机译文读取失败，原对话保持可用`}}
+     }), p.ipcMain.removeHandler(`haituo:local-chat-observe`), p.ipcMain.handle(`haituo:local-chat-observe`,(event,items)=>haituoLocalChatStore().observe(haituoLocalChatAccount(event),items)),
+     p.ipcMain.removeHandler(`haituo:local-chat-page`), p.ipcMain.handle(`haituo:local-chat-page`,(event,chat,options)=>haituoLocalChatStore().page(haituoLocalChatAccount(event),chat,options)),
+     p.ipcMain.removeHandler(`caisheng:translate`), p.ipcMain.handle(`caisheng:translate`, async (e, t) => {
+@@ -28283,8 +28287,19 @@ function haituoShortcutConfig(source) {
+         screenshotCopyShortcut: String(source?.screenshotCopyShortcut || 'CommandOrControl+Alt+S').trim()
+     };
+ }
++function haituoRequireResolvedSecrets(incoming, clean) {
++    const masked=value=>typeof value===`string`&&value.startsWith(HaituoRedactedSecret);
++    const valid=value=>typeof value===`string`&&!!value.trim()&&!masked(value);
++    const reject=()=>{throw Error(`已保存的密钥占位信息已过期，本次设置未保存；请重新打开设置后再试，原配置已保留`)};
++    for(const field of HaituoSecretConfigFields)if(masked(incoming?.[field])&&!valid(clean?.[field]))reject();
++    const check=(before,after,field)=>{if(!Array.isArray(before))return;const hasMask=before.some(item=>masked(field?item?.[field]:item));if(hasMask&&(!Array.isArray(after)||before.length!==after.length))reject();before.forEach((item,index)=>{if(masked(field?item?.[field]:item)&&!valid(field?after?.[index]?.[field]:after?.[index]))reject()})};
++    check(incoming?.openaiApiKeys,clean?.openaiApiKeys,null);
++    for(const field of [`openaiApiProfiles`,`screenshotApiPool`])check(incoming?.[field],clean?.[field],`apiKey`);
++    for(const group of [`primary`,`backup`])check(incoming?.translationPools?.[group],clean?.translationPools?.[group],`apiKey`);
++}
+ function haituoApplyTranslationConfig(t) {
+-    t = haituoUnredactConfigPatch(t);
++    const cleaned=haituoUnredactConfigPatch(t);haituoRequireResolvedSecrets(t,cleaned);
++    t = { ...$p(), ...cleaned };
+     if ($u !== `signal-main` && process.connected) return haituoRequestGlobalSettings(t);
+     if (haituoScreenshotController) {
+         // Re-registering on every save made an occupied screenshot shortcut
+diff --git a/src/app/js/caisheng-webview-preload.js b/src/app/js/caisheng-webview-preload.js
+index cf1b54f..a353431 100644
+--- a/src/app/js/caisheng-webview-preload.js
++++ b/src/app/js/caisheng-webview-preload.js
+@@ -1607,120 +1607,67 @@ function haituoCurrentWebMessage(item) {
+     return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId;
+ }
+ function haituoLocalChatConversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
+-function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate}){
+- const sessions=new Map,hiddenRoots=new Map;
+- let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false,officialOverride=false;
+- const root=document.createElement('section');root.id='haituo-local-bilingual-chat';root.setAttribute('aria-label','海拓本机双语聊天记录');
+- Object.assign(root.style,{position:'fixed',zIndex:'1000',display:'none',boxSizing:'border-box',background:'var(--conversation-panel-background,#efeae2)',color:'var(--primary,#111b21)',overflow:'hidden',flexDirection:'column'});
+- const bar=document.createElement('div'),toggle=document.createElement('button'),label=document.createElement('span'),status=document.createElement('div');
+- Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
+- label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
+- Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
+- const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{opacity:0!important}';
+- // Until a complete local page is available, never reveal an original-only
+- // WhatsApp frame. Opacity preserves innerText/layout for the native scanner;
+- // visibility:hidden would make Chromium return empty message text.
+- // This stylesheet also covers replacement native DOM roots.
+- (document.head||document.documentElement).append(privacy);
+- bar.append(label,toggle);root.append(bar,status);document.body.append(root);
+- function state(chat){if(!sessions.has(chat)){
+-  const list=document.createElement('div');Object.assign(list.style,{flex:'1',overflowY:'auto',padding:'10px 16px',minHeight:'0',overflowAnchor:'none'});
+-  const value={chat,list,records:new Map,nodes:new Map,ordered:[],older:false,total:0,ready:false,official:false,scrollTop:0,signature:'',serial:Promise.resolve(),loading:false,error:''};
+-  list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
+-  sessions.set(chat,value);
+- }return sessions.get(chat)}
+- function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.opacity);node.style.opacity='0'}
+- function restoreNative(){for(const [node,opacity] of hiddenRoots)node.style.opacity=opacity;hiddenRoots.clear()}
+- function bounds(){
+-  if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
+-  const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
+-  const top=header?.bottom>r.top?header.bottom:r.top,bottom=footer?.top>top?Math.min(footer.top,r.bottom):r.bottom;return{left:r.left,top,width:r.width,height:Math.max(0,bottom-top)};
++function haituoInstallLocalChatView({document,window,ipc,targetFor,retranslate,keepPosition=(_node,work)=>work(),copyText}){
++ // The native WhatsApp conversation is the only conversation UI. No cover,
++ // replacement list, loading surface, style mask or alternate-view switch.
++ const records=new Map,checked=new Map;let destroyed=false;
++ const quote='[data-testid*="quoted" i],[data-testid="quote"],[aria-label*="Quoted" i],[aria-label*="引用"]';
++ const textSelector='.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
++ function read(node){
++  const id=node?.getAttribute?.('data-id');if(!haituoLocalChatConversation(id))return null;
++  const candidates=[...(node.matches(textSelector)?[node]:[]),...node.querySelectorAll(textSelector)].filter(n=>!n.closest('.haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error')&&!n.closest(quote));
++  const roots=candidates.filter(n=>!candidates.some(p=>p!==n&&p.contains(n)));
++  const source=roots.map(n=>{if(!n.querySelector(quote))return(n.innerText||n.textContent||'').trim();const copy=n.cloneNode(true);copy.querySelectorAll(quote).forEach(q=>q.remove());return(copy.textContent||'').trim()}).filter(Boolean).join('\n\n').trim();
++  if(!source)return null;return{id,source,roots,node};
+  }
+- function position(){
+-  if(destroyed)return;
+-  const official=officialOverride||!!current?.official&&!waiting;privacy.media=official?'not all':'all';
+-  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+-  if(official)restoreNative();else hideNative(nativeRoot);
+-  const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
+-  if(current)current.list.style.display=!official&&!waiting&&current.ready?'block':'none';
+-  status.style.display=official&&!current?.error?'none':'block';
+-  status.textContent=current?.error||(waiting||!current?.ready?'正在读取本机双语记录…':`已保存 ${current.total} 条本机记录；图片、语音请切换官方视图。`);
++ function candidates(root){const set=new Set;if(root?.nodeType===1){const closest=root.closest('[data-id]');if(closest)set.add(closest);if(root.matches('[data-id]'))set.add(root)}for(const node of root?.querySelectorAll?.('[data-id]')||[])set.add(node);return[...set].filter(n=>n.closest('#main')&&!n.closest('.haituo-wa-message-translation'))}
++ function mountFor(item){let mount=item.roots.at(-1)?.closest('[data-pre-plain-text]')||item.roots.at(-1)?.parentElement;while(mount&&mount!==item.node&&!item.roots.every(n=>mount.contains(n)))mount=mount.parentElement;return mount&&item.node.contains(mount)?mount:null}
++ function render(item){
++  if(destroyed||!item.node.isConnected)return;
++  const record=records.get(item.id),target=targetFor(item.source),value=record?.source===item.source?record.translations?.[target]?.text:'';
++  const existing=item.node.querySelector('.haituo-wa-message-translation');
++  if(!value){if(existing?.dataset.haituoOwned==='record'&&(existing.dataset.messageId!==item.id||existing.dataset.source!==item.source||existing.dataset.target!==target))keepPosition(item.node,()=>existing.remove());return;}
++  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)keepPosition(item.node,()=>{text.textContent=value});return;}
++  const mount=mountFor(item);if(!mount)return;
++  keepPosition(item.node,()=>{
++   existing?.remove();
++   const result=document.createElement('div'),text=document.createElement('span'),actions=document.createElement('span');
++   result.className='haituo-wa-message-translation';result.dataset.haituoOwned='record';result.dataset.source=item.source;result.dataset.target=target;result.dataset.messageId=item.id;
++   Object.assign(result.style,{display:'block',clear:'both',borderTop:'1px solid #8886',marginTop:'6px',paddingTop:'6px',fontSize:'13px',lineHeight:'1.35',whiteSpace:'pre-wrap',overflowWrap:'anywhere',userSelect:'text',overflowAnchor:'none'});
++   text.dataset.haituoSavedText='true';text.textContent=value;Object.assign(text.style,{display:'block',whiteSpace:'pre-wrap'});Object.assign(actions.style,{display:'flex',gap:'7px',marginTop:'5px',width:'max-content'});
++   for(const [label,title,work] of [['📄','复制原文',()=>copyText?.(item.source,'原文')],['🌐','复制译文',()=>copyText?.(text.textContent,'译文')],['✨','重新直译',async()=>{await retranslate(item.source,item.id);await refresh(item.id)}]]){
++    const button=document.createElement('button');button.type='button';button.textContent=label;button.title=title;Object.assign(button.style,{background:'transparent',border:'0',color:'inherit',cursor:'pointer',padding:'0 3px'});button.onclick=async event=>{event.preventDefault();event.stopPropagation();button.disabled=true;try{await work()}catch(error){showError(error.message,item.id)}finally{button.disabled=false}};actions.append(button);
++   }
++   result.append(text,actions);mount.append(result);
++  });
+  }
+- function activate(value){
+-  if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
+-  position();
+- }
+- function setOfficial(value){officialOverride=!!value;if(current&&!waiting)current.official=!!value;position()}
+- toggle.onclick=()=>setOfficial(!(officialOverride||!!current?.official&&!waiting));
+- function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
+- function updateNode(value,record){
+-  const target=targetFor(record.source),translation=record.translations?.[target]?.text||'';let node=value.nodes.get(record.id);
+-  if(!node){
+-   node=document.createElement('article');node.dataset.messageId=record.id;
+-   Object.assign(node.style,{padding:'9px 12px',borderRadius:'8px',margin:'8px 0',whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxWidth:'85%',width:'fit-content',background:record.outgoing?'var(--outgoing-background,#d9fdd3)':'var(--incoming-background,#fff)',marginLeft:record.outgoing?'auto':'0'});
+-   const source=document.createElement('div'),result=document.createElement('div'),meta=document.createElement('small'),retry=document.createElement('button');
+-   result.className='haituo-local-message-translation';Object.assign(result.style,{borderTop:'1px solid currentColor',marginTop:'7px',paddingTop:'7px'});
+-   retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{const latest=value.records.get(record.id);await retranslate(latest.source,record.id);await refresh(record.id)}catch(error){value.error=error.message;position()}finally{retry.disabled=false}};
+-   node.append(source,result,meta,retry);node.__parts={source,result,meta,retry};value.nodes.set(record.id,node);
+-  }
+-  const {source,result,meta,retry}=node.__parts;
+-  if(source.textContent!==record.source)source.textContent=record.source;
+-  if(result.textContent!==(translation||'等待翻译'))result.textContent=translation||'等待翻译';
+-  result.style.opacity=translation?'1':'.6';meta.textContent=record.metadata||'';retry.textContent=translation?'重译':'翻译/重试';
+-  return node;
+- }
+- function apply(value,page,{prepend=false,targeted=false}={}){
+-  if(destroyed||page.chat!==value.chat)return;
+-  const anchor=anchorOf(value),anchorTop=anchor.node?.getBoundingClientRect().top,first=!value.ready;
+-  for(const record of page.messages)value.records.set(record.id,record);
+-  // Existing nodes and ordering remain owned by their chat. A page refresh
+-  // updates text in place, never clears or remounts the conversation.
+-  const ids=page.messages.map(r=>r.id);
+-  for(let i=0;i<ids.length;i++)if(!value.ordered.includes(ids[i])){
+-   const following=ids.slice(i+1).find(id=>value.ordered.includes(id));
+-   const preceding=ids.slice(0,i).reverse().find(id=>value.ordered.includes(id));
+-   if(following)value.ordered.splice(value.ordered.indexOf(following),0,ids[i]);
+-   else if(preceding)value.ordered.splice(value.ordered.indexOf(preceding)+1,0,ids[i]);
+-   else if(prepend)value.ordered.unshift(ids[i]);else value.ordered.push(ids[i]);
+-  }
+-  for(const id of ids)updateNode(value,value.records.get(id));
+-  let previous=null;for(const id of value.ordered){const node=value.nodes.get(id);if(!node)continue;if(previous?previous.nextSibling!==node:value.list.firstChild!==node)value.list.insertBefore(node,previous?previous.nextSibling:value.list.firstChild);previous=node;}
+-  if(!targeted){if(first||prepend)value.older=page.hasOlder;value.total=page.total;}value.ready=true;value.error='';
+-  if(current===value&&!waiting){position();if(first||anchor.bottom)value.list.scrollTop=Math.max(0,value.list.scrollHeight-value.list.clientHeight);else if(anchor.node?.isConnected)value.list.scrollTop=anchor.top+anchor.node.getBoundingClientRect().top-anchorTop;else value.list.scrollTop=anchor.top;value.scrollTop=value.list.scrollTop;}
+- }
+- function enqueue(value,work){const task=value.serial.catch(()=>{}).then(work);value.serial=task;return task}
+- function header(){const node=document.querySelector('#main header');return node?.querySelector('[data-testid=conversation-info-header-chat-title]')?.textContent||node?.querySelector('[title]')?.getAttribute('title')||''}
+- function selectRoot(elements,chat){
+-  const candidate=elements.find(n=>haituoLocalChatConversation(n.getAttribute('data-id')||n.closest('[data-id]')?.getAttribute('data-id'))===chat);
+-  if(candidate)for(let node=candidate.parentElement;node&&node.id!=='main';node=node.parentElement){if(/^(auto|scroll)$/.test(window.getComputedStyle(node).overflowY)&&node.clientHeight>0){if(nativeRoot!==node){if(nativeRoot)resize.unobserve?.(nativeRoot);nativeRoot=node;resize.observe(node)}break;}}
++ function readSaved(items,force=false){
++  const groups=new Map;
++  for(const item of items){const cached=records.get(item.id);if(!force&&cached?.source===item.source&&cached.translations?.[targetFor(item.source)]?.text)continue;if(!force&&checked.get(item.id)===item.source)continue;const chat=haituoLocalChatConversation(item.id);if(!groups.has(chat))groups.set(chat,[]);groups.get(chat).push(item);}
++  for(const [chat,values] of groups)for(let start=0;start<values.length;start+=100){const batch=values.slice(start,start+100);try{
++   const response=ipc.sendSync('haituo:local-chat-read',{chat,ids:batch.map(x=>x.id)});
++   if(!response?.ok)continue;for(const record of response.page?.messages||[])if(haituoLocalChatConversation(record.id)===chat)records.set(record.id,record);for(const item of batch)checked.set(item.id,item.source);
++  }catch{/* Storage problems must never hide or replace the native chat. */}}
+  }
++ function hydrate(root){const items=candidates(root).map(read).filter(Boolean);readSaved(items);for(const item of items)render(item)}
+  async function observe(items,elements){
+-  if(destroyed||!items.length)return;const chat=haituoLocalChatConversation(items[0].id);if(!chat||items.some(item=>haituoLocalChatConversation(item.id)!==chat))return;
+-  const title=header();
+-  if(!waiting&&lastHeader&&title!==lastHeader&&chat===current?.chat){if(current?.list.style.display!=='none')current.scrollTop=current.list.scrollTop;waiting=true;previousChat=chat;navigationAt=Date.now();position();return;}
+-  if(waiting&&chat===previousChat){if(title!==lastHeader||Date.now()-navigationAt<1200){position();return;}}
+-  waiting=false;lastHeader=title;previousChat=null;const value=state(chat);selectRoot(elements,chat);activate(value);
+-  const signature=JSON.stringify([items,items.map(item=>targetFor(item.source))]);
+-  if(signature===value.signature){position();return;}
+-  return enqueue(value,async()=>{try{const page=await ipc.invoke('haituo:local-chat-observe',items);if(destroyed)return;value.signature=signature;apply(value,page)}catch(error){value.error=error.message;if(current===value){value.official=true;position()}throw error}});
+- }
+- async function refresh(messageId){
+-  const chat=messageId?haituoLocalChatConversation(messageId):current?.chat,value=sessions.get(chat);if(!value||destroyed)return;
+-  return enqueue(value,async()=>{const options=messageId?{ids:[messageId]}:undefined;const page=await ipc.invoke('haituo:local-chat-page',chat,options);apply(value,page,{targeted:!!messageId})});
++  if(destroyed||!items.length)return;
++  const page=await ipc.invoke('haituo:local-chat-observe',items);
++  if(destroyed)return;for(const record of page.messages||[])records.set(record.id,record);
++  // The returned page is only the last 200; use indexed ID reads for older
++  // bubbles currently materialized by WhatsApp's own virtualizer.
++  const visible=elements.map(read).filter(Boolean);readSaved(visible,true);for(const item of visible)render(item);
+  }
+- async function loadOlder(value){
+-  if(value.loading||!value.ready)return;value.loading=true;
+-  try{if(value.older){await enqueue(value,async()=>{const page=await ipc.invoke('haituo:local-chat-page',value.chat,{before:value.ordered[0],limit:200});apply(value,page,{prepend:true})})}else if(nativeRoot&&current===value){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight)}}catch(error){value.error=error.message;position()}finally{value.loading=false}
++ async function refresh(id){
++  if(destroyed||!haituoLocalChatConversation(id))return;const response=ipc.sendSync('haituo:local-chat-read',{chat:haituoLocalChatConversation(id),ids:[id]});
++  if(!response?.ok)throw Error(response?.error||'无法读取本机译文');
++  for(const record of response.page.messages||[])records.set(record.id,record);
++  for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node);if(item)render(item)}
+  }
+- const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
+- function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;officialOverride=false;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
+- document.addEventListener('pointerdown',navigate,true);
+- // Cover first load and keyboard navigation in the same mutation microtask,
+- // before the browser paints newly created native original-only messages.
+- const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;officialOverride=false;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
+- observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
+- return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
++ function showError(message,id){if(!id)return;for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node),mount=item&&mountFor(item);if(!mount)continue;let error=node.querySelector('.haituo-wa-translation-error');if(!error){error=document.createElement('button');error.className='haituo-wa-translation-error';error.type='button';error.onclick=async()=>{try{await retranslate(item.source,id);await refresh(id);error.remove()}catch(next){error.title=next.message}};mount.append(error)}error.textContent='翻译失败 · 点击重试';error.title=String(message||'翻译暂时不可用')}}
++ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}for(const root of roots)hydrate(root)});
++ observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id']});hydrate(document.querySelector('#main'));
++ return{observe,refresh,showError,isActive:()=>!destroyed,isManaged:()=>!destroyed,destroy(){destroyed=true;observer.disconnect();records.clear();checked.clear()}};
+ }
+ 
+ 
+@@ -1733,7 +1680,7 @@ function haituoInstallMessageScanner() {
+     if (window.__haituoMessageScannerInstalled) return;
+     window.__haituoMessageScannerInstalled = true;
+     let e;
+-    if(isWhatsApp()) haituoLocalBilingualView ||= haituoInstallLocalChatView({document,window,ipc:ipcRenderer,targetFor:haituoMessageTarget,retranslate:(text,id)=>translateMessage(text,true,id)});
++    if(isWhatsApp()) haituoLocalBilingualView ||= haituoInstallLocalChatView({document,window,ipc:ipcRenderer,targetFor:haituoMessageTarget,keepPosition:haituoKeepTranslationPosition,copyText:copyTranslationText,retranslate:(text,id)=>translateMessage(text,true,id)});
+     installWhatsAppNotificationBridge(), installWhatsAppUnreadObserver();
+     refreshSettings().then(() => {
+         const e = findComposer();
+@@ -1853,7 +1800,7 @@ function haituoInstallMessageScanner() {
+         }
+         if(haituoLocalBilingualView && localRecords.length) await haituoLocalBilingualView.observe(localRecords,visibleMessages);
+         const applyTranslation = item => {
+-        if(isWhatsApp() && haituoLocalBilingualView){if(item.error)haituoLocalBilingualView.showError(item.error);else haituoLocalBilingualView.refresh(item.messageId).catch(error=>toast(error.message,!0));return;}
++        if(isWhatsApp() && haituoLocalBilingualView && haituoLocalChatConversation(item.messageId)){if(item.error)haituoLocalBilingualView.showError(item.error,item.messageId);else haituoLocalBilingualView.refresh(item.messageId).catch(error=>toast(error.message,!0));return;}
+         haituoKeepTranslationPosition(item.e, () => {
+             if (!webTranslationActive()) return;
+             const { e, t, n, r, mount } = item;
+diff --git a/src/app/js/haituo-local-chat-view.js b/src/app/js/haituo-local-chat-view.js
+index e5cff86..e44a516 100644
+--- a/src/app/js/haituo-local-chat-view.js
++++ b/src/app/js/haituo-local-chat-view.js
+@@ -1,118 +1,65 @@
+ 'use strict';
+ function conversation(id){return typeof id==='string'&&id.length<=1024?id.match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|g\.us|lid))_/u)?.[1]||null:null}
+-function install({document,window,ipc,targetFor,retranslate}){
+- const sessions=new Map,hiddenRoots=new Map;
+- let current=null,nativeRoot=null,waiting=false,lastHeader='',previousChat=null,navigationAt=0,destroyed=false,officialOverride=false;
+- const root=document.createElement('section');root.id='haituo-local-bilingual-chat';root.setAttribute('aria-label','海拓本机双语聊天记录');
+- Object.assign(root.style,{position:'fixed',zIndex:'1000',display:'none',boxSizing:'border-box',background:'var(--conversation-panel-background,#efeae2)',color:'var(--primary,#111b21)',overflow:'hidden',flexDirection:'column'});
+- const bar=document.createElement('div'),toggle=document.createElement('button'),label=document.createElement('span'),status=document.createElement('div');
+- Object.assign(bar.style,{display:'flex',alignItems:'center',gap:'12px',padding:'7px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0',pointerEvents:'auto'});
+- label.textContent='本机双语记录';toggle.type='button';toggle.textContent='图片、语音等操作：官方视图';
+- Object.assign(status.style,{fontSize:'12px',padding:'5px 12px',background:'var(--panel-header-background,#f0f2f5)',flexShrink:'0'});
+- const privacy=document.createElement('style');privacy.textContent='#main [data-id^="false_"],#main [data-id^="true_"]{opacity:0!important}';
+- // Until a complete local page is available, never reveal an original-only
+- // WhatsApp frame. Opacity preserves innerText/layout for the native scanner;
+- // visibility:hidden would make Chromium return empty message text.
+- // This stylesheet also covers replacement native DOM roots.
+- (document.head||document.documentElement).append(privacy);
+- bar.append(label,toggle);root.append(bar,status);document.body.append(root);
+- function state(chat){if(!sessions.has(chat)){
+-  const list=document.createElement('div');Object.assign(list.style,{flex:'1',overflowY:'auto',padding:'10px 16px',minHeight:'0',overflowAnchor:'none'});
+-  const value={chat,list,records:new Map,nodes:new Map,ordered:[],older:false,total:0,ready:false,official:false,scrollTop:0,signature:'',serial:Promise.resolve(),loading:false,error:''};
+-  list.addEventListener('scroll',()=>{value.scrollTop=list.scrollTop;if(current===value&&!waiting&&list.scrollTop<=60)loadOlder(value)});
+-  sessions.set(chat,value);
+- }return sessions.get(chat)}
+- function hideNative(node){if(!node)return;if(!hiddenRoots.has(node))hiddenRoots.set(node,node.style.opacity);node.style.opacity='0'}
+- function restoreNative(){for(const [node,opacity] of hiddenRoots)node.style.opacity=opacity;hiddenRoots.clear()}
+- function bounds(){
+-  if(nativeRoot?.isConnected)return nativeRoot.getBoundingClientRect();
+-  const main=document.querySelector('#main');if(!main)return null;const r=main.getBoundingClientRect(),header=main.querySelector('header')?.getBoundingClientRect(),footer=main.querySelector('footer')?.getBoundingClientRect();
+-  const top=header?.bottom>r.top?header.bottom:r.top,bottom=footer?.top>top?Math.min(footer.top,r.bottom):r.bottom;return{left:r.left,top,width:r.width,height:Math.max(0,bottom-top)};
++function install({document,window,ipc,targetFor,retranslate,keepPosition=(_node,work)=>work(),copyText}){
++ // The native WhatsApp conversation is the only conversation UI. No cover,
++ // replacement list, loading surface, style mask or alternate-view switch.
++ const records=new Map,checked=new Map;let destroyed=false;
++ const quote='[data-testid*="quoted" i],[data-testid="quote"],[aria-label*="Quoted" i],[aria-label*="引用"]';
++ const textSelector='.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
++ function read(node){
++  const id=node?.getAttribute?.('data-id');if(!conversation(id))return null;
++  const candidates=[...(node.matches(textSelector)?[node]:[]),...node.querySelectorAll(textSelector)].filter(n=>!n.closest('.haituo-wa-message-translation,.haituo-voice-result,.haituo-wa-translation-error')&&!n.closest(quote));
++  const roots=candidates.filter(n=>!candidates.some(p=>p!==n&&p.contains(n)));
++  const source=roots.map(n=>{if(!n.querySelector(quote))return(n.innerText||n.textContent||'').trim();const copy=n.cloneNode(true);copy.querySelectorAll(quote).forEach(q=>q.remove());return(copy.textContent||'').trim()}).filter(Boolean).join('\n\n').trim();
++  if(!source)return null;return{id,source,roots,node};
+  }
+- function position(){
+-  if(destroyed)return;
+-  const official=officialOverride||!!current?.official&&!waiting;privacy.media=official?'not all':'all';
+-  toggle.textContent=official?'返回本机双语记录':'图片、语音等操作：官方视图';
+-  if(official)restoreNative();else hideNative(nativeRoot);
+-  const r=bounds();if(!r||r.width<=0||r.height<=0){root.style.display='none';return;}
+-  Object.assign(root.style,{display:'flex',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',background:official?'transparent':'var(--conversation-panel-background,#efeae2)',pointerEvents:official?'none':'auto'});
+-  if(current)current.list.style.display=!official&&!waiting&&current.ready?'block':'none';
+-  status.style.display=official&&!current?.error?'none':'block';
+-  status.textContent=current?.error||(waiting||!current?.ready?'正在读取本机双语记录…':`已保存 ${current.total} 条本机记录；图片、语音请切换官方视图。`);
++ function candidates(root){const set=new Set;if(root?.nodeType===1){const closest=root.closest('[data-id]');if(closest)set.add(closest);if(root.matches('[data-id]'))set.add(root)}for(const node of root?.querySelectorAll?.('[data-id]')||[])set.add(node);return[...set].filter(n=>n.closest('#main')&&!n.closest('.haituo-wa-message-translation'))}
++ function mountFor(item){let mount=item.roots.at(-1)?.closest('[data-pre-plain-text]')||item.roots.at(-1)?.parentElement;while(mount&&mount!==item.node&&!item.roots.every(n=>mount.contains(n)))mount=mount.parentElement;return mount&&item.node.contains(mount)?mount:null}
++ function render(item){
++  if(destroyed||!item.node.isConnected)return;
++  const record=records.get(item.id),target=targetFor(item.source),value=record?.source===item.source?record.translations?.[target]?.text:'';
++  const existing=item.node.querySelector('.haituo-wa-message-translation');
++  if(!value){if(existing?.dataset.haituoOwned==='record'&&(existing.dataset.messageId!==item.id||existing.dataset.source!==item.source||existing.dataset.target!==target))keepPosition(item.node,()=>existing.remove());return;}
++  if(existing?.dataset.haituoOwned==='record'&&existing.dataset.source===item.source&&existing.dataset.target===target){const text=existing.querySelector('[data-haituo-saved-text]');if(text&&text.textContent!==value)keepPosition(item.node,()=>{text.textContent=value});return;}
++  const mount=mountFor(item);if(!mount)return;
++  keepPosition(item.node,()=>{
++   existing?.remove();
++   const result=document.createElement('div'),text=document.createElement('span'),actions=document.createElement('span');
++   result.className='haituo-wa-message-translation';result.dataset.haituoOwned='record';result.dataset.source=item.source;result.dataset.target=target;result.dataset.messageId=item.id;
++   Object.assign(result.style,{display:'block',clear:'both',borderTop:'1px solid #8886',marginTop:'6px',paddingTop:'6px',fontSize:'13px',lineHeight:'1.35',whiteSpace:'pre-wrap',overflowWrap:'anywhere',userSelect:'text',overflowAnchor:'none'});
++   text.dataset.haituoSavedText='true';text.textContent=value;Object.assign(text.style,{display:'block',whiteSpace:'pre-wrap'});Object.assign(actions.style,{display:'flex',gap:'7px',marginTop:'5px',width:'max-content'});
++   for(const [label,title,work] of [['📄','复制原文',()=>copyText?.(item.source,'原文')],['🌐','复制译文',()=>copyText?.(text.textContent,'译文')],['✨','重新直译',async()=>{await retranslate(item.source,item.id);await refresh(item.id)}]]){
++    const button=document.createElement('button');button.type='button';button.textContent=label;button.title=title;Object.assign(button.style,{background:'transparent',border:'0',color:'inherit',cursor:'pointer',padding:'0 3px'});button.onclick=async event=>{event.preventDefault();event.stopPropagation();button.disabled=true;try{await work()}catch(error){showError(error.message,item.id)}finally{button.disabled=false}};actions.append(button);
++   }
++   result.append(text,actions);mount.append(result);
++  });
+  }
+- function activate(value){
+-  if(current!==value){if(current){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;current.list.remove()}current=value;root.insertBefore(value.list,status);position();value.list.scrollTop=value.scrollTop;}
+-  position();
+- }
+- function setOfficial(value){officialOverride=!!value;if(current&&!waiting)current.official=!!value;position()}
+- toggle.onclick=()=>setOfficial(!(officialOverride||!!current?.official&&!waiting));
+- function anchorOf(value){const list=value.list,rect=list.getBoundingClientRect();return{bottom:list.scrollHeight-list.scrollTop-list.clientHeight<=32,top:list.scrollTop,node:[...list.children].find(n=>n.getBoundingClientRect().bottom>rect.top)}}
+- function updateNode(value,record){
+-  const target=targetFor(record.source),translation=record.translations?.[target]?.text||'';let node=value.nodes.get(record.id);
+-  if(!node){
+-   node=document.createElement('article');node.dataset.messageId=record.id;
+-   Object.assign(node.style,{padding:'9px 12px',borderRadius:'8px',margin:'8px 0',whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxWidth:'85%',width:'fit-content',background:record.outgoing?'var(--outgoing-background,#d9fdd3)':'var(--incoming-background,#fff)',marginLeft:record.outgoing?'auto':'0'});
+-   const source=document.createElement('div'),result=document.createElement('div'),meta=document.createElement('small'),retry=document.createElement('button');
+-   result.className='haituo-local-message-translation';Object.assign(result.style,{borderTop:'1px solid currentColor',marginTop:'7px',paddingTop:'7px'});
+-   retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{const latest=value.records.get(record.id);await retranslate(latest.source,record.id);await refresh(record.id)}catch(error){value.error=error.message;position()}finally{retry.disabled=false}};
+-   node.append(source,result,meta,retry);node.__parts={source,result,meta,retry};value.nodes.set(record.id,node);
+-  }
+-  const {source,result,meta,retry}=node.__parts;
+-  if(source.textContent!==record.source)source.textContent=record.source;
+-  if(result.textContent!==(translation||'等待翻译'))result.textContent=translation||'等待翻译';
+-  result.style.opacity=translation?'1':'.6';meta.textContent=record.metadata||'';retry.textContent=translation?'重译':'翻译/重试';
+-  return node;
+- }
+- function apply(value,page,{prepend=false,targeted=false}={}){
+-  if(destroyed||page.chat!==value.chat)return;
+-  const anchor=anchorOf(value),anchorTop=anchor.node?.getBoundingClientRect().top,first=!value.ready;
+-  for(const record of page.messages)value.records.set(record.id,record);
+-  // Existing nodes and ordering remain owned by their chat. A page refresh
+-  // updates text in place, never clears or remounts the conversation.
+-  const ids=page.messages.map(r=>r.id);
+-  for(let i=0;i<ids.length;i++)if(!value.ordered.includes(ids[i])){
+-   const following=ids.slice(i+1).find(id=>value.ordered.includes(id));
+-   const preceding=ids.slice(0,i).reverse().find(id=>value.ordered.includes(id));
+-   if(following)value.ordered.splice(value.ordered.indexOf(following),0,ids[i]);
+-   else if(preceding)value.ordered.splice(value.ordered.indexOf(preceding)+1,0,ids[i]);
+-   else if(prepend)value.ordered.unshift(ids[i]);else value.ordered.push(ids[i]);
+-  }
+-  for(const id of ids)updateNode(value,value.records.get(id));
+-  let previous=null;for(const id of value.ordered){const node=value.nodes.get(id);if(!node)continue;if(previous?previous.nextSibling!==node:value.list.firstChild!==node)value.list.insertBefore(node,previous?previous.nextSibling:value.list.firstChild);previous=node;}
+-  if(!targeted){if(first||prepend)value.older=page.hasOlder;value.total=page.total;}value.ready=true;value.error='';
+-  if(current===value&&!waiting){position();if(first||anchor.bottom)value.list.scrollTop=Math.max(0,value.list.scrollHeight-value.list.clientHeight);else if(anchor.node?.isConnected)value.list.scrollTop=anchor.top+anchor.node.getBoundingClientRect().top-anchorTop;else value.list.scrollTop=anchor.top;value.scrollTop=value.list.scrollTop;}
+- }
+- function enqueue(value,work){const task=value.serial.catch(()=>{}).then(work);value.serial=task;return task}
+- function header(){const node=document.querySelector('#main header');return node?.querySelector('[data-testid=conversation-info-header-chat-title]')?.textContent||node?.querySelector('[title]')?.getAttribute('title')||''}
+- function selectRoot(elements,chat){
+-  const candidate=elements.find(n=>conversation(n.getAttribute('data-id')||n.closest('[data-id]')?.getAttribute('data-id'))===chat);
+-  if(candidate)for(let node=candidate.parentElement;node&&node.id!=='main';node=node.parentElement){if(/^(auto|scroll)$/.test(window.getComputedStyle(node).overflowY)&&node.clientHeight>0){if(nativeRoot!==node){if(nativeRoot)resize.unobserve?.(nativeRoot);nativeRoot=node;resize.observe(node)}break;}}
++ function readSaved(items,force=false){
++  const groups=new Map;
++  for(const item of items){const cached=records.get(item.id);if(!force&&cached?.source===item.source&&cached.translations?.[targetFor(item.source)]?.text)continue;if(!force&&checked.get(item.id)===item.source)continue;const chat=conversation(item.id);if(!groups.has(chat))groups.set(chat,[]);groups.get(chat).push(item);}
++  for(const [chat,values] of groups)for(let start=0;start<values.length;start+=100){const batch=values.slice(start,start+100);try{
++   const response=ipc.sendSync('haituo:local-chat-read',{chat,ids:batch.map(x=>x.id)});
++   if(!response?.ok)continue;for(const record of response.page?.messages||[])if(conversation(record.id)===chat)records.set(record.id,record);for(const item of batch)checked.set(item.id,item.source);
++  }catch{/* Storage problems must never hide or replace the native chat. */}}
+  }
++ function hydrate(root){const items=candidates(root).map(read).filter(Boolean);readSaved(items);for(const item of items)render(item)}
+  async function observe(items,elements){
+-  if(destroyed||!items.length)return;const chat=conversation(items[0].id);if(!chat||items.some(item=>conversation(item.id)!==chat))return;
+-  const title=header();
+-  if(!waiting&&lastHeader&&title!==lastHeader&&chat===current?.chat){if(current?.list.style.display!=='none')current.scrollTop=current.list.scrollTop;waiting=true;previousChat=chat;navigationAt=Date.now();position();return;}
+-  if(waiting&&chat===previousChat){if(title!==lastHeader||Date.now()-navigationAt<1200){position();return;}}
+-  waiting=false;lastHeader=title;previousChat=null;const value=state(chat);selectRoot(elements,chat);activate(value);
+-  const signature=JSON.stringify([items,items.map(item=>targetFor(item.source))]);
+-  if(signature===value.signature){position();return;}
+-  return enqueue(value,async()=>{try{const page=await ipc.invoke('haituo:local-chat-observe',items);if(destroyed)return;value.signature=signature;apply(value,page)}catch(error){value.error=error.message;if(current===value){value.official=true;position()}throw error}});
+- }
+- async function refresh(messageId){
+-  const chat=messageId?conversation(messageId):current?.chat,value=sessions.get(chat);if(!value||destroyed)return;
+-  return enqueue(value,async()=>{const options=messageId?{ids:[messageId]}:undefined;const page=await ipc.invoke('haituo:local-chat-page',chat,options);apply(value,page,{targeted:!!messageId})});
++  if(destroyed||!items.length)return;
++  const page=await ipc.invoke('haituo:local-chat-observe',items);
++  if(destroyed)return;for(const record of page.messages||[])records.set(record.id,record);
++  // The returned page is only the last 200; use indexed ID reads for older
++  // bubbles currently materialized by WhatsApp's own virtualizer.
++  const visible=elements.map(read).filter(Boolean);readSaved(visible,true);for(const item of visible)render(item);
+  }
+- async function loadOlder(value){
+-  if(value.loading||!value.ready)return;value.loading=true;
+-  try{if(value.older){await enqueue(value,async()=>{const page=await ipc.invoke('haituo:local-chat-page',value.chat,{before:value.ordered[0],limit:200});apply(value,page,{prepend:true})})}else if(nativeRoot&&current===value){nativeRoot.scrollTop=Math.max(0,nativeRoot.scrollTop-nativeRoot.clientHeight)}}catch(error){value.error=error.message;position()}finally{value.loading=false}
++ async function refresh(id){
++  if(destroyed||!conversation(id))return;const response=ipc.sendSync('haituo:local-chat-read',{chat:conversation(id),ids:[id]});
++  if(!response?.ok)throw Error(response?.error||'无法读取本机译文');
++  for(const record of response.page.messages||[])records.set(record.id,record);
++  for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node);if(item)render(item)}
+  }
+- const resize=window.ResizeObserver?new window.ResizeObserver(position):{observe(){},disconnect(){}};resize.observe(document.documentElement);window.addEventListener('resize',position);
+- function navigate(event){if(!event.target.closest?.('#pane-side,[data-testid="chat-list"]'))return;officialOverride=false;previousChat=current?.chat;navigationAt=Date.now();waiting=true;if(current){current.scrollTop=current.list.scrollTop;current.list.style.display='none';current.official=false;}position()}
+- document.addEventListener('pointerdown',navigate,true);
+- // Cover first load and keyboard navigation in the same mutation microtask,
+- // before the browser paints newly created native original-only messages.
+- const observer=window.MutationObserver?new window.MutationObserver(events=>{if(events.every(e=>root.contains(e.target)||e.target===root||e.target===privacy))return;const title=header();if(current&&!waiting&&lastHeader&&title!==lastHeader){if(current.list.style.display!=='none')current.scrollTop=current.list.scrollTop;officialOverride=false;previousChat=current.chat;waiting=true;navigationAt=Date.now();}position()}):null;
+- observer?.observe(document.documentElement,{childList:true,subtree:true,characterData:true});position();
+- return{observe,refresh,setOfficial,showError:message=>{if(current)current.error=message;position()},isActive:()=>!!current&&current.ready&&!waiting&&!current.official,isManaged:()=>true,destroy(){destroyed=true;restoreNative();resize.disconnect();observer?.disconnect();privacy.remove();root.remove();document.removeEventListener('pointerdown',navigate,true);window.removeEventListener('resize',position);sessions.clear()}};
++ function showError(message,id){if(!id)return;for(const node of document.querySelectorAll('#main [data-id]'))if(node.getAttribute('data-id')===id){const item=read(node),mount=item&&mountFor(item);if(!mount)continue;let error=node.querySelector('.haituo-wa-translation-error');if(!error){error=document.createElement('button');error.className='haituo-wa-translation-error';error.type='button';error.onclick=async()=>{try{await retranslate(item.source,id);await refresh(id);error.remove()}catch(next){error.title=next.message}};mount.append(error)}error.textContent='翻译失败 · 点击重试';error.title=String(message||'翻译暂时不可用')}}
++ const observer=new window.MutationObserver(events=>{const roots=new Set;for(const event of events){const target=event.target.nodeType===1?event.target:event.target.parentElement;if(target?.closest('.haituo-wa-message-translation,.haituo-wa-translation-error'))continue;if(event.type==='attributes'||event.type==='characterData'||target?.closest('[data-id]'))roots.add(target);for(const node of event.addedNodes||[])if(node.nodeType===1&&!node.matches('.haituo-wa-message-translation,.haituo-wa-translation-error'))roots.add(node);}for(const root of roots)hydrate(root)});
++ observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-id']});hydrate(document.querySelector('#main'));
++ return{observe,refresh,showError,isActive:()=>!destroyed,isManaged:()=>!destroyed,destroy(){destroyed=true;observer.disconnect();records.clear();checked.clear()}};
+ }
+ module.exports={install};
