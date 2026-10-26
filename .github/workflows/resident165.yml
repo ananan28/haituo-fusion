@@ -1,0 +1,101 @@
+name: Haituo WhatsApp 1.6.5 diagnostic build - NOT A RELEASE
+on:
+  push:
+    branches: ['impl/1.6.5-whatsapp-resident']
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  PYTHONUTF8: 1
+jobs:
+  integrate:
+    if: ${{ !startsWith(github.event.head_commit.message, 'source165:') }}
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Apply isolated WhatsApp implementation
+        run: |
+          git apply --check scripts/wa-resident-165.patch
+          git apply scripts/wa-resident-165.patch
+          python scripts/sync-local-chat-view.py
+          git diff --exit-code 42e7aac6074979f5e654880efbc993799944c8f2 -- src/app/bundles/preload src/app/bundles/workers src/app/js/haituo-signal-message-record.js src/app/js/haituo-scroll.js
+          node --check src/app/bundles/main.js
+          node --check src/app/js/caisheng-webview-preload.js
+          node --test scripts/*.test.cjs
+      - name: Install isolated DOM test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
+      - name: Synthetic WhatsApp coverage and frozen Signal component regression
+        run: node --test scripts/wa-resident.dom.cjs scripts/signal-attachments.dom.cjs
+        env:
+          HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
+      - name: Commit exact diagnostic client source
+        id: source
+        run: |
+          git config user.name 'Haituo Build'
+          git config user.email 'haituo-build@users.noreply.github.com'
+          git add -A
+          git commit -m 'source165: WhatsApp resident diagnostic candidate; real-account gates UNTESTED'
+          git push origin HEAD:impl/1.6.5-whatsapp-resident
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: integrate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: windows
+            node: '22.23.4'
+          - os: macos-15
+            target: macos
+            node: '22.23.2'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.commit }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Target OS regression
+        run: node --test scripts/*.test.cjs
+      - name: Build diagnostic candidate
+        run: python scripts/build.py --target ${{ matrix.target }}
+      - name: Native SQLCipher reopen and content-cache account isolation
+        run: node scripts/local-chat-native-check.cjs
+      - name: Frozen Signal profile/startup regression
+        timeout-minutes: 4
+        run: node scripts/inprocess-native-check.cjs
+      - name: Native settings and offline restart regression
+        run: node scripts/native-attachments-check.cjs
+      - name: Runtime dependency and transport checks
+        run: python scripts/build.py --target ${{ matrix.target }} --runtime-tests-only
+      - name: Package corresponding client source
+        run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Haituo-1.6.5-diagnostic-verification-${{ matrix.target }}
+          path: |
+            audit-results/**
+            windows/verification/**
+            macos/verification/**
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haituo-1.6.5-diagnostic-${{ matrix.target }}
+          path: |
+            windows/out/*Setup.exe
+            macos/out/*.dmg
+            source-packages/*.zip
