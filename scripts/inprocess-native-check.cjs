@@ -5,6 +5,7 @@ const mac=process.platform==='darwin',out=path.resolve('audit-results'),profile=
 fs.mkdirSync(out,{recursive:true});fs.mkdirSync(profile,{recursive:true});const report={platform:process.platform,checks:[],errors:[],settingsInventory:[]};
 const app=path.resolve(mac?'macos/out/海拓-darwin-arm64/海拓.app':'windows/out/win-unpacked/海拓.exe');
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let proc,client,log;
+let previousTranslationSettings;
 let fixtureCalls=0; const fixtureServer=require("node:http").createServer((req,res)=>{req.resume();req.on("end",()=>{fixtureCalls++;res.setHeader("content-type","application/json");res.end(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"原消息下方的常驻译文"}}]}))})});
 async function attach(target){const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('websocket connection timeout')),5000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve()},{once:true});ws.addEventListener('error',reject,{once:true})});let sequence=0;const pending=new Map(),contexts=new Set();ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id){const item=pending.get(message.id);if(item){pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result)}}else if(message.method==='Runtime.executionContextCreated')contexts.add(message.params.context.id);else if(message.method==='Runtime.executionContextsCleared')contexts.clear();else if(message.method==='Runtime.exceptionThrown')report.errors.push(message.params.exceptionDetails);else if(message.method==='Log.entryAdded')report.errors.push(message.params.entry);else if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')report.errors.push({console:message.params.args.map(x=>x.value||x.description)})});return{ws,contexts,call(method,params={}){return new Promise((resolve,reject)=>{const id=++sequence,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method))},7000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}))})}}}
 async function evaluate(expression,contextId){const r=await client.call('Runtime.evaluate',{expression,contextId,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value}
@@ -27,6 +28,15 @@ async function check(id,work){try{const result=await work();report.checks.push({
 (async()=>{try{
  await check('MAIN-DEFAULT-EMBEDDED-START',async()=>{const state=await start();if(!state.installed||state.loading)throw Error(JSON.stringify(state));return state});
  if(client){
+  if(mac&&process.env.GITHUB_ACTIONS==='true')await check('SEED-ISOLATED-TEST-SETTINGS',async()=>{
+   const before=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig()`);
+   const poolEntries=[...(before.translationPools?.primary||[]),...(before.translationPools?.backup||[])];
+   if(before.googleCloudApiKey||poolEntries.some(entry=>entry.apiKey))throw Error('Fixture refuses to overwrite existing credentials');
+   previousTranslationSettings={googleCloudApiKey:before.googleCloudApiKey||'',inputTranslationProvider:before.inputTranslationProvider,translationPools:before.translationPools||null};
+   const version=before.__v;
+   await apiEvaluate(`window.SignalContext.caishengSetTranslationConfig(${JSON.stringify({googleCloudApiKey:'CI-FAKE-GOOGLE-KEY',inputTranslationProvider:'google-cloud',translationPools:{primary:[{provider:'google-cloud',apiKey:'CI-FAKE-POOL-KEY'}],backup:[]},__v:version})})`);
+   return{isolatedFixture:true};
+  });
   await check('CHILD-PROFILE-CREATE',async()=>{
    // Register a real shell workspace, then reload its persisted UI state.
    // A phantom IPC-only profile leaves React on the main tab; ResizeObserver
@@ -56,6 +66,13 @@ async function check(id,work){try{const result=await work();report.checks.push({
    throw Error('Child profile never reached initialized renderer; inspect child stderr/startup log');
   });
   if(childClient){
+   if(mac&&process.env.GITHUB_ACTIONS==='true')await check('CHILD-CONFIG-READY-BEFORE-RENDERER',async()=>{
+    if(!previousTranslationSettings)throw Error('Isolated config was not seeded');
+    let cfg;
+    for(const contextId of childClient.contexts){try{const r=await childClient.call('Runtime.evaluate',{expression:`window.SignalContext?.caishengGetTranslationConfig?.()`,contextId,returnByValue:true,awaitPromise:true});if(r.result?.value?.inputTranslationProvider){cfg=r.result.value;break}}catch{}}
+    if(cfg?.inputTranslationProvider!=='google-cloud'||!String(cfg.googleCloudApiKey||'').startsWith('__HAITUO_REDACTED__')||!String(cfg.translationPools?.primary?.[0]?.apiKey||'').startsWith('__HAITUO_REDACTED__'))throw Error('Child did not receive redacted Google configuration before use');
+    return{inputProvider:'google-cloud',googleKeyPresent:true,poolKeyPresent:true,rendererSecretsRedacted:true};
+   });
    if(!mac)await check('CHILD-LAUNCH-IDEMPOTENT-PROCESS-INVENTORY',async()=>{
     await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);await apiEvaluate(`window.SignalContext.caishengLaunchSignalProfile('signal-ci-inprocess')`);
     const rows=windowsProcessInventory(),backends=rows.filter(x=>x.kind==='signal-backend');if(backends.length!==1)throw Error('Repeated launch did not retain exactly one backend: '+JSON.stringify(rows));return{backends:backends.length,processes:rows};
@@ -121,4 +138,6 @@ async function check(id,work){try{const result=await work();report.checks.push({
   await check('CHILD-PROFILE-STOP',async()=>{const result=await apiEvaluate(`window.SignalContext.caishengStopSignalProfile('signal-ci-inprocess')`);if(result!==true)throw Error('Child backend did not shut down gracefully');return result});
   if(!mac)await check('STOPPED-PROFILE-HAS-NO-BACKEND-PROCESS',async()=>{const rows=windowsProcessInventory();if(rows.some(x=>x.kind==='signal-backend'))throw Error('Stopped profile still owns a backend process');return{backends:0,processes:rows}});
  }
-}catch(error){report.fatal=String(error.stack||error)}finally{collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();
+}catch(error){report.fatal=String(error.stack||error)}finally{
+ if(previousTranslationSettings&&client)try{const current=await apiEvaluate(`window.SignalContext.caishengGetTranslationConfig()`);const restore={...previousTranslationSettings,__v:current.__v};await apiEvaluate(`window.SignalContext.caishengSetTranslationConfig(${JSON.stringify(restore)})`)}catch(error){report.fatal=String(error.stack||error)}
+ collectStartupLogs();await stop();report.ok=!report.fatal&&report.checks.every(x=>x.ok);fs.writeFileSync(path.join(out,'inprocess-native.json'),JSON.stringify(report,null,2));console.log('INPROCESS_NATIVE_SUMMARY',JSON.stringify({ok:report.ok,checks:report.checks,fatal:report.fatal}));process.exitCode=report.ok?0:1}})();

@@ -153,3 +153,19 @@ test('a save loop accumulates three primary and two backup entries with keys int
   assert.equal(pools.sanitize(stored).primary.length,3,'a reload must not drop entries');
   assert.equal(pools.sanitize(stored).backup.length,2,'a reload must not drop backup entries');
 });
+
+test('embedded Signal child receives saved config before its renderer starts',()=>{
+ const start=bundle.indexOf('        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`)');
+ const end=bundle.indexOf('        if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-result`)',start);
+ assert.ok(start>=0&&end>start,'embedded ready handler must exist');
+ const calls=[],child={},saved={__v:8,googleCloudApiKey:'fake-cloud-key',translationPools:{primary:[{provider:'google-cloud',apiKey:'fake-pool-key'}],backup:[]}};
+ const ctx={process:{env:{HAITUO_INPROCESS:'1'}},Yg:new Map([['signal-1',child]]),X:{info:()=>{}},$p:()=>saved,HaituoConfigVersion:9,caishengSendChild:(target,payload)=>calls.push({kind:'send',target,payload}),caishengBridge:{ready:(id,config,sync)=>calls.push({kind:'ready',id,config,sync})}};
+ vm.createContext(ctx);vm.runInContext('function receive(e,t,r){'+bundle.slice(start,end)+'}',ctx);
+ ctx.receive({type:'haituo-bridge-ready',config:{child:true},sync:{}},'signal-1',child);
+ assert.equal(calls[0]?.kind,'send','settings must be sent before renderer load');
+ assert.equal(calls[0].target,child);assert.equal(calls[0].payload.type,'haituo-global-settings-update');
+ assert.equal(calls[0].payload.config.googleCloudApiKey,'fake-cloud-key');
+ assert.equal(calls[0].payload.config.translationPools.primary[0].apiKey,'fake-pool-key');
+ assert.equal(calls[0].payload.config.__v,9);assert.equal(calls[1]?.kind,'ready');
+ calls.length=0;ctx.receive({type:'haituo-bridge-ready',config:{},sync:{}},'signal-1',{});assert.equal(calls.length,0,'stale child cannot receive configuration');
+});

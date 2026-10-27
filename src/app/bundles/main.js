@@ -29824,7 +29824,14 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
         X.error(`Haituo Signal profile failed to start (${t}): ${error?.message ?? error}`), Yg.get(t) === r && (Yg.delete(t), Xg.delete(t), caishengLastWindowPayload.delete(t));
     }), r.on(`message`, e => {
         if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-renderer-ready`){globalThis.caishengBridge?.rendererReady?.(t);return;}
-        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){X.info(`inprocess backend ready (${t}); SQL initialized`);globalThis.caishengBridge?.ready?.(t,e.config,e.sync);return;}
+        if(process.env.HAITUO_INPROCESS===`1` && Yg.get(t)===r && e?.type===`haituo-bridge-ready`){
+            X.info(`inprocess backend ready (${t}); SQL initialized`);
+            // The hidden backend may never emit ready-to-show. Seed its trusted
+            // settings snapshot before loading the embedded renderer.
+            const current=$p();
+            caishengSendChild(r,{type:`haituo-global-settings-update`,config:{...current,__v:Math.max(HaituoConfigVersion,Number(current.__v)||0)}});
+            globalThis.caishengBridge?.ready?.(t,e.config,e.sync);return;
+        }
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-result`) { (e.ok ? globalThis.caishengBridge?.resolve : globalThis.caishengBridge?.reject)?.(e.requestId, e.ok ? e.result : e.error); return; }
         if (process.env.HAITUO_INPROCESS === `1` && Yg.get(t) === r && e?.type === `haituo-bridge-push`) { globalThis.caishengBridge?.push?.(t, e.channel, e.args || []); return; }
         if (Yg.get(t) === r && e?.type === `haituo-captcha-pending`) { haituoPendingCaptchaAccounts.set(t,e.seq); return; }
