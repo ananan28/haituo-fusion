@@ -28497,6 +28497,9 @@ function $g(e, t, a) {
 p.ipcMain.removeAllListeners(`haituo:order-selected-account`);p.ipcMain.on(`haituo:order-selected-account`,()=>haituoMacOrderSelectedAccount());
 
 function haituoMacOrderSelectedAccount() {
+    // Embedded accounts render inside the main window; their backend windows
+    // must never be ordered above it on macOS.
+    if (process.env.HAITUO_INPROCESS === `1`) return;
     if (haituoScreenshotController?.capturing) return;
     if (process.platform !== `darwin` || $u !== `signal-main` || !Z || Z.isDestroyed() || !Z.isVisible() || Z.isMinimized()) return;
     if(!Z.isFocused() && !caishengFocusedSignals.has(Zg?.id) && !caishengMenuOpen)return;
@@ -28682,6 +28685,7 @@ $u !== `signal-main` && (process.on(`message`, e => {
     }
     if (e.type === `haituo-order-account`) {
         caishengParentHeartbeat=Date.now();
+        if (process.env.HAITUO_INPROCESS === `1`) return;
         if (process.platform === `darwin` && Qg?.visible && Z && !Z.isDestroyed()) {
             n_();
             try {Z.moveAbove(e.parentSourceId)} catch(error) {X.warn(`Account ordering failed: ${error?.message}`)}
