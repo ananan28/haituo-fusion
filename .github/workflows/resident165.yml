@@ -70,6 +70,9 @@ jobs:
       - name: Frozen Signal profile/startup regression
         timeout-minutes: 4
         run: node scripts/inprocess-native-check.cjs
+      - name: Five simultaneous Signal accounts and rapid switching
+        timeout-minutes: 12
+        run: node scripts/macos-multi-signal-check.cjs
       - name: Native sandboxed WhatsApp webview startup regression
         timeout-minutes: 3
         run: node scripts/wa-guest-native-check.cjs
