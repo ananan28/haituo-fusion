@@ -174,3 +174,18 @@ test('webview-translate without a pool keeps the legacy strict input bypass', as
   await dispatch(ctx, 'caisheng:webview-translate', { purpose: 'input', provider: 'deepl', text: 'hi', targetLanguage: 'zh-CN' });
   assert.equal(strictProviderOf(ctx.__calls[0]), true);
 });
+
+test('DeepL request preserves the other provider keys and pool in child session config', async () => {
+  const config={__v:7,apiKey:'other-key',googleCloudApiKey:'cloud-key',deepLApiKey:'deepl-key',translationPools:{primary:[{provider:'google-cloud',apiKey:'pool-cloud-key'}],backup:[]}};
+  const ctx=makeCtx(config);ctx.Zp={...config};
+  await dispatch(ctx,'caisheng:translate',{provider:'deepl',purpose:'input',text:'你好',targetLanguage:'en',apiKey:'deepl-key'});
+  assert.equal(ctx.Zp.googleCloudApiKey,'cloud-key');
+  assert.equal(ctx.Zp.translationPools.primary[0].apiKey,'pool-cloud-key');
+  assert.equal(ctx.Zp.__v,7);
+  assert.equal(ctx.Zp.apiKey,'other-key');
+  assert.equal(ctx.Zp.deepLApiKey,'deepl-key');
+  ctx.$p=()=>ctx.Zp;
+  await dispatch(ctx,'caisheng:translate',{provider:'google-cloud',purpose:'input',text:'下一句',targetLanguage:'en'});
+  assert.equal(ctx.__calls.at(-1)[0].googleCloudApiKey,'cloud-key');
+  assert.equal(ctx.__calls.at(-1)[0].translationPools.primary[0].apiKey,'pool-cloud-key');
+});

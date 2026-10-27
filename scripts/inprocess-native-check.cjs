@@ -79,6 +79,20 @@ async function check(id,work){try{const result=await work();report.checks.push({
     }
     return sizes;
    });
+   await check('CHILD-TAB-AWAY-AND-BACK',async()=>{
+    await childClient.call('Runtime.evaluate',{expression:`document.body.dataset.haituoNoReloadMarker='focus-cycle-fixture'`,returnByValue:true});
+    const observed=[];
+    for(let i=0;i<3;i++){
+     await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await pause(300);
+     if(!await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]')?.getAttribute('aria-pressed')==='true'`))throw Error('Main tab did not activate');
+     await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]').click()`);await pause(700);
+     if(!await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-ci-inprocess"]')?.getAttribute('aria-pressed')==='true'`))throw Error('Child tab did not reactivate');
+     const value=(await childClient.call('Runtime.evaluate',{expression:`({marker:document.body?.dataset.haituoNoReloadMarker,visibility:document.visibilityState,width:innerWidth,height:innerHeight,body:!!document.body})`,returnByValue:true})).result?.value;
+     if(value?.marker!=='focus-cycle-fixture'||!value.body||value.width<1||value.height<1||value.visibility!=='visible')throw Error('Child view did not return without reload: '+JSON.stringify(value));
+     observed.push(value);
+    }
+    return {cycles:observed.length,sameRenderer:true,states:observed};
+   });
    await check('CHILD-ACCOUNT-LABEL-IN-VIEW',async()=>{
     const operation=apiEvaluate(`window.SignalContext.caishengEditAccountLabel({id:'signal-ci-inprocess',platformId:'signal',label:'Fixture label'})`).then(value=>({value}),error=>({error}));
     let shown;const deadline=Date.now()+2000;

@@ -25982,11 +25982,6 @@ function tm() {
             endpoint: typeof r.endpoint == `string` && r.endpoint.trim() ? r.endpoint : n.endpoint,
             model: typeof r.model == `string` && r.model.trim() ? r.model : n.model
         };
-        a.provider === `deepl` && typeof a.apiKey == `string` && a.apiKey.trim() && (Zp = {
-            provider: `deepl`,
-            apiKey: a.apiKey.trim(),
-            timeoutMs: a.timeoutMs
-        });
         const startedAt = Date.now();
         const result = r.messageId ? await haituoTranslateAttached(e, r, () => a.translationPools?haituoTranslateWithMode(a,r):HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(a, r))) : (a.translationPools?await haituoTranslateWithMode(a,r):await HaituoNetwork.retryTranslation(() => haituoTranslateWithMode(a, r)));
         a.messageScope = r.messageScope; haituoRememberChatTranslation(a, result);
