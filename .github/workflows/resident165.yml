@@ -1,4 +1,4 @@
-name: Haituo 1.6.5 macOS input and Signal diagnostic - NOT A RELEASE
+name: Haituo 1.6.5 Windows and macOS Signal diagnostic - NOT A RELEASE
 on:
   push:
     branches: ['fix/macos-signal-input-165']
@@ -49,6 +49,9 @@ jobs:
           - os: macos-15
             target: macos
             node: '22.23.2'
+          - os: windows-2022
+            target: windows
+            node: '22.23.2'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -71,6 +74,7 @@ jobs:
         timeout-minutes: 4
         run: node scripts/inprocess-native-check.cjs
       - name: Five simultaneous Signal accounts and rapid switching
+        if: matrix.target == 'macos'
         timeout-minutes: 12
         run: node scripts/macos-multi-signal-check.cjs
       - name: Native sandboxed WhatsApp webview startup regression
