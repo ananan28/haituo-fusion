@@ -77,6 +77,10 @@ jobs:
         if: matrix.target == 'macos'
         timeout-minutes: 12
         run: node scripts/macos-multi-signal-check.cjs
+      - name: Five simultaneous Windows Signal accounts and rapid switching
+        if: matrix.target == 'windows'
+        timeout-minutes: 12
+        run: node scripts/windows-multi-signal-check.cjs
       - name: Native sandboxed WhatsApp webview startup regression
         timeout-minutes: 3
         run: node scripts/wa-guest-native-check.cjs
