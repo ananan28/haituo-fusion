@@ -5,7 +5,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=r
 if(process.platform!=='darwin'||process.env.GITHUB_ACTIONS!=='true')throw Error('This test requires the isolated macOS CI runner');
 const app=path.resolve('macos/out/海拓-darwin-arm64/海拓.app'),out=path.resolve('audit-results'),profile=path.join(process.env.RUNNER_TEMP||os.tmpdir(),'haituo-multisignal-ci');
 fs.mkdirSync(out,{recursive:true});fs.mkdirSync(profile,{recursive:true});
-const ids=Array.from({length:5},(_,i)=>`signal-ci-multi-${i+1}`),report={platform:process.platform,realAccounts:'UNTESTED',profiles:ids.length,checks:[],events:[],externalFocus:{status:'UNTESTED'}};
+const ids=Array.from({length:5},(_,i)=>`signal-ci-multi-${i+1}`),report={platform:process.platform,realAccounts:'UNTESTED',profiles:ids.length,checks:[],events:[],externalFocus:{status:'UNTESTED'},screenCapture:{status:'UNTESTED',files:[]},nativeInput:{status:'UNTESTED'}};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let root,proc,log;const clients=new Map();
 async function attach(target){
  const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CDP connect timeout')),10000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve()},{once:true});ws.addEventListener('error',reject,{once:true})});
@@ -36,7 +36,13 @@ async function inspect(id,stage,saveImage=false){
  await evaluate(c,`window.__haituoMultiMouse=0;document.addEventListener('mousemove',()=>window.__haituoMultiMouse++,{once:true})`);
  await c.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:Math.floor(state.width/2),y:Math.floor(state.height/2)});await pause(100);
  if(!(await evaluate(c,'window.__haituoMultiMouse > 0')))throw Error('Selected child did not receive a test pointer event: '+id);
- if(saveImage){const shot=await c.call('Page.captureScreenshot',{format:'png'});const bytes=Buffer.from(shot.data,'base64');if(bytes.length<1000)throw Error('Child screenshot unexpectedly small: '+id);fs.writeFileSync(path.join(out,`multi-${id}-${stage}.png`),bytes);state.screenshotBytes=bytes.length}
+ if(saveImage){const shot=await c.call('Page.captureScreenshot',{format:'png'});const bytes=Buffer.from(shot.data,'base64');if(bytes.length<1000)throw Error('Child screenshot unexpectedly small: '+id);fs.writeFileSync(path.join(out,`multi-${id}-${stage}.png`),bytes);state.screenshotBytes=bytes.length;
+  if(stage==='switch-3'||stage==='external-return'){
+   const file=path.join(out,`screen-${id}-${stage}.png`),capture=cp.spawnSync('/usr/sbin/screencapture',['-x','-t','png',file],{timeout:10000,stdio:'pipe'});
+   if(capture.status===0&&fs.existsSync(file)&&fs.statSync(file).size>1000){report.screenCapture.status='CAPTURED';report.screenCapture.files.push(path.basename(file))}
+   else if(report.screenCapture.status!=='CAPTURED')report.screenCapture={status:'UNTESTED',files:[],reason:'macOS screen capture unavailable on CI runner'};
+  }
+ }
  report.events.push({id,stage,...state});
 }
 function frontmost(){const r=cp.spawnSync('/usr/bin/osascript',['-e','tell application "System Events" to get name of first application process whose frontmost is true'],{encoding:'utf8',timeout:10000});return r.status===0?r.stdout.trim():null}
@@ -46,6 +52,22 @@ async function externalFocusTest(id){
  const restore=cp.spawnSync('/usr/bin/open',['-a',app],{encoding:'utf8',timeout:10000});await pause(1200);const back=frontmost();
  if(restore.status!==0||!back||back===away){report.externalFocus={status:'UNTESTED',reason:'Unable to verify application returned to foreground'};return}
  await inspect(id,'external-return',true);report.externalFocus={status:'PASS',away,back};
+}
+async function nativePointerTest(id){
+ if(report.externalFocus.status!=='PASS'){report.nativeInput={status:'UNTESTED',reason:'Application foreground could not be verified'};return}
+ const file=path.join(out,'multi-native-click.swift'),binary=path.join(out,'multi-native-click');
+ fs.writeFileSync(file,`import Foundation\nimport ApplicationServices\nimport Darwin\nguard AXIsProcessTrusted() else { exit(2) }\nguard CommandLine.arguments.count == 3, let x = Double(CommandLine.arguments[1]), let y = Double(CommandLine.arguments[2]) else { exit(3) }\nlet pt = CGPoint(x: x, y: y)\nfor kind in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] { guard let e = CGEvent(mouseEventSource: nil, mouseType: kind, mouseCursorPosition: pt, mouseButton: .left) else { exit(4) }; e.post(tap: .cghidEventTap); usleep(100000) }\n`);
+ const build=cp.spawnSync('/usr/bin/swiftc',[file,'-o',binary],{timeout:60000,stdio:'pipe'});if(build.status!==0){report.nativeInput={status:'UNTESTED',reason:'Could not compile native input probe'};return}
+ const query=cp.spawnSync('/usr/bin/osascript',['-e','tell application "System Events" to tell process "海拓" to get {position of front window, size of front window}'],{encoding:'utf8',timeout:10000});
+ const numbers=(query.stdout||'').match(/-?\d+/g)?.map(Number)||[];
+ if(query.status!==0||numbers.length!==4||numbers[2]<200||numbers[3]<200){report.nativeInput={status:'UNTESTED',reason:'macOS window geometry/accessibility unavailable'};return}
+ const c=clients.get(id);await evaluate(c,`window.__haituoNativeDown=0;document.addEventListener('mousedown',()=>window.__haituoNativeDown++,{once:true})`);
+ const click=cp.spawnSync(binary,[String(Math.round(numbers[0]+numbers[2]*.65)),String(Math.round(numbers[1]+numbers[3]*.62))],{timeout:10000,stdio:'pipe'});
+ if(click.status===2){report.nativeInput={status:'UNTESTED',reason:'macOS Accessibility permission unavailable'};return}
+ if(click.status!==0){report.nativeInput={status:'UNTESTED',reason:'Native input probe failed'};return}
+ await pause(450);const delivered=await evaluate(c,'window.__haituoNativeDown > 0');
+ if(!delivered)throw Error('OS-level mouse click did not reach the selected Signal view');
+ report.nativeInput={status:'PASS',event:'mousedown'};
 }
 (async()=>{try{
  log=fs.openSync(path.join(out,'multi-signal-startup.log'),'w');proc=cp.spawn('/usr/bin/open',['-n','-a',app,'--args','--user-data-dir='+profile,'--remote-debugging-address=127.0.0.1','--remote-debugging-port=19343'],{stdio:['ignore',log,log]});await rootReady();
@@ -58,7 +80,7 @@ async function externalFocusTest(id){
  report.checks.push({id:'FIFTEEN-ACCOUNT-SWITCHES',ok:true,count:15});
  const current=ids[ids.length-1];await select(current);await pause(300);
  await evaluate(root,"document.querySelector('.CaishengPlatformShell__settingsButton').click()");await pause(450);await evaluate(root,"document.querySelector('.CaishengPlatformShell__settingsButton').click()");await pause(600);await inspect(current,'settings-return',true);report.checks.push({id:'OPEN-CLOSE-SETTINGS',ok:true});
- await externalFocusTest(current);
+ await externalFocusTest(current);await nativePointerTest(current);
 }catch(error){report.fatal=String(error.stack||error)}finally{
  if(root){for(const id of ids)try{await api(`window.SignalContext.caishengStopSignalProfile(${JSON.stringify(id)})`)}catch{}try{await root.call('Browser.close')}catch{}try{root.ws.close()}catch{}}
  for(const c of clients.values())try{c.ws.close()}catch{}if(log!==undefined)fs.closeSync(log);
