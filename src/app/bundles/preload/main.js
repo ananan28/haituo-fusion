@@ -230163,7 +230163,7 @@ function haituoCachedSignalTranslation(text) {
         let {user: t} = lCr(), [r, a] = (0, D9.useState)(xCr), [o, s] = (0, D9.useState)(() => {
             try {
                 let e = localStorage.getItem(`caisheng.lastWorkspace`), t = xCr();
-                return e && t.some(t => t.id === e) ? e : `signal-main`;
+                return e && t.some(t => t.id === e && (t.platformId !== `viber` || window.SignalContext.OS.platform === `darwin`)) ? e : `signal-main`;
             } catch {
                 return `signal-main`;
             }
@@ -230619,7 +230619,8 @@ function haituoCachedSignalTranslation(text) {
                             alt: ``
                         }) : (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__iconFallback is-${e.platformId}`,
-                            children: `T`
+                            style: e.platformId === `viber` ? {background:`#7360f2`} : undefined,
+                            children: e.platformId === `viber` ? `V` : `T`
                         }), (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__tabLabel`,
                             children: e.label
@@ -231004,7 +231005,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         type: `button`,
                         children: `打开账号`
-                    }), j.platformId === `signal` ? null : (0, O9.jsx)(`button`, {
+                    }), (j.platformId === `signal` || j.platformId === `viber`) ? null : (0, O9.jsx)(`button`, {
                         onClick: () => void B(j),
                         type: `button`,
                         children: `清除缓存`
