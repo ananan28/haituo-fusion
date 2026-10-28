@@ -1,0 +1,47 @@
+name: Fusion development packages
+on:
+  push:
+    branches: ['fusion/develop']
+    paths: ['src/**', 'scripts/**', 'project.json', '.github/workflows/fusion-build.yml']
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: windows
+          - os: macos-15
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build existing native shell with combined platform fixes
+        run: python scripts/build.py --target ${{ matrix.target }}
+      - name: Verify native encrypted local store with synthetic messages
+        run: node scripts/local-chat-native-check.cjs
+      - name: Verify fresh native startup, settings and durable restart
+        timeout-minutes: 8
+        run: node scripts/native-attachments-check.cjs
+      - name: Package editable source
+        run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fusion-development-${{ matrix.target }}-${{ github.sha }}
+          retention-days: 14
+          path: |
+            windows/out/*Setup.exe
+            windows/out/*Source.zip
+            macos/out/*.dmg
+            macos/out/*Source.zip
+            audit-results/**

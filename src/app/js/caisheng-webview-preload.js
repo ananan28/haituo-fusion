@@ -1597,11 +1597,27 @@ function haituoWhatsAppTranslationMount(message, roots) {
     return mount;
 }
 
+// Telegram message numbers are scoped to a peer, not globally unique.
+// Read the peer again on delivery so recycled rows cannot accept a previous chat's result.
+function haituoTelegramConversationScope(node) {
+    const peerRoot=node?.closest('[data-peer-id],[data-chat-id]') || document.querySelector('.bubbles[data-peer-id],.chat[data-peer-id],#MiddleColumn [data-peer-id],#MiddleColumn[data-chat-id]');
+    const peer=peerRoot?.getAttribute('data-peer-id') || peerRoot?.getAttribute('data-chat-id');
+    if(peer) return JSON.stringify(['peer',peer]);
+    const hash=String(location.hash || '').replace(/^#/, '');
+    return hash ? JSON.stringify(['route',hash]) : null;
+}
 function haituoWebMessageId(node) {
-    return node.getAttribute("data-id") || node.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? node.getAttribute("data-mid") : undefined);
+    if(isTelegram()) {
+        const message=node.closest('[data-mid],[data-message-id]') || node;
+        const id=message.getAttribute('data-mid') || message.getAttribute('data-message-id');
+        const peer=haituoTelegramConversationScope(node);
+        // Unknown identity uses provider/session translation only, never a durable attachment.
+        return id && peer ? JSON.stringify(['telegram',peer,id]) : undefined;
+    }
+    return node.getAttribute("data-id") || node.closest("[data-id]")?.getAttribute("data-id");
 }
 function haituoCurrentWebMessage(item) {
-    return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId;
+    return item.e.isConnected && item.e.dataset.haituoTranslationSource === item.n && (!item.target || item.e.dataset.haituoTranslationTarget === item.target) && haituoWebMessageId(item.e) === item.messageId && (!isTelegram() || (item.conversation != null && item.conversation === (haituoTelegramConversationScope() || "telegram-unresolved")));
 }
 // 1.6.4 observer reattach mode. Resident/SQLCipher view deliberately disabled.
 let haituoLocalBilingualView = null;
@@ -1617,7 +1633,7 @@ function haituoInstallMessageScanner() {
     // Session-only renderer memo; no chat-ID parser or disk cache is involved.
     const sessionTranslations=new Map,accountScope=new URL(window.location.href).searchParams.get('haituoWorkspace')||'isolated-webview';
     const messageContainer=()=>document.querySelector('#main [data-testid="conversation-panel-messages"]')||document.querySelector('#main');
-    const conversationScope=()=>{const root=document.querySelector('#main'),header=root?.querySelector('header,[data-testid="conversation-header"]');return String(header?.querySelector('[title]')?.getAttribute('title')||header?.innerText||header?.textContent||'current-conversation').trim()};
+    const conversationScope=()=>{if(isTelegram())return haituoTelegramConversationScope() || 'telegram-unresolved';const root=document.querySelector('#main'),header=root?.querySelector('header,[data-testid="conversation-header"]');return String(header?.querySelector('[title]')?.getAttribute('title')||header?.innerText||header?.textContent||'current-conversation').trim()};
     const sessionKey=(text,target)=>JSON.stringify([accountScope,conversationScope(),target,String(text).normalize('NFKC').replace(/\s+/gu,' ').trim()]);
     // Resident cache is disabled; use the ordinary 1.6.4 message observer.
     installWhatsAppNotificationBridge(), installWhatsAppUnreadObserver();
@@ -1750,7 +1766,7 @@ function haituoInstallMessageScanner() {
         haituoKeepTranslationPosition(item.e, () => {
             if (!webTranslationActive()||item.conversation!==conversationScope()) return;
             const { e, t, n, r, mount } = item;
-            const liveId = e.getAttribute("data-id") || e.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? e.getAttribute("data-mid") : undefined);
+            const liveId = haituoWebMessageId(e);
             if (item.messageId !== liveId) return;
             if (e.isConnected && mount?.isConnected && e.dataset.haituoTranslationSource === n) {
                 let status = e.querySelector('.haituo-wa-translation-error');
@@ -1811,12 +1827,18 @@ function haituoInstallMessageScanner() {
                     lineHeight: "1"
                 }), retryButton.onclick = async t => {
                     t.preventDefault(), t.stopPropagation();
+                    const stillCurrent=()=>webTranslationActive() && item.conversation===conversationScope() && haituoCurrentWebMessage(item) && mount?.isConnected && e.contains(mount) && o.isConnected && e.contains(o);
+                    if(!stillCurrent()) return;
                     const a = t.currentTarget;
                     a.disabled = !0, a.textContent = "…";
                     try {
-                        const result=await translateMessage(n,!0,item.messageId);if(isWhatsApp())sessionTranslations.set(item.memoKey,result);translationText.textContent=formatMessageParagraphs(n,result);a.textContent="✨";
+                        const result=await translateMessage(n,!0,item.messageId);
+                        if(!stillCurrent()) return;
+                        if(isWhatsApp())sessionTranslations.set(item.memoKey,result);
+                        translationText.textContent=formatMessageParagraphs(n,result);a.textContent="✨";
                     } catch (e) {
-                        toast(e instanceof Error ? e.message : "智能重新翻译失败", !0), a.textContent = "✨";
+                        if(stillCurrent()) toast(e instanceof Error ? e.message : "智能重新翻译失败", !0);
+                        a.textContent = "✨";
                     } finally {
                         a.disabled = !1;
                     }
