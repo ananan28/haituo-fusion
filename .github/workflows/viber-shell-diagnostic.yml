@@ -1,0 +1,38 @@
+name: Viber packaged shell diagnostic
+on:
+  push:
+    branches: ['fusion/viber-shell']
+    paths: ['scripts/viber-shell-native-check.cjs', '.github/workflows/viber-shell-diagnostic.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  synthetic-packaged-shell:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fusion-viber-shell-macos-2dde34ae3feb8520b43808ef4464b35a1a998f2e
+          run-id: 40630076576
+          github-token: ${{ github.token }}
+          path: packaged
+      - name: Run latest synthetic probe against previously built app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shell-dmg" "macos/out/海拓-darwin-arm64"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/shell-dmg" packaged/macos/out/*.dmg
+          trap 'hdiutil detach "$RUNNER_TEMP/shell-dmg" || true' EXIT
+          ditto "$RUNNER_TEMP/shell-dmg/海拓.app" "macos/out/海拓-darwin-arm64/海拓.app"
+          swiftc viber-fusion/synthetic-shell-helper.swift -o "$RUNNER_TEMP/synthetic-helper"
+          node scripts/viber-shell-native-check.cjs "$RUNNER_TEMP/synthetic-helper"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-shell-synthetic-diagnostic
+          path: audit-results/viber-shell-synthetic.json
