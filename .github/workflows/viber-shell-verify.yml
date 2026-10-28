@@ -35,7 +35,7 @@ jobs:
           else
             git apply --reverse --check development/fusion-shell.patch
           fi
-          if ! rg -Fq 'getBlockChinese:' src/app/bundles/main.js; then
+          if ! git grep -Fq 'getBlockChinese:' -- src/app/bundles/main.js; then
             git apply --index development/viber-input-main.patch
             git config user.name 'Haituo Fusion'
             git config user.email 'fusion@users.noreply.github.com'
