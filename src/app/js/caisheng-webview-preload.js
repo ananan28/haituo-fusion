@@ -1857,8 +1857,8 @@ function haituoInstallMessageScanner() {
                 if(scrolling){delete item.t.dataset.haituoTranslationPending;continue}
                 try {
                     item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly);
-                    if(isWhatsApp()&&item.r)sessionTranslations.set(item.memoKey,item.r);
-                    if (haituoCurrentWebMessage(item)) {
+                    if (haituoCurrentWebMessage(item) && item.conversation===conversationScope()) {
+                        if(isWhatsApp()&&item.r)sessionTranslations.set(item.memoKey,item.r);
                         item.t.dataset.haituoTranslationDone = "1";
                         if (!item.r && item.attachmentOnly) item.t.dataset.haituoAttachmentMiss = "1";
                         delete item.t.dataset.haituoTranslationRetryCount;
