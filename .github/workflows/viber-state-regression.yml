@@ -1,0 +1,24 @@
+name: Viber connection state regression
+on:
+  push:
+    branches: ['fusion/viber']
+    paths: ['viber-fusion/**', '.github/workflows/viber-state-regression.yml']
+  pull_request:
+    paths: ['viber-fusion/**', '.github/workflows/viber-state-regression.yml']
+permissions:
+  contents: read
+jobs:
+  state-regression:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production app and run synthetic AppKit regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -swift-version 5 viber-fusion/main.swift -o "$RUNNER_TEMP/viber-fusion"
+          mkdir -p "$RUNNER_TEMP/state-regression"
+          cat viber-fusion/main.swift viber-fusion/state-regression.swift > "$RUNNER_TEMP/state-regression/main.swift"
+          swiftc -swift-version 5 -D STATE_REGRESSION "$RUNNER_TEMP/state-regression/main.swift" -o "$RUNNER_TEMP/state-regression/run"
+          "$RUNNER_TEMP/state-regression/run"

@@ -119,10 +119,17 @@ final class FrameSink: NSObject, SCStreamOutput {
         let input=CIImage(cvPixelBuffer:buffer)
         guard let image=context.createCGImage(input,from:input.extent) else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self=self, self.isCurrent?() == true else { return }
-            self.view?.image=image; self.view?.needsDisplay=true; self.onFrame?()
+            self?.deliver(image)
         }
     }
+    // Main-thread delivery is also exercised with synthetic images by the regression runner.
+    func deliver(_ image: CGImage) {
+        precondition(Thread.isMainThread)
+        guard isCurrent?() == true else { return }
+        view?.image=image; view?.needsDisplay=true
+        onFrame?()
+    }
+    func cancel() { isCurrent=nil; onFrame=nil }
 }
 func largestAXWindow(_ application: AXUIElement) -> AXUIElement? {
     var raw:CFTypeRef?
@@ -142,6 +149,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var status:NSTextField!
     var sink:FrameSink?
     var generation = 0
+    var geometryValid = false
     var stream:SCStream?
     var buttons:[NSButton]=[]
     var selected=0
@@ -163,7 +171,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func selectSlot(_ sender:NSButton) {
         guard !pending else { return }
         let slot=sender.tag; pending=true; buttons.forEach{$0.isEnabled=false}
-        generation += 1; selected=0; viewer.target=nil; viewer.image=nil; viewer.needsDisplay=true
+        invalidateConnection()
         status.stringValue="正在启动账号 \(slot)……首次准备可能需要几分钟。"
         if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess(); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许屏幕录制，然后重启并重试。"; return }
         if !AXIsProcessTrusted() { let options=[kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary; _ = AXIsProcessTrustedWithOptions(options); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许辅助功能权限，然后重试。"; return }
@@ -179,11 +187,58 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func done(_ text:String) { pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue=text }
+    // Detach synchronously. Completion of an old stop must never touch the new stream.
+    func invalidateConnection(_ message: String? = nil) {
+        generation += 1; geometryValid=false; selected=0
+        viewer.target=nil; viewer.targetFrame = .zero; viewer.image=nil; viewer.needsDisplay=true
+        sink?.cancel(); sink=nil
+        let old=stream; stream=nil
+        if let message=message {
+            window.title="Fusion: Alignment failed"
+            status.stringValue=message
+        } else { window.title="Fusion: Disconnected" }
+        if let old=old { stopDetached { try await old.stopCapture() } }
+    }
+    @discardableResult
+    func stopDetached(_ stop: @escaping () async throws -> Void) -> Task<Void, Never> {
+        Task { @MainActor in try? await stop() }
+    }
+    func geometryFailed(_ message: String, source: AXUIElement?, application: AXUIElement?) {
+        if let source=source {
+            _=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanTrue)
+        } else if let application=application {
+            // Even when no main window passes the size filter, minimize any available source windows.
+            var raw: CFTypeRef?
+            if AXUIElementCopyAttributeValue(application,kAXWindowsAttribute as CFString,&raw) == .success,
+               let windows=raw as? [AXUIElement] {
+                for window in windows { _=AXUIElementSetAttributeValue(window,kAXMinimizedAttribute as CFString,kCFBooleanTrue) }
+            }
+        }
+        invalidateConnection(message)
+    }
+    func isCurrent(_ token: Int, _ slot: Int) -> Bool {
+        generation == token && selected == slot && geometryValid
+    }
+    func installCallbacks(_ frameSink: FrameSink, token: Int, slot: Int) {
+        frameSink.isCurrent={ [weak self] in self?.isCurrent(token,slot) == true }
+        frameSink.onFrame={ [weak self, weak frameSink] in
+            guard let self=self, self.isCurrent(token,slot) else { return }
+            self.window.title="Fusion: Ready slot \(slot)"
+            frameSink?.onFrame=nil
+        }
+    }
     func connect(_ slot:Int) {
+        let token=generation
         guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).first else { done("账号未启动"); return }
+        geometryValid=false
+        // Normally selection already detached this; direct reconnects use the same ownership rule.
+        let old=stream; stream=nil; sink?.cancel(); sink=nil
         Task { @MainActor in
+            var local: SCStream?
+            var localSink: FrameSink?
             do {
-                if let old=stream { try? await old.stopCapture(); stream=nil }
+                if let old=old { try? await old.stopCapture(); guard generation == token else { return } }
+                guard generation == token else { return }
                 for n in 1...5 {
                     guard let candidate=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(n)).first else { continue }
                     let element=AXUIElementCreateApplication(candidate.processIdentifier)
@@ -193,60 +248,79 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     }
                 }
                 try await Task.sleep(nanoseconds:600_000_000)
+                guard generation == token else { return }
                 let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
+                guard generation == token else { return }
                 guard let target=content.windows.first(where:{$0.owningApplication?.processID == app.processIdentifier && $0.frame.width > 100 && $0.frame.height > 100}) else { throw NSError(domain:"fusion",code:1,userInfo:[NSLocalizedDescriptionKey:"没有找到 Viber 窗口"]) }
                 let config=SCStreamConfiguration(); config.width=Int(target.frame.width); config.height=Int(target.frame.height); config.minimumFrameInterval=CMTime(value:1,timescale:10); config.queueDepth=3; config.showsCursor=false
                 let next=SCStream(filter:SCContentFilter(desktopIndependentWindow:target),configuration:config,delegate:nil)
-                let frameSink=FrameSink(viewer); let currentGeneration=generation
-                frameSink.isCurrent={ [weak self] in self?.generation == currentGeneration }
+                local=next
+                let frameSink=FrameSink(viewer); localSink=frameSink
+                installCallbacks(frameSink,token:token,slot:slot)
                 sink=frameSink
                 try next.addStreamOutput(frameSink,type:.screen,sampleHandlerQueue:DispatchQueue(label:"haituo.viber.frames"))
                 selected=slot
-                frameSink.onFrame={ [weak self, weak frameSink] in
-                    guard let self=self, self.selected==slot else { return }
-                    self.window.title="Fusion: Ready slot \(slot)"
-                    frameSink?.onFrame=nil
-                }
-                try await next.startCapture(); stream=next; viewer.target=app; viewer.targetFrame=target.frame
+                try await next.startCapture()
+                guard generation == token else { frameSink.cancel(); try? await next.stopCapture(); return }
+                stream=next; local=nil; viewer.target=app; viewer.targetFrame=target.frame
                 window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true)
+                // Alignment owns validity. Frames arriving before validation keep the first-frame callback.
+                alignSourceWindow(whileConnecting:true)
+                guard generation == token else {
+                    // Invalidation detached and stopped the stream already; only finish our pending request.
+                    pending=false; buttons.forEach{$0.isEnabled=true}; return
+                }
                 done("账号 \(slot) 画面已连接；仅支持可访问控件点击，输入与滚动尚未完整验证。")
-                alignSourceWindow()
-            } catch { done("连接失败：\(error.localizedDescription)") }
+            } catch {
+                let failed=local; localSink?.cancel()
+                if generation == token {
+                    invalidateConnection()
+                    done("连接失败：\(error.localizedDescription)")
+                }
+                // Stop only the local unpublished stream; never clear state after this await.
+                if let failed=failed { try? await failed.stopCapture() }
+            }
         }
     }
     func windowDidMove(_ notification:Notification) { alignSourceWindow() }
     func windowDidResize(_ notification:Notification) { alignSourceWindow() }
-    func alignSourceWindow() {
-        guard !pending, selected > 0, let app=viewer.target, let window=window else { return }
+    func alignSourceWindow(whileConnecting: Bool = false) {
+        guard (!pending || whileConnecting), selected > 0, let app=viewer.target, let window=window else { return }
+        geometryValid=false
+        let application=AXUIElementCreateApplication(app.processIdentifier)
+        let source=largestAXWindow(application)
+        func fail(_ message: String) {
+            geometryFailed(message,source:source,application:application)
+        }
         guard let rows=CGWindowListCopyWindowInfo([.optionIncludingWindow],CGWindowID(window.windowNumber)) as? [[String:Any]],
               let row=rows.first, let bounds=row[kCGWindowBounds as String] as? [String:Any],
               let x=(bounds["X"] as? NSNumber)?.doubleValue, let y=(bounds["Y"] as? NSNumber)?.doubleValue,
-              let width=(bounds["Width"] as? NSNumber)?.doubleValue, let height=(bounds["Height"] as? NSNumber)?.doubleValue else { return }
-        let application=AXUIElementCreateApplication(app.processIdentifier)
-        guard let source=largestAXWindow(application) else { viewer.target=nil; status.stringValue="无法识别 Viber 主窗口，已暂停操作。"; return }
+              let width=(bounds["Width"] as? NSNumber)?.doubleValue, let height=(bounds["Height"] as? NSNumber)?.doubleValue else { fail("无法获取宿主窗口几何，已暂停操作。"); return }
+        guard let source=source else { fail("无法识别 Viber 主窗口，已暂停操作。"); return }
         var desiredSize=CGSize(width:max(1,width-20),height:max(1,height-90))
         var desiredPosition=CGPoint(x:x+10,y:y+80)
-        guard let size=AXValueCreate(.cgSize,&desiredSize),let pos=AXValueCreate(.cgPoint,&desiredPosition) else { return }
+        guard let size=AXValueCreate(.cgSize,&desiredSize),let pos=AXValueCreate(.cgPoint,&desiredPosition) else { fail("无法创建窗口几何，已暂停操作。"); return }
         let sizeResult=AXUIElementSetAttributeValue(source,kAXSizeAttribute as CFString,size)
         let positionResult=AXUIElementSetAttributeValue(source,kAXPositionAttribute as CFString,pos)
         var actualPos:CFTypeRef?,actualSize:CFTypeRef?,p=CGPoint.zero,z=CGSize.zero
         let readPos=AXUIElementCopyAttributeValue(source,kAXPositionAttribute as CFString,&actualPos)
         let readSize=AXUIElementCopyAttributeValue(source,kAXSizeAttribute as CFString,&actualSize)
+        var decoded=false
         if let ap=actualPos,let az=actualSize,CFGetTypeID(ap)==AXValueGetTypeID(),CFGetTypeID(az)==AXValueGetTypeID() {
-            _=AXValueGetValue(ap as! AXValue,.cgPoint,&p); _=AXValueGetValue(az as! AXValue,.cgSize,&z)
+            decoded=AXValueGetValue(ap as! AXValue,.cgPoint,&p) && AXValueGetValue(az as! AXValue,.cgSize,&z)
         }
-        if sizeResult == .success, positionResult == .success, readPos == .success, readSize == .success,
+        if decoded, z.width > 0, z.height > 0, p.x.isFinite, p.y.isFinite, z.width.isFinite, z.height.isFinite,
+           sizeResult == .success, positionResult == .success, readPos == .success, readSize == .success,
            CGRect(x:x,y:y,width:width,height:height).insetBy(dx:-1,dy:-1).contains(CGRect(origin:p,size:z)) {
-            viewer.targetFrame=CGRect(origin:p,size:z)
+            viewer.targetFrame=CGRect(origin:p,size:z); geometryValid=true
         } else {
-            _=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanTrue)
-            viewer.target=nil
-            viewer.image=nil; viewer.needsDisplay=true; generation += 1
-            window.title="Fusion: Alignment failed"
-            status.stringValue="无法安全对齐 Viber 窗口：size=\(sizeResult.rawValue) position=\(positionResult.rawValue) host=\(Int(width))x\(Int(height)) actual=\(Int(z.width))x\(Int(z.height))@\(Int(p.x)),\(Int(p.y))；已暂停操作。"
+            fail("无法安全对齐 Viber 窗口：size=\(sizeResult.rawValue) position=\(positionResult.rawValue) host=\(Int(width))x\(Int(height)) actual=\(Int(z.width))x\(Int(z.height))@\(Int(p.x)),\(Int(p.y))；已暂停操作。")
         }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool { true }
 }
+#if !STATE_REGRESSION
 let app=NSApplication.shared
 let delegate=Delegate(); app.delegate=delegate; app.setActivationPolicy(.regular); app.run()
+
+#endif
