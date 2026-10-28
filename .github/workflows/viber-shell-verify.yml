@@ -2,7 +2,7 @@ name: Viber native shell integration
 on:
   push:
     branches: ['fusion/viber-shell']
-    paths: ['development/fusion-shell.patch', 'development/viber-input-main.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml', '!scripts/viber-shell-native-check.cjs']
+    paths: ['development/fusion-shell.patch', 'development/viber-input-main.patch', 'development/viber-shell-ui.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml', '!scripts/viber-shell-native-check.cjs']
 permissions:
   contents: read
 concurrency:
@@ -41,6 +41,15 @@ jobs:
             git config user.email 'fusion@users.noreply.github.com'
             git commit -m 'feat(viber): wire focused input with the shared Chinese-send setting'
             git push origin HEAD:fusion/viber-shell
+          fi
+          if git apply --check development/viber-shell-ui.patch; then
+            git apply --index development/viber-shell-ui.patch
+            git config user.name 'Haituo Fusion'
+            git config user.email 'fusion@users.noreply.github.com'
+            git commit -m 'fix(viber): route unsupported workspaces safely and show native account controls'
+            git push origin HEAD:fusion/viber-shell
+          else
+            git apply --reverse --check development/viber-shell-ui.patch
           fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   verify:
