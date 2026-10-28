@@ -2,6 +2,8 @@ param([string]$Executable)
 $ErrorActionPreference='Stop'
 $base=Join-Path $env:RUNNER_TEMP 'haituo-viber-windows-isolation'
 New-Item -ItemType Directory -Force $base | Out-Null
+$shared=Join-Path $env:APPDATA 'ViberPC'
+$sharedBefore=@{};Get-ChildItem -LiteralPath $shared -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {$sharedBefore[$_.FullName]=$_.LastWriteTimeUtc.Ticks}
 $report=[ordered]@{syntheticData=$true;loggedIn=$false;version=(Get-Item $Executable).VersionInfo.ProductVersion;profiles=@()}
 # Scan only public vendor executable constants, never account files.
 $bytes=[IO.File]::ReadAllBytes($Executable)
@@ -32,12 +34,15 @@ foreach($slot in 1..2){
  $start.EnvironmentVariables['USERPROFILE']=Join-Path $root 'User'
  $process=[Diagnostics.Process]::Start($start)
  Start-Sleep -Seconds 15
- $matches=@(Get-CimInstance Win32_Process -Filter "Name='Viber.exe'" | Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($app,[StringComparison]::OrdinalIgnoreCase)})
- $windows=@(foreach($item in $matches){$p=Get-Process -Id $item.ProcessId -ErrorAction SilentlyContinue;if($p -and $p.MainWindowHandle -ne 0){[ordered]@{pid=$p.Id;handle=$p.MainWindowHandle.ToInt64();responding=$p.Responding}}})
- $report.profiles+=@([ordered]@{slot=$slot;processes=$matches.Count;windows=$windows;roamingFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'Roaming') -Recurse -File -ErrorAction SilentlyContinue).Count;localFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'Local') -Recurse -File -ErrorAction SilentlyContinue).Count;userFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'User') -Recurse -File -ErrorAction SilentlyContinue).Count})
+ $slotProcesses=@(Get-CimInstance Win32_Process -Filter "Name='Viber.exe'" | Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($app,[StringComparison]::OrdinalIgnoreCase)})
+ $windows=@(foreach($item in $slotProcesses){$p=Get-Process -Id $item.ProcessId -ErrorAction SilentlyContinue;if($p -and $p.MainWindowHandle -ne 0){[ordered]@{pid=$p.Id;handle=$p.MainWindowHandle.ToInt64();responding=$p.Responding}}})
+ $dataFiles=@(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notlike ($app+'*') -and $_.FullName -match '(?i)[\\/](ViberPC|ViberData|UserData)[\\/]'})
+ $report.profiles+=@([ordered]@{profileDataFiles=$dataFiles.Count;slot=$slot;processes=$slotProcesses.Count;windows=$windows;roamingFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'Roaming') -Recurse -File -ErrorAction SilentlyContinue).Count;localFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'Local') -Recurse -File -ErrorAction SilentlyContinue).Count;userFiles=@(Get-ChildItem -LiteralPath (Join-Path $root 'User') -Recurse -File -ErrorAction SilentlyContinue).Count})
 }
 $report.independentWindows=(@($report.profiles | Where-Object {$_.windows.Count -gt 0}).Count -eq 2)
-$report.isolatedWriteObserved=(@($report.profiles | Where-Object {$_.roamingFiles+$_.localFiles+$_.userFiles -gt 0}).Count -eq 2)
+$sharedTouched=@(Get-ChildItem -LiteralPath $shared -File -Recurse -ErrorAction SilentlyContinue | Where-Object {-not $sharedBefore.ContainsKey($_.FullName) -or $sharedBefore[$_.FullName] -ne $_.LastWriteTimeUtc.Ticks}).Count
+$report.sharedDefaultProfileFilesChanged=$sharedTouched
+$report.isolatedWriteObserved=(@($report.profiles | Where-Object {$_.profileDataFiles -gt 0}).Count -eq 2 -and $sharedTouched -eq 0)
 New-Item -ItemType Directory -Force 'audit-results' | Out-Null
 $report | ConvertTo-Json -Depth 10 | Set-Content audit-results/viber-windows-isolation.json -Encoding UTF8
 $report | ConvertTo-Json -Depth 10 | Write-Host
