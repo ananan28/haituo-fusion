@@ -1,8 +1,8 @@
 name: Viber macOS integrated-view prototype
 on:
   push:
-    branches: ['spike/viber-macos-fusion']
-    paths: ['viber-fusion/main.swift', 'viber-fusion/integrated-click-test.swift', 'viber-fusion/stack-check.swift', '.github/workflows/viber-fusion-ui.yml']
+    branches: ['fusion/viber-integration']
+    paths: ['viber-mac-preview/**', 'viber-switch/**', 'viber-fusion/main.swift', 'viber-fusion/integrated-click-test.swift', 'viber-fusion/stack-check.swift', '.github/workflows/viber-fusion-ui.yml']
 permissions:
   contents: read
 jobs:
