@@ -1,0 +1,64 @@
+name: Viber real unlinked shell integration
+on:
+  push:
+    branches: ['fusion/viber-shell']
+    paths: ['scripts/viber-shell-native-check.cjs', 'viber-fusion/normalized-click-point.swift', '.github/workflows/viber-shell-real.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  unlinked-native-shell:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fusion-viber-shell-macos-2dde34ae3feb8520b43808ef4464b35a1a998f2e
+          run-id: 40630076576
+          github-token: ${{ github.token }}
+          path: packaged
+      - name: Prepare runner display and official unlinked Viber
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc viber-fusion/runner-display.swift -o "$RUNNER_TEMP/display"
+          "$RUNNER_TEMP/display"
+          curl --fail --location --retry 2 --max-time 180 https://download.viber.com/desktop/mac/online/Viber.dmg -o "$RUNNER_TEMP/Viber.dmg"
+          mkdir -p "$RUNNER_TEMP/viber-volume"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/viber-volume" "$RUNNER_TEMP/Viber.dmg"
+          trap 'hdiutil detach "$RUNNER_TEMP/viber-volume" || true' EXIT
+          sourceApp="$(find "$RUNNER_TEMP/viber-volume" -maxdepth 2 -type d -name '*.app' -print -quit)"
+          test -n "$sourceApp"
+          codesign --verify --deep --strict "$sourceApp"
+          ditto "$sourceApp" /Applications/Viber.app
+          open -n /Applications/Viber.app
+          for i in {1..50}; do
+            version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Viber.app/Contents/Info.plist 2>/dev/null || true)
+            [ "$version" != "1.0.0.110" ] && [ -n "$version" ] && break
+            sleep 3
+          done
+          test "$version" != "1.0.0.110"
+          pkill -f '^/Applications/Viber.app/Contents/MacOS/Viber' || true
+      - name: Verify real native capture, 15 switches, AX forwarding and source containment
+        env:
+          HAITUO_VIBER_CLICK_HELPER: ${{ runner.temp }}/normalized-click
+          HAITUO_VIBER_STACK_HELPER: ${{ runner.temp }}/stack-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shell-dmg" "macos/out/海拓-darwin-arm64"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/shell-dmg" packaged/macos/out/*.dmg
+          trap 'hdiutil detach "$RUNNER_TEMP/shell-dmg" || true' EXIT
+          ditto "$RUNNER_TEMP/shell-dmg/海拓.app" "macos/out/海拓-darwin-arm64/海拓.app"
+          swiftc viber-fusion/normalized-click-point.swift -o "$RUNNER_TEMP/normalized-click"
+          swiftc viber-fusion/stack-check.swift -o "$RUNNER_TEMP/stack-check"
+          node scripts/viber-shell-native-check.cjs --real-viber
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-shell-real-unlinked-report
+          path: audit-results/viber-shell-unlinked-real.json
