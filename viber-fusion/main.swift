@@ -238,11 +238,12 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func connect(_ slot:Int) {
         let token=generation
-        guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).first else { done("账号未启动"); return }
+        guard let initialApp=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).first else { done("账号未启动"); return }
         geometryValid=false
         // Normally selection already detached this; direct reconnects use the same ownership rule.
         let old=stream; stream=nil; sink?.cancel(); sink=nil
         Task { @MainActor in
+            var app=initialApp
             var local: SCStream?
             var localSink: FrameSink?
             do {
@@ -263,14 +264,19 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 var discovered: SCWindow?
                 for _ in 0..<60 {
                     guard generation == token else { return }
-                    if let source=largestAXWindow(AXUIElementCreateApplication(app.processIdentifier)) {
-                        let result=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanFalse)
-                        guard result == .success else { throw NSError(domain:"fusion",code:Int(result.rawValue),userInfo:[NSLocalizedDescriptionKey:"Viber 窗口尚无法恢复，辅助功能权限或窗口状态异常"]) }
+                    let running=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).filter{!$0.isTerminated}
+                    // Viber can replace its launcher process before creating the first window.
+                    let pids=Set(running.map{$0.processIdentifier})
+                    for candidate in running {
+                        if let source=largestAXWindow(AXUIElementCreateApplication(candidate.processIdentifier)) {
+                            let result=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanFalse)
+                            guard result == .success else { throw NSError(domain:"fusion",code:Int(result.rawValue),userInfo:[NSLocalizedDescriptionKey:"Viber 窗口尚无法恢复，辅助功能权限或窗口状态异常"]) }
+                        }
                     }
                     let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
                     guard generation == token else { return }
-                    discovered=content.windows.filter({$0.owningApplication?.processID == app.processIdentifier && $0.frame.width > 100 && $0.frame.height > 100}).max(by:{$0.frame.width*$0.frame.height < $1.frame.width*$1.frame.height})
-                    if discovered != nil { break }
+                    discovered=content.windows.filter({pids.contains($0.owningApplication?.processID ?? -1) && $0.frame.width > 100 && $0.frame.height > 100}).max(by:{$0.frame.width*$0.frame.height < $1.frame.width*$1.frame.height})
+                    if let discovered=discovered,let current=running.first(where:{$0.processIdentifier==discovered.owningApplication?.processID}) { app=current; break }
                     try await Task.sleep(nanoseconds:250_000_000)
                     guard generation == token else { return }
                 }
