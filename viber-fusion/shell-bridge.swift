@@ -39,6 +39,7 @@ func command(_ object: [String:Any]) {
     if type=="select" {
         guard let epoch=object["epoch"] as? Int,epoch>clientEpoch,let slot=object["slot"] as? Int,(1...5).contains(slot),let bounds=object["bounds"] as? [String:Any],let host=frame(bounds) else { return }
         clientEpoch=epoch;lastState="";lastImageAt = .distantPast
+        if let pid=object["hostPID"] as? Int32 { bridgeDelegate.hostApplication=NSRunningApplication(processIdentifier:pid) }
         bridgeDelegate.externalHostFrame=host
         // Superseding a selection owns pending; invalidateConnection itself never changes it.
         bridgeDelegate.pending=false

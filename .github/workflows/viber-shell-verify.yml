@@ -24,7 +24,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git apply --check development/fusion-shell.patch; then
+          if git cat-file -e HEAD:src/app/js/haituo-viber-bridge.js 2>/dev/null; then
+            echo "Native integration already present; verify current source"
+          elif git apply --check development/fusion-shell.patch; then
             git apply --index development/fusion-shell.patch
             git config user.name 'Haituo Fusion'
             git config user.email 'fusion@users.noreply.github.com'
@@ -85,6 +87,14 @@ jobs:
       - name: Verify fresh native startup and settings
         timeout-minutes: 8
         run: node scripts/native-attachments-check.cjs
+      - name: Verify actual packaged Viber pane with synthetic helper, OCR and local provider
+        if: matrix.target == 'macos'
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc viber-fusion/synthetic-shell-helper.swift -o "$RUNNER_TEMP/synthetic-viber-helper"
+          node scripts/viber-shell-native-check.cjs "$RUNNER_TEMP/synthetic-viber-helper"
       - name: Package editable source
         run: python scripts/package-source.py --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4

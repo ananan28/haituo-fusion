@@ -17,4 +17,17 @@ test('Viber pane clears images on account changes and ignores delayed OCR/transl
  await act(async()=>{for(const listener of listeners)listener({accountId:'viber-a',epoch:a,type:'frame',image:'data:image/png;base64,AA=='})});
  assert.equal(dom.window.document.querySelector('img'),null);
  assert(commands.some(x=>x.type==='hide'&&x.id==='viber-a'&&x.epoch===a));
+ async function ready(id){await act(async()=>{for(const listener of listeners){listener({accountId:id,epoch,type:'frame',image:'data:image/png;base64,AA=='});listener({accountId:id,epoch,type:'state',ready:true,status:'synthetic ready'})}})}
+ function button(label){return [...dom.window.document.querySelectorAll('button')].find(node=>node.textContent===label)}
+ let releaseOCR;const originalCommand=api.command;
+ api.command=(type,payload)=>type==='ocr'?new Promise(resolve=>{releaseOCR=resolve}):originalCommand(type,payload);
+ await ready('viber-b');await act(async()=>button('识别当前画面文字').click());
+ await act(async()=>render('viber-a'));await act(async()=>releaseOCR({original:'late old OCR'}));
+ assert.equal(dom.window.document.querySelector('textarea[aria-label="Viber 翻译原文"]').value,'');
+ api.command=originalCommand;await ready('viber-a');await act(async()=>button('识别当前画面文字').click());
+ assert.equal(dom.window.document.querySelector('textarea[aria-label="Viber 翻译原文"]').value,'synthetic OCR');
+ let releaseTranslation;api.translate=()=>new Promise(resolve=>{releaseTranslation=resolve});
+ await act(async()=>button('翻译').click());assert(releaseTranslation);
+ await act(async()=>render('viber-b'));await act(async()=>releaseTranslation({text:'late old translation'}));
+ assert.equal(dom.window.document.querySelector('textarea[aria-label="Viber 译文"]').value,'');
 });

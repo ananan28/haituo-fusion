@@ -35,7 +35,7 @@ function createBridge({binary,platform=process.platform,spawn=require('node:chil
   if(!validID(id))throw Error('Viber 账号标识无效');
   const rect=bounds();if(!available())throw Error('当前安装包尚不支持 Viber 原生融合（需要 macOS 捕获助手）');
   if(!accounts.has(id)){const slot=[1,2,3,4,5].find(slot=>![...accounts.values()].includes(slot));if(!slot)throw Error('Viber 原型最多保留五个独立账号目录；删除标签不会复用其他账号的数据');const next=Object.fromEntries([...accounts,[id,slot]]);saveAccounts(next);accounts.set(id,slot)}
-  start();active=id;epoch++;reset();write({type:'select',slot:accounts.get(id),epoch,bounds:rect});return{epoch,slot:accounts.get(id)}
+  start();active=id;epoch++;reset();write({type:'select',slot:accounts.get(id),epoch,hostPID:process.pid,bounds:rect});return{epoch,slot:accounts.get(id)}
  }
  function current(id,token){return active===id&&token===epoch&&!!child}
  function hide(id,token){if(!current(id,token))return;write({type:'hide',epoch:++epoch});reset();active=null}

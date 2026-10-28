@@ -159,6 +159,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var selected=0
     var pending=false
     var showHost=true
+    var hostApplication: NSRunningApplication?
     var externalHostFrame: CGRect?
     func applicationDidFinishLaunching(_ notification:Notification) {
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:780),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -273,6 +274,9 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if showHost { window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true) }
                 // Alignment owns validity. Frames arriving before validation keep the first-frame callback.
                 alignSourceWindow(whileConnecting:true)
+                if !showHost, let host=hostApplication, NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+                    _=host.activate(options:[.activateIgnoringOtherApps])
+                }
                 guard generation == token else {
                     // Invalidation detached and stopped the stream already; only finish our pending request.
                     pending=false; buttons.forEach{$0.isEnabled=true}; return
