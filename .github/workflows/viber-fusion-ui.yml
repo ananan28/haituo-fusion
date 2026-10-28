@@ -2,7 +2,7 @@ name: Viber macOS integrated-view prototype
 on:
   push:
     branches: ['fusion/viber-integration']
-    paths: ['viber-mac-preview/**', 'viber-switch/**', 'viber-fusion/main.swift', 'viber-fusion/integrated-click-test.swift', 'viber-fusion/stack-check.swift', '.github/workflows/viber-fusion-ui.yml']
+    paths: ['viber-fusion/runner-display.swift', 'viber-mac-preview/**', 'viber-switch/**', 'viber-fusion/main.swift', 'viber-fusion/integrated-click-test.swift', 'viber-fusion/stack-check.swift', '.github/workflows/viber-fusion-ui.yml']
 permissions:
   contents: read
 jobs:
@@ -11,6 +11,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Configure runner display for the unchanged 1100x780 host
+        run: |
+          swiftc viber-fusion/runner-display.swift -o "$RUNNER_TEMP/runner-display"
+          "$RUNNER_TEMP/runner-display"
       - name: Build prototype and prepare five unlinked Viber instances
         shell: bash
         run: |
