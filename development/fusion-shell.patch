@@ -1,0 +1,486 @@
+diff --git a/scripts/build.py b/scripts/build.py
+index c57cec5..2e249a4 100644
+--- a/scripts/build.py
++++ b/scripts/build.py
+@@ -95,6 +95,11 @@ def prepare(target):
+                 shutil.copytree(path, nested/path.name, dirs_exist_ok=True)
+     if target == 'macos':
+         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
++        bridge_source=ROOT/'viber-fusion/shell-bridge.swift'
++        if bridge_source.exists():
++            combined=tools/'viber-bridge-main.swift'
++            combined.write_text((ROOT/'viber-fusion/main.swift').read_text(encoding='utf-8')+'\n'+bridge_source.read_text(encoding='utf-8'),encoding='utf-8')
++            run(['swiftc','-O','-swift-version','5','-D','FUSION_BRIDGE',combined,'-o',app/'native/haituo-viber-fusion'])
+     if target == 'windows':
+         # Always stage a clean bundle; the runtime test hook is injected later
+         # into a separate test build, never into the release package.
+@@ -209,11 +214,13 @@ def macos(app, tools):
+          '--platform=darwin','--arch=arm64','--electron-version='+CFG['tools']['electron'],
+          '--app-version='+version,'--build-version='+version,'--icon='+str(icon),
+          '--app-bundle-id=com.haituo.desktop','--out=macos/out','--overwrite',
+-         '--asar.unpack={**/*.node,native/haituo-ocr}','--extend-info=macos/Info.plist'])
++         '--asar.unpack={**/*.node,native/haituo-ocr,native/haituo-viber-fusion}','--extend-info=macos/Info.plist'])
+     bundle = ROOT/'macos/out/海拓-darwin-arm64/海拓.app'
+     ocr_dest = bundle/'Contents/Resources/app.asar.unpacked/native/haituo-ocr'
+     ocr_dest.parent.mkdir(parents=True,exist_ok=True)
+     shutil.copy2(app/'native/haituo-ocr',ocr_dest)
++    if (app/'native/haituo-viber-fusion').exists():
++        shutil.copy2(app/'native/haituo-viber-fusion',ocr_dest.parent/'haituo-viber-fusion')
+     ocr_dest.chmod(0o755)
+     p = bundle/'Contents/Info.plist'
+     info = plistlib.loads(p.read_bytes());info['LSUIElement']=False;info.pop('LSBackgroundOnly',None)
+diff --git a/scripts/viber-bridge.test.cjs b/scripts/viber-bridge.test.cjs
+new file mode 100644
+index 0000000..9378421
+--- /dev/null
++++ b/scripts/viber-bridge.test.cjs
+@@ -0,0 +1,38 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),{EventEmitter}=require('node:events');
++const {createBridge}=require('../src/app/js/haituo-viber-bridge');
++function fixture(options={}){
++ const children=[],events=[],saved=[];let box={x:20,y:40,width:1200,height:900};
++ function spawn(){const proc=new EventEmitter;proc.stdout=new EventEmitter;proc.stdout.setEncoding=()=>{};proc.stderr=new EventEmitter;proc.stdin=new EventEmitter;proc.stdin.writable=true;proc.commands=[];proc.stdin.write=line=>proc.commands.push(JSON.parse(line));proc.stdin.end=()=>proc.emit('exit',0);proc.kill=()=>{proc.killed=true;proc.emit('exit',1)};children.push(proc);return proc}
++ const bridge=createBridge({binary:'/synthetic/helper',platform:'darwin',spawn,exists:()=>true,readAccounts:()=>({}),saveAccounts:value=>saved.push(value),hostBounds:()=>box,onEvent:event=>events.push(event),recognize:async()=>({original:'synthetic OCR'}),...options});
++ function send(value,proc=children.at(-1)){proc.stdout.emit('data',JSON.stringify(value)+'\n')}
++ return{bridge,children,events,saved,send,setBox(value){box=value}};
++}
++const image=Buffer.from('synthetic pixels').toString('base64');
++function frame(epoch,slot=1){return{type:'frame',epoch,slot,image,width:8,height:8}}
++test('Viber frame and state routing rejects stale epoch and wrong account slot',()=>{
++ const x=fixture();try{const a=x.bridge.select('viber-a'),b=x.bridge.select('viber-b');x.events.length=0;
++ x.send(frame(a.epoch,1));x.send(frame(b.epoch,1));assert.equal(x.events.length,0);
++ x.send(frame(b.epoch,2));assert.equal(x.events[0].accountId,'viber-b');
++ x.send({type:'state',epoch:b.epoch,slot:0,ready:false,status:'synthetic alignment error'});assert.equal(x.events.at(-1).status,'synthetic alignment error');
++ }finally{x.bridge.close()}
++});
++test('old pane cleanup cannot hide a newer selection or forward its clicks',()=>{
++ const x=fixture();try{const a=x.bridge.select('viber-a'),b=x.bridge.select('viber-b');const count=x.children[0].commands.length;x.bridge.hide('viber-a',a.epoch);assert.equal(x.children[0].commands.length,count);
++ x.send({type:'state',epoch:b.epoch,slot:2,ready:true});assert.equal(x.bridge.click('viber-a',a.epoch,.5,.5),false);assert.equal(x.bridge.click('viber-b',b.epoch,.5,.5),true);
++ assert.throws(()=>x.bridge.click('viber-b',b.epoch,2,.5),/坐标/);
++ }finally{x.bridge.close()}
++});
++test('OCR result is discarded after account selection changes',async()=>{
++ let release;const x=fixture({recognize:()=>new Promise(resolve=>{release=resolve})});try{const a=x.bridge.select('viber-a');x.send(frame(a.epoch));x.send({type:'state',epoch:a.epoch,slot:1,ready:true});const pending=x.bridge.ocr('viber-a',a.epoch);x.bridge.select('viber-b');release({original:'old synthetic OCR'});await assert.rejects(pending,/账号已切换/)}finally{x.bridge.close()}
++});
++test('five reserved account directories never get reassigned after tab removal',()=>{
++ const x=fixture();try{for(let i=0;i<5;i++){const selected=x.bridge.select('viber-'+i);x.bridge.hide('viber-'+i,selected.epoch)}assert.throws(()=>x.bridge.select('viber-other'),/五个/);assert.equal(Object.keys(x.saved.at(-1)).length,5)}finally{x.bridge.close()}
++});
++test('native helper restart ignores old stdout and requires new Ready',()=>{
++ const x=fixture();try{const a=x.bridge.select('viber-a'),old=x.children[0];old.emit('exit',1);const b=x.bridge.select('viber-a');x.events.length=0;x.send(frame(b.epoch),old);assert.equal(x.events.length,0);assert.equal(x.bridge.click('viber-a',b.epoch,.1,.1),false);x.send(frame(b.epoch));x.send({type:'state',epoch:b.epoch,slot:1,ready:true});assert.equal(x.bridge.click('viber-a',b.epoch,.1,.1),true)}finally{x.bridge.close()}
++});
++test('unsupported OS and invalid host geometry cannot reserve accounts or launch helpers',()=>{
++ const unsupported=fixture({platform:'win32'});assert.throws(()=>unsupported.bridge.select('viber-a'),/macOS/);assert.equal(unsupported.saved.length,0);unsupported.bridge.close();
++ const invalid=fixture();invalid.setBox(null);assert.throws(()=>invalid.bridge.select('viber-a'),/几何/);assert.equal(invalid.children.length,0);invalid.bridge.close();
++});
+diff --git a/scripts/viber-pane.dom.cjs b/scripts/viber-pane.dom.cjs
+new file mode 100644
+index 0000000..01ad68f
+--- /dev/null
++++ b/scripts/viber-pane.dom.cjs
+@@ -0,0 +1,20 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),path=require('node:path');
++const modules=process.env.HAITUO_QA_NODE_MODULES;
++const {JSDOM}=require(require.resolve('jsdom',{paths:[modules]})),React=require(require.resolve('react',{paths:[modules]})),{createRoot}=require(require.resolve('react-dom/client',{paths:[modules]}));
++const {act}=React,{createPane}=require('../src/app/js/haituo-viber-pane');
++test('Viber pane clears images on account changes and ignores delayed OCR/translation',async t=>{
++ const dom=new JSDOM('<div id="root"></div>',{pretendToBeVisual:true});const previous={window:global.window,document:global.document,IS_REACT_ACT_ENVIRONMENT:global.IS_REACT_ACT_ENVIRONMENT};global.window=dom.window;global.document=dom.window.document;global.IS_REACT_ACT_ENVIRONMENT=true;
++ const listeners=new Set,commands=[];let epoch=0;
++ const api={onEvent(fn){listeners.add(fn);return()=>listeners.delete(fn)},command(type,payload){commands.push({type,...payload});if(type==='select')return Promise.resolve({epoch:++epoch});return Promise.resolve({original:'synthetic OCR'})},config:async()=>({chatTranslationProvider:'google-free'}),translate:async()=>({text:'synthetic translation'})};
++ const Pane=createPane(React,api),root=createRoot(dom.window.document.getElementById('root'));t.after(async()=>{await act(async()=>root.unmount());dom.window.close();Object.assign(global,previous)});
++ const render=id=>root.render(React.createElement(Pane,{account:{id},active:true}));
++ await act(async()=>render('viber-a'));const a=epoch;
++ await act(async()=>{for(const listener of listeners){listener({accountId:'viber-a',epoch:a,type:'frame',image:'data:image/png;base64,AA=='});listener({accountId:'viber-a',epoch:a,type:'state',ready:true,status:'synthetic ready'})}});
++ assert(dom.window.document.querySelector('img'));
++ await act(async()=>render('viber-b'));
++ assert.equal(dom.window.document.querySelector('img'),null);
++ await act(async()=>{for(const listener of listeners)listener({accountId:'viber-a',epoch:a,type:'frame',image:'data:image/png;base64,AA=='})});
++ assert.equal(dom.window.document.querySelector('img'),null);
++ assert(commands.some(x=>x.type==='hide'&&x.id==='viber-a'&&x.epoch===a));
++});
+diff --git a/src/app/bundles/main.js b/src/app/bundles/main.js
+index f58a798..e0a6143 100644
+--- a/src/app/bundles/main.js
++++ b/src/app/bundles/main.js
+@@ -29745,10 +29745,43 @@ function caishengShowTopMenu(title, items) {
+     });
+ }
+ 
++let haituoViberBridge;
++function haituoNativeViber() {
++    if(!haituoViberBridge) {
++        const fs=require('node:fs'),path=require('node:path');
++        const binary=path.join(__dirname,'../native/haituo-viber-fusion').replace(/app\.asar([/\\])/,'app.asar.unpacked$1');
++        const mapping=path.join(p.app.getPath('appData'),'Haituo','viber-account-slots.json');
++        haituoViberBridge=require('../js/haituo-viber-bridge.js').createBridge({binary,
++            readAccounts:()=>haituoProtectedRead(mapping,{}),
++            saveAccounts:value=>{if(haituoProtectedWrite(mapping,value)!==true)throw Error('Viber 账号目录映射保存失败');},
++            hostBounds:()=>Z&&!Z.isDestroyed()&&Z.isVisible()&&!Z.isMinimized()?Z.getBounds():null,
++            onEvent:value=>{if(Z&&!Z.isDestroyed())Z.webContents.send('haituo:viber-event',value);}
++        });
++        p.app.once('will-quit',()=>haituoViberBridge?.close());
++        if(Z&&!Z.__haituoViberEvents){
++            Z.__haituoViberEvents=true;
++            for(const event of ['move','resize'])Z.on(event,()=>{try{haituoViberBridge?.geometry()}catch{}});
++            for(const event of ['hide','minimize'])Z.on(event,()=>{haituoViberBridge?.close();haituoViberBridge=null;});
++            for(const event of ['show','restore'])Z.on(event,()=>{if(!Z.isDestroyed())Z.webContents.send('haituo:viber-event',{type:'reconnect'});});
++        }
++    }
++    return haituoViberBridge;
++}
++p.ipcMain.handle('haituo:viber-command',async(event,type,payload)=>{
++    if($u!=='signal-main'||event.sender!==Z?.webContents||event.senderFrame!==event.sender.mainFrame)throw Error('无效 Viber 控制来源');
++    const bridge=haituoNativeViber();
++    if(type==='select')return bridge.select(payload?.id);
++    if(type==='hide')return bridge.hide(payload?.id,payload?.epoch);
++    if(type==='click')return bridge.click(payload?.id,payload?.epoch,payload?.x,payload?.y);
++    if(type==='ocr')return bridge.ocr(payload?.id,payload?.epoch);
++    throw Error('不支持的 Viber 命令');
++});
++
+ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新增账号`, [
+     { value: `signal`, label: `新增 Signal` },
+     { value: `whatsapp`, label: `新增 WhatsApp 账号` },
+-    { value: `telegram`, label: `新增 Telegram 账号` }
++    { value: `telegram`, label: `新增 Telegram 账号` },
++    ...(process.platform===`darwin` ? [{value:`viber`,label:`新增 Viber 账号（原生预览）`}] : [])
+ ])), p.ipcMain.handle(`caisheng:show-account-menu`, async () => caishengShowTopMenu(`账号管理`, [
+     { value: `edit`, label: `编辑备注` },
+     { value: `refresh`, label: `刷新账号` },
+diff --git a/src/app/bundles/preload/main.js b/src/app/bundles/preload/main.js
+index ccbdcfe..bc3bd66 100644
+--- a/src/app/bundles/preload/main.js
++++ b/src/app/bundles/preload/main.js
+@@ -615,6 +615,8 @@ http://jedwatson.github.io/classnames
+             caishengGetWebUnreadCount(e) {
+                 return u.ipcRenderer.invoke(`caisheng:get-web-unread-count`, e);
+             },
++            caishengViberCommand(type,payload) {return u.ipcRenderer.invoke('haituo:viber-command',type,payload)},
++            caishengOnViber(callback) {const handler=(_event,value)=>callback(value);u.ipcRenderer.on('haituo:viber-event',handler);return()=>u.ipcRenderer.removeListener('haituo:viber-event',handler)},
+             caishengLaunchSignalProfile(e) {
+                 return u.ipcRenderer.invoke(`caisheng:launch-signal-profile`, e);
+             },
+@@ -230109,6 +230111,7 @@ function haituoCachedSignalTranslation(text) {
+                 allowedHosts: [ `web.whatsapp.com` ],
+                 defaultIcon: `whatsapp`
+             },
++            viber: {id:`viber`,label:`Viber`,runtime:`native-capture`,defaultIcon:`viber`},
+             telegram: {
+                 id: `telegram`,
+                 label: `Telegram`,
+@@ -230128,7 +230131,7 @@ function haituoCachedSignalTranslation(text) {
+         }
+     }
+     function bCr(e, t) {
+-        return e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
++        return e === `viber` ? process.platform===`darwin` : e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
+     }
+     function xCr() {
+         try {
+@@ -230142,14 +230145,21 @@ function haituoCachedSignalTranslation(text) {
+                 }
+                 if (!a || typeof a != `object`) continue;
+                 let o = a;
+-                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
++                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram` || o.platformId === `viber`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
+             }
+             return r || t.unshift(ECr), t;
+         } catch {
+             return [ ECr ];
+         }
+     }
++    let haituoViberPane;
+     function SCr({signal: e}) {
++        haituoViberPane ||= require('../../js/haituo-viber-pane.js').createPane(D9,{
++            command:(type,payload)=>window.SignalContext.caishengViberCommand(type,payload),
++            onEvent:callback=>window.SignalContext.caishengOnViber(callback),
++            config:()=>window.SignalContext.caishengGetTranslationConfig(),
++            translate:request=>window.SignalContext.caishengTranslate(request)
++        });
+         let {user: t} = lCr(), [r, a] = (0, D9.useState)(xCr), [o, s] = (0, D9.useState)(() => {
+             try {
+                 let e = localStorage.getItem(`caisheng.lastWorkspace`), t = xCr();
+@@ -230503,6 +230513,7 @@ function haituoCachedSignalTranslation(text) {
+             n === null && requestAnimationFrame(() => A(o));
+         }
+         async function ne(e) {
++            if(e.platformId===`viber`){s(`signal-main`);requestAnimationFrame(()=>s(e.id));return;}
+             if (x(void 0), e.id === `signal-main`) {
+                 A(`signal-main`, 0, !0), await window.SignalContext.caishengRefreshSignalProfile(`signal-main`), requestAnimationFrame(() => A(`signal-main`, 0, !0));
+                 return;
+@@ -231021,6 +231032,7 @@ function haituoCachedSignalTranslation(text) {
+                     children: e
+                 }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` && e.platformId !== `telegram` || qLoaded.includes(e.id))).map(e => {
+                     let t = gCr(e.platformId);
++                    if(e.platformId===`viber`)return (0,D9.createElement)(haituoViberPane,{key:e.id,account:e,active:!haituoHome&&o===e.id});
+                     return t.startUrl ? (0, D9.createElement)(`webview`, {
+                         className: `CaishengPlatformShell__webview`,
+                         style: {
+diff --git a/src/app/js/haituo-viber-bridge.js b/src/app/js/haituo-viber-bridge.js
+new file mode 100644
+index 0000000..eb6e62a
+--- /dev/null
++++ b/src/app/js/haituo-viber-bridge.js
+@@ -0,0 +1,48 @@
++'use strict';
++// Private native-helper pipe. Neither images nor OCR text are written to logs or account files.
++const {EventEmitter}=require('node:events');
++const validID=id=>typeof id==='string'&&/^viber-[a-z0-9][a-z0-9_-]{0,47}$/.test(id);
++function createBridge({binary,platform=process.platform,spawn=require('node:child_process').spawn,exists=require('node:fs').existsSync,readAccounts=()=>({}),saveAccounts=()=>{},hostBounds,onEvent=()=>{},recognize=require('./haituo-ocr').recognize}){
++ let child=null,epoch=0,active=null,ready=false,lastFrame=null,buffer='',closed=false;
++ const saved=readAccounts(),accounts=new Map();
++ for(const [id,slot] of Object.entries(saved||{}))if(validID(id)&&Number.isInteger(slot)&&slot>=1&&slot<=5&&![...accounts.values()].includes(slot))accounts.set(id,slot);
++ const events=new EventEmitter();events.on('event',onEvent);
++ function publish(value){events.emit('event',{accountId:active,epoch,...value})}
++ function available(){return platform==='darwin'&&exists(binary)}
++ function write(value){if(!child||!child.stdin?.writable)throw Error('Viber 捕获助手未连接');child.stdin.write(JSON.stringify(value)+'\n')}
++ function reset(message){ready=false;lastFrame=null;publish({type:'clear'});if(message)publish({type:'state',ready:false,pending:false,status:message})}
++ function retire(proc){if(child!==proc)return;child=null;buffer='';reset('Viber 捕获助手已退出，请重新选择账号')}
++ function start(){
++  if(closed)throw Error('Viber bridge closed');if(child)return;
++  if(!available())throw Error('当前安装包尚不支持 Viber 原生融合（需要 macOS 捕获助手）');
++  const proc=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});child=proc;buffer='';
++  proc.stdout.setEncoding('utf8');
++  proc.stdout.on('data',chunk=>{
++   if(child!==proc)return;buffer+=chunk;
++   if(buffer.length>9*1024*1024){proc.kill();retire(proc);return}
++   let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line)}catch{continue}
++    if(!active||event.epoch!==epoch||event.type==='frame'&&event.slot!==accounts.get(active))continue;
++    if(event.type==='clear'){reset();continue}
++    if(event.type==='state'){ready=event.ready===true;publish({type:'state',ready,pending:event.pending===true,status:String(event.status||'').slice(0,2000)});continue}
++    if(event.type==='frame'&&typeof event.image==='string'&&event.image.length<8*1024*1024&&/^[A-Za-z0-9+/]+={0,2}$/.test(event.image)&&Number.isFinite(event.width)&&Number.isFinite(event.height)&&event.width>0&&event.height>0&&event.width*event.height<40e6){lastFrame={image:event.image,epoch};publish({type:'frame',image:'data:image/jpeg;base64,'+event.image,width:event.width,height:event.height})}
++   }
++  });
++  // Drain diagnostics without recording paths, image data, QR codes, or chat text.
++  proc.stderr.on('data',()=>{});proc.on('error',()=>retire(proc));proc.on('exit',()=>retire(proc));proc.stdin.on('error',()=>retire(proc));
++ }
++ function bounds(){const r=hostBounds();if(!r||!['x','y','width','height'].every(k=>Number.isFinite(r[k]))||r.width<=0||r.height<=0)throw Error('无法获取主窗口几何');return{x:r.x,y:r.y,width:r.width,height:r.height}}
++ function select(id){
++  if(!validID(id))throw Error('Viber 账号标识无效');
++  const rect=bounds();if(!available())throw Error('当前安装包尚不支持 Viber 原生融合（需要 macOS 捕获助手）');
++  if(!accounts.has(id)){const slot=[1,2,3,4,5].find(slot=>![...accounts.values()].includes(slot));if(!slot)throw Error('Viber 原型最多保留五个独立账号目录；删除标签不会复用其他账号的数据');const next=Object.fromEntries([...accounts,[id,slot]]);saveAccounts(next);accounts.set(id,slot)}
++  start();active=id;epoch++;reset();write({type:'select',slot:accounts.get(id),epoch,bounds:rect});return{epoch,slot:accounts.get(id)}
++ }
++ function current(id,token){return active===id&&token===epoch&&!!child}
++ function hide(id,token){if(!current(id,token))return;write({type:'hide',epoch:++epoch});reset();active=null}
++ function geometry(){if(active&&child)write({type:'bounds',epoch,bounds:bounds()})}
++ function click(id,token,x,y){if(!current(id,token)||!ready)return false;if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>1||y<0||y>1)throw Error('点击坐标无效');write({type:'click',epoch,x,y});return true}
++ async function ocr(id,token){if(!current(id,token)||!ready||lastFrame?.epoch!==epoch)throw Error('当前 Viber 画面尚未就绪');const snapshot=lastFrame;const result=await recognize(Buffer.from(snapshot.image,'base64'));if(!current(id,token)||!ready)throw Error('账号已切换，已丢弃旧画面识字结果');return{original:result.original}}
++ function close(){if(closed)return;closed=true;const proc=child;child=null;epoch++;ready=false;lastFrame=null;active=null;if(proc){proc.stdin.end();const timer=setTimeout(()=>proc.kill(),2000);timer.unref?.();proc.once('exit',()=>clearTimeout(timer))}events.removeAllListeners()}
++ return{available,select,hide,geometry,click,ocr,close,onEvent(fn){events.on('event',fn);return()=>events.removeListener('event',fn)}};
++}
++module.exports={createBridge,validID};
+diff --git a/src/app/js/haituo-viber-pane.js b/src/app/js/haituo-viber-pane.js
+new file mode 100644
+index 0000000..ba10f90
+--- /dev/null
++++ b/src/app/js/haituo-viber-pane.js
+@@ -0,0 +1,26 @@
++'use strict';
++// This component receives only its own account's ephemeral native stream.
++function createPane(React,api){
++ return function ViberPane({account,active}){
++  const [state,setState]=React.useState({ready:false,status:'选择 Viber 账号以连接',image:null}),[source,setSource]=React.useState(''),[translated,setTranslated]=React.useState(''),[busy,setBusy]=React.useState(false),[target,setTarget]=React.useState('zh-CN'),[revision,reconnect]=React.useState(0);
++  const token=React.useRef(null),generation=React.useRef(0);
++  React.useEffect(()=>{
++   const current=++generation.current;token.current=null;setState({ready:false,status:'正在连接 Viber……',image:null});setSource('');setTranslated('');setBusy(false);
++   if(!active)return;
++   const off=api.onEvent(event=>{if(event.type==='reconnect'){reconnect(n=>n+1);return}if(generation.current!==current||event.accountId!==account.id||event.epoch!==token.current)return;if(event.type==='clear')setState(s=>({...s,ready:false,image:null}));else if(event.type==='frame')setState(s=>({...s,image:event.image}));else if(event.type==='state')setState(s=>({...s,...event}));});
++   api.command('select',{id:account.id}).then(result=>{if(generation.current!==current){api.command('hide',{id:account.id,epoch:result.epoch}).catch(()=>{});return}token.current=result.epoch}).catch(error=>{if(generation.current===current)setState({ready:false,status:String(error.message||error),image:null})});
++   return()=>{generation.current++;off();if(token.current!==null)api.command('hide',{id:account.id,epoch:token.current}).catch(()=>{});token.current=null};
++  },[account.id,active,revision]);
++  async function recognize(){const current=generation.current;setBusy(true);setTranslated('');try{const result=await api.command('ocr',{id:account.id,epoch:token.current});if(generation.current===current)setSource(result.original)}catch(error){if(generation.current===current)setState(s=>({...s,status:String(error.message||error)}))}finally{if(generation.current===current)setBusy(false)}}
++  async function translate(){const current=generation.current,text=source;setBusy(true);try{const cfg=await api.config();const result=await api.translate({text,targetLanguage:target,provider:cfg.chatTranslationProvider||'google-free',purpose:'input'});if(generation.current===current)setTranslated(result.text)}catch(error){if(generation.current===current)setState(s=>({...s,status:String(error.message||error)}))}finally{if(generation.current===current)setBusy(false)}}
++  function click(event){if(!state.ready||!state.image)return;const image=event.currentTarget,r=image.getBoundingClientRect(),scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale,x=(event.clientX-r.left-(r.width-width)/2)/width,y=(event.clientY-r.top-(r.height-height)/2)/height;if(x>=0&&x<=1&&y>=0&&y<=1)api.command('click',{id:account.id,epoch:token.current,x,y}).catch(()=>{})}
++  const h=React.createElement;
++  return h('section',{hidden:!active,'data-haituo-viber-account':account.id,style:{position:'absolute',inset:0,display:active?'flex':'none',flexDirection:'column',background:'#151a22',color:'#edf2fa',zIndex:active?3:0}},
++   h('div',{role:'status',style:{padding:'8px 12px',fontSize:13}},state.status,' ',h('button',{onClick:()=>reconnect(n=>n+1)},'重新连接')),
++   h('div',{style:{flex:1,minHeight:0,position:'relative'}},state.ready&&state.image?h('img',{src:state.image,alt:'Viber 当前账号画面',onClick:click,draggable:false,style:{width:'100%',height:'100%',objectFit:'contain'}}):h('p',{style:{padding:20}},'画面未就绪；可重新选择账号恢复。')),
++   h('div',{style:{padding:10,display:'flex',gap:8,alignItems:'center'}},h('button',{onClick:recognize,disabled:busy||!state.ready},'识别当前画面文字'),h('select',{'aria-label':'Viber 翻译目标语言',value:target,onChange:e=>setTarget(e.target.value)},...[['zh-CN','中文'],['en','English'],['th','ไทย']].map(([value,label])=>h('option',{key:value,value},label))),h('button',{onClick:translate,disabled:busy||!source.trim()},busy?'处理中……':'翻译'),h('small',null,'识字在本机完成；翻译复用海拓当前接口。')),
++   h('div',{style:{display:'flex',gap:8,padding:'0 10px 10px',height:110}},h('textarea',{'aria-label':'Viber 翻译原文',value:source,onChange:e=>setSource(e.target.value),placeholder:'识字后可编辑，也可手动输入原文',style:{width:'50%',resize:'none'}}),h('textarea',{'aria-label':'Viber 译文',value:translated,readOnly:true,style:{width:'50%',resize:'none'}}))
++  );
++ };
++}
++module.exports={createPane};
+diff --git a/viber-fusion/main.swift b/viber-fusion/main.swift
+index ecc7d64..87fae80 100644
+--- a/viber-fusion/main.swift
++++ b/viber-fusion/main.swift
+@@ -59,7 +59,8 @@ func prepare(_ slot: Int) throws -> URL {
+ }
+ 
+ final class FusionView: NSView {
+-    var image: CGImage?
++    var imageChanged: ((CGImage?) -> Void)?
++    var image: CGImage? { didSet { imageChanged?(image) } }
+     var target: NSRunningApplication?
+     var targetFrame: CGRect = .zero
+     var feedback: ((String)->Void)?
+@@ -80,6 +81,9 @@ final class FusionView: NSView {
+         let r = CGRect(x:(bounds.width-CGFloat(image.width)*scale)/2,y:(bounds.height-CGFloat(image.height)*scale)/2,width:CGFloat(image.width)*scale,height:CGFloat(image.height)*scale)
+         guard r.contains(p) else { return }
+         let screen = CGPoint(x:targetFrame.minX + (p.x-r.minX)/r.width*targetFrame.width, y:targetFrame.minY + (p.y-r.minY)/r.height*targetFrame.height)
++        forwardMouse(screen,target:target)
++    }
++    func forwardMouse(_ screen: CGPoint, target: NSRunningApplication) {
+         var stack=[AXUIElementCreateApplication(target.processIdentifier)], candidates: [(AXUIElement,CGFloat)] = []
+         var visited=0
+         while let element=stack.popLast(), visited<1500 {
+@@ -154,6 +158,8 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+     var buttons:[NSButton]=[]
+     var selected=0
+     var pending=false
++    var showHost=true
++    var externalHostFrame: CGRect?
+     func applicationDidFinishLaunching(_ notification:Notification) {
+         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:780),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+         window.title="Viber 同窗口融合实验"; window.center(); window.minSize=NSSize(width:700,height:500); window.delegate=self
+@@ -166,12 +172,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+         viewer=FusionView(); viewer.setAccessibilityElement(true); viewer.setAccessibilityRole(.group); viewer.setAccessibilityLabel("Fusion viewport"); viewer.translatesAutoresizingMaskIntoConstraints=false; root.addSubview(viewer)
+         viewer.feedback={ [weak self] message in self?.status.stringValue=message }
+         NSLayoutConstraint.activate([header.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:12),header.topAnchor.constraint(equalTo:root.topAnchor,constant:10),header.heightAnchor.constraint(equalToConstant:32),status.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:12),status.topAnchor.constraint(equalTo:header.bottomAnchor,constant:5),status.trailingAnchor.constraint(equalTo:root.trailingAnchor,constant:-12),viewer.leadingAnchor.constraint(equalTo:root.leadingAnchor),viewer.trailingAnchor.constraint(equalTo:root.trailingAnchor),viewer.topAnchor.constraint(equalTo:status.bottomAnchor,constant:8),viewer.bottomAnchor.constraint(equalTo:root.bottomAnchor)])
+-        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
++        if showHost { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
+     }
+     @objc func selectSlot(_ sender:NSButton) {
+         guard !pending else { return }
+         let slot=sender.tag; pending=true; buttons.forEach{$0.isEnabled=false}
+         invalidateConnection()
++        let selectionToken=generation
+         status.stringValue="正在启动账号 \(slot)……首次准备可能需要几分钟。"
+         if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess(); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许屏幕录制，然后重启并重试。"; return }
+         if !AXIsProcessTrusted() { let options=[kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary; _ = AXIsProcessTrustedWithOptions(options); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许辅助功能权限，然后重试。"; return }
+@@ -182,8 +189,8 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+                 let target=try prepare(slot)
+                 if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { _ = try run("/usr/bin/open",["-n",target.path]) }
+                 for _ in 0..<40 { if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { break }; Thread.sleep(forTimeInterval:0.5) }
+-                DispatchQueue.main.async { self?.connect(slot) }
+-            } catch { DispatchQueue.main.async { self?.done("启动失败：\(error.localizedDescription)") } }
++                DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.connect(slot) }
++            } catch { DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.done("启动失败：\(error.localizedDescription)") } }
+         }
+     }
+     func done(_ text:String) { pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue=text }
+@@ -263,7 +270,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+                 try await next.startCapture()
+                 guard generation == token else { frameSink.cancel(); try? await next.stopCapture(); return }
+                 stream=next; local=nil; viewer.target=app; viewer.targetFrame=target.frame
+-                window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true)
++                if showHost { window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true) }
+                 // Alignment owns validity. Frames arriving before validation keep the first-frame callback.
+                 alignSourceWindow(whileConnecting:true)
+                 guard generation == token else {
+@@ -292,10 +299,16 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+         func fail(_ message: String) {
+             geometryFailed(message,source:source,application:application)
+         }
+-        guard let rows=CGWindowListCopyWindowInfo([.optionIncludingWindow],CGWindowID(window.windowNumber)) as? [[String:Any]],
+-              let row=rows.first, let bounds=row[kCGWindowBounds as String] as? [String:Any],
+-              let x=(bounds["X"] as? NSNumber)?.doubleValue, let y=(bounds["Y"] as? NSNumber)?.doubleValue,
+-              let width=(bounds["Width"] as? NSNumber)?.doubleValue, let height=(bounds["Height"] as? NSNumber)?.doubleValue else { fail("无法获取宿主窗口几何，已暂停操作。"); return }
++        let host: CGRect?
++        if let external=externalHostFrame { host=external }
++        else if let rows=CGWindowListCopyWindowInfo([.optionIncludingWindow],CGWindowID(window.windowNumber)) as? [[String:Any]],
++                let row=rows.first,let bounds=row[kCGWindowBounds as String] as? [String:Any],
++                let x=(bounds["X"] as? NSNumber)?.doubleValue,let y=(bounds["Y"] as? NSNumber)?.doubleValue,
++                let width=(bounds["Width"] as? NSNumber)?.doubleValue,let height=(bounds["Height"] as? NSNumber)?.doubleValue {
++            host=CGRect(x:x,y:y,width:width,height:height)
++        } else { host=nil }
++        guard let host=host, !host.isEmpty, !host.isInfinite, !host.isNull else { fail("无法获取宿主窗口几何，已暂停操作。"); return }
++        let x=host.minX,y=host.minY,width=host.width,height=host.height
+         guard let source=source else { fail("无法识别 Viber 主窗口，已暂停操作。"); return }
+         var desiredSize=CGSize(width:max(1,width-20),height:max(1,height-90))
+         var desiredPosition=CGPoint(x:x+10,y:y+80)
+@@ -319,7 +332,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+     }
+     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool { true }
+ }
+-#if !STATE_REGRESSION
++#if !STATE_REGRESSION && !FUSION_BRIDGE
+ let app=NSApplication.shared
+ let delegate=Delegate(); app.delegate=delegate; app.setActivationPolicy(.regular); app.run()
+ 
+diff --git a/viber-fusion/shell-bridge.swift b/viber-fusion/shell-bridge.swift
+new file mode 100644
+index 0000000..659aa21
+--- /dev/null
++++ b/viber-fusion/shell-bridge.swift
+@@ -0,0 +1,77 @@
++// Concatenate after main.swift and compile with -D FUSION_BRIDGE.
++// A private stdio pipe owned by the Electron parent; never a listening network server.
++let bridgeApp=NSApplication.shared
++bridgeApp.setActivationPolicy(.accessory)
++let bridgeDelegate=Delegate()
++bridgeDelegate.showHost=false
++bridgeDelegate.window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:780),styleMask:[.titled],backing:.buffered,defer:false)
++bridgeDelegate.viewer=FusionView(frame:NSRect(x:0,y:0,width:1000,height:650))
++bridgeDelegate.window.contentView=bridgeDelegate.viewer
++bridgeDelegate.status=NSTextField(labelWithString:"未连接")
++var clientEpoch=0
++var lastImageAt=Date.distantPast
++var lastState=""
++func emit(_ value: [String:Any]) {
++    guard let data=try? JSONSerialization.data(withJSONObject:value),data.count<8*1024*1024 else { return }
++    FileHandle.standardOutput.write(data);FileHandle.standardOutput.write(Data([10]))
++}
++bridgeDelegate.viewer.imageChanged={ image in
++    guard let image=image else { emit(["type":"clear","epoch":clientEpoch]); return }
++    guard bridgeDelegate.geometryValid,bridgeDelegate.selected>0,Date().timeIntervalSince(lastImageAt)>0.15 else { return }
++    let representation=NSBitmapImageRep(cgImage:image)
++    guard let data=representation.representation(using:.jpeg,properties:[.compressionFactor:0.65]),data.count<6*1024*1024 else { return }
++    lastImageAt=Date()
++    emit(["type":"frame","epoch":clientEpoch,"slot":bridgeDelegate.selected,"image":data.base64EncodedString(),"width":image.width,"height":image.height])
++}
++bridgeDelegate.viewer.feedback={ bridgeDelegate.status.stringValue=$0 }
++func frame(_ object: [String:Any]) -> CGRect? {
++    guard let x=object["x"] as? Double,let y=object["y"] as? Double,let width=object["width"] as? Double,let height=object["height"] as? Double,
++          [x,y,width,height].allSatisfy({$0.isFinite}),width>0,height>0,width<20000,height<20000 else { return nil }
++    return CGRect(x:x,y:y,width:width,height:height)
++}
++func minimizeSource() {
++    if let app=bridgeDelegate.viewer.target,let source=largestAXWindow(AXUIElementCreateApplication(app.processIdentifier)) {
++        _=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanTrue)
++    }
++}
++func command(_ object: [String:Any]) {
++    guard let type=object["type"] as? String else { return }
++    if type=="select" {
++        guard let epoch=object["epoch"] as? Int,epoch>clientEpoch,let slot=object["slot"] as? Int,(1...5).contains(slot),let bounds=object["bounds"] as? [String:Any],let host=frame(bounds) else { return }
++        clientEpoch=epoch;lastState="";lastImageAt = .distantPast
++        bridgeDelegate.externalHostFrame=host
++        // Superseding a selection owns pending; invalidateConnection itself never changes it.
++        bridgeDelegate.pending=false
++        let button=NSButton(title:"",target:nil,action:nil);button.tag=slot
++        bridgeDelegate.selectSlot(button)
++    } else if type=="hide" {
++        guard let epoch=object["epoch"] as? Int,epoch>=clientEpoch else { return }
++        clientEpoch=epoch;minimizeSource();bridgeDelegate.invalidateConnection()
++    } else {
++        guard (object["epoch"] as? Int)==clientEpoch else { return }
++        if type=="bounds",let bounds=object["bounds"] as? [String:Any],let host=frame(bounds) {
++            bridgeDelegate.externalHostFrame=host;bridgeDelegate.alignSourceWindow()
++        } else if type=="click",bridgeDelegate.geometryValid,let target=bridgeDelegate.viewer.target,
++                  let x=object["x"] as? Double,let y=object["y"] as? Double,x.isFinite,y.isFinite,(0...1).contains(x),(0...1).contains(y) {
++            let r=bridgeDelegate.viewer.targetFrame
++            bridgeDelegate.viewer.forwardMouse(CGPoint(x:r.minX+x*r.width,y:r.minY+y*r.height),target:target)
++        }
++    }
++}
++let stateTimer=Timer.scheduledTimer(withTimeInterval:0.1,repeats:true) { _ in
++    let title=bridgeDelegate.window.title
++    let state=title+bridgeDelegate.status.stringValue+String(bridgeDelegate.pending)
++    if state != lastState {
++        lastState=state
++        emit(["type":"state","epoch":clientEpoch,"slot":bridgeDelegate.selected,"ready":bridgeDelegate.geometryValid && title.hasPrefix("Fusion: Ready"),"pending":bridgeDelegate.pending,"status":bridgeDelegate.status.stringValue])
++    }
++}
++DispatchQueue.global(qos:.userInitiated).async {
++    while let line=readLine() {
++        guard line.utf8.count<65536,let data=line.data(using:.utf8),let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else { continue }
++        DispatchQueue.main.async { command(object) }
++    }
++    DispatchQueue.main.async { minimizeSource();bridgeDelegate.invalidateConnection();bridgeApp.terminate(nil) }
++}
++emit(["type":"started","protocol":1])
++bridgeApp.run()

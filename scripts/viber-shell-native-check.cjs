@@ -1,0 +1,74 @@
+'use strict';
+// Exercises the packaged Electron main/preload/React/native-pipe/OCR/translation chain.
+// The real helper is restored byte for byte before artifacts are uploaded.
+const fs=require('node:fs'),fsp=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process'),assert=require('node:assert/strict');
+const app=path.resolve('macos/out/海拓-darwin-arm64/海拓.app'),helper=path.join(app,'Contents/Resources/app.asar.unpacked/native/haituo-viber-fusion'),realMode=process.argv[2]==='--real-viber',fake=realMode?null:process.argv[2];
+if(process.platform!=='darwin'||!realMode&&!fake)throw Error('macOS synthetic helper path required');
+const output=path.resolve('audit-results'),profile=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'viber-shell-synthetic-'));fs.mkdirSync(output,{recursive:true});
+const original=fs.readFileSync(helper),report={synthetic:true,realViber:realMode,checks:[]};let client,processHandle,fixtureCalls=0,restoreConfig;
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const fixture=require('node:http').createServer((req,res)=>{let text='';req.on('data',data=>text+=data);req.on('end',()=>{fixtureCalls++;res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'合成 Viber 译文'}}]}))})});
+async function connect(target){const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CDP connection timeout')),8000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve()},{once:true});ws.addEventListener('error',reject,{once:true})});const pending=new Map,contexts=new Set;let sequence=0;ws.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.id){const item=pending.get(value.id);if(item){pending.delete(value.id);clearTimeout(item.timer);value.error?item.reject(Error(JSON.stringify(value.error))):item.resolve(value.result)}}else if(value.method==='Runtime.executionContextCreated')contexts.add(value.params.context.id);else if(value.method==='Runtime.executionContextsCleared')contexts.clear()});return{ws,contexts,call(method,params={}){return new Promise((resolve,reject)=>{const id=++sequence,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method))},15000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}))})}}}
+async function evaluate(expression,contextId){const r=await client.call('Runtime.evaluate',{expression,contextId,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value}
+async function api(expression){for(const contextId of client.contexts){let exists=false;try{exists=await evaluate("typeof window.SignalContext?.caishengViberCommand==='function'",contextId)}catch{}if(exists)return evaluate(expression,contextId)}throw Error('Viber preload API unavailable')}
+async function until(expression,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){try{const value=await evaluate(expression);if(value)return value}catch{}await pause(100)}throw Error('Condition timeout: '+expression)}
+async function check(name,work){await work();report.checks.push({name,ok:true})}
+async function startApp(){
+ processHandle=cp.spawn('/usr/bin/open',['-n','-a',app,'--args','--user-data-dir='+profile,'--remote-debugging-address=127.0.0.1','--remote-debugging-port=19347'],{stdio:'ignore'});
+ const deadline=Date.now()+40000;while(Date.now()<deadline&&!client){try{const list=await(await fetch('http://127.0.0.1:19347/json/list')).json(),target=list.find(item=>item.type==='page'&&item.url.includes('background.html'));if(target)client=await connect(target)}catch{}if(!client)await pause(200)}
+ assert(client,'packaged app CDP page unavailable');await client.call('Runtime.enable');await until("!!document.querySelector('.CaishengPlatformShell')");
+
+}
+async function stopApp(){
+ if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}
+ await pause(500);
+ try{const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){try{process.kill(Number(line.trim().split(/\s+/)[0]),'SIGTERM')}catch{}}}catch{}
+ await pause(500);
+}
+
+(async()=>{await new Promise(resolve=>fixture.listen(0,'127.0.0.1',resolve));try{
+ if(!realMode){fs.copyFileSync(fake,helper);fs.chmodSync(helper,0o755);}
+ await startApp();
+ await check('packaged Viber preload IPC',async()=>{const config=await api('window.SignalContext.caishengGetTranslationConfig()');restoreConfig=config;await api('window.SignalContext.caishengSetTranslationConfig('+JSON.stringify({...config,chatTranslationProvider:'openai',inputTranslationProvider:'openai',apiKey:'synthetic-viber-key',endpoint:'http://127.0.0.1:'+fixture.address().port+'/v1',model:'synthetic-model',openaiApiProfiles:[],openaiApiKeys:[],blockChineseOutgoing:true,translationPools:{primary:[{provider:'openai',apiKey:'synthetic-viber-key',endpoint:'http://127.0.0.1:'+fixture.address().port+'/v1',model:'synthetic-model',enabled:true}],backup:[]}})+')')});
+ const ids=realMode?['viber-synthetic-a','viber-synthetic-b','viber-synthetic-c','viber-synthetic-d','viber-synthetic-e']:['viber-synthetic-a','viber-synthetic-b'];
+ const workspaces=[{id:'signal-main',platformId:'signal',label:'Signal',createdAt:1},...ids.map((id,index)=>({id,platformId:'viber',label:'Viber synthetic '+(index+1),createdAt:index+2}))];
+ await evaluate(`localStorage.setItem('caisheng.workspaces.v3',${JSON.stringify(JSON.stringify(workspaces))});localStorage.setItem('caisheng.lastWorkspace',${JSON.stringify(realMode?'signal-main':'viber-synthetic-a')})`);
+ await stopApp();await startApp();
+ if(realMode){cp.execFileSync('/usr/bin/osascript',['-e','tell application "System Events" to tell process "海拓" to set size of window 1 to {1200, 850}','-e','tell application "System Events" to tell process "海拓" to set position of window 1 to {150, 25}']);await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="viber-synthetic-a"]').click()`);}
+ await until("!!document.querySelector('[data-haituo-viber-account=\"viber-synthetic-a\"] img')",realMode?100000:30000);
+ await check('15 account switches through actual React shell',async()=>{for(let index=0;index<15;index++){const id=realMode?ids[(index+1)%ids.length]:(index%2?'viber-synthetic-a':'viber-synthetic-b');await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="${id}"]').click()`);await until(`!!document.querySelector('[data-haituo-viber-account="${id}"]:not([hidden]) img')`,realMode?100000:30000);assert.equal(await evaluate(`document.querySelectorAll('[data-haituo-viber-account]:not([hidden])').length`),1)}});
+ if(!realMode){
+ await check('local OCR on generated native frame',async()=>{await evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='识别当前画面文字').click()})()`);await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) textarea[aria-label="Viber 翻译原文"]').value.includes('SYNTHETIC')`,50000)});
+ await check('configured translation provider receives synthetic OCR and updates pane',async()=>{await evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='翻译').click()})()`);await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) textarea[aria-label="Viber 译文"]').value.includes('合成 Viber 译文')`,30000);assert(fixtureCalls>0)});
+ await check('Chinese-send policy and fill-without-send through packaged IPC',async()=>{
+  const clickFill=()=>evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='填入当前 Viber 输入框').click()})()`);
+  await clickFill();await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) [role=status]').textContent.includes('禁止中文发送')`);
+  await api(`(async()=>{const cfg=await window.SignalContext.caishengGetTranslationConfig();return window.SignalContext.caishengSetTranslationConfig({...cfg,blockChineseOutgoing:false})})()`);
+  await clickFill();await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) [role=status]').textContent.includes('尚未发送')`);
+ });
+ }else{
+ let selectedNativePID;
+ await check('real unlinked Viber AX click through the actual shell image',async()=>{
+  const rows=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');
+  const target=rows.find(line=>line.includes('/profiles/slot-1/Viber.app/Contents/MacOS/Viber'));
+  const host=rows.find(line=>line.includes(app+'/Contents/MacOS/')&&line.includes('--user-data-dir='+profile)&&!line.includes('--type='));
+  assert(target&&host,'real host/target process missing');const targetPID=target.trim().split(/\s+/)[0],hostPID=host.trim().split(/\s+/)[0];selectedNativePID=Number(targetPID);
+  const point=JSON.parse(cp.execFileSync(process.env.HAITUO_VIBER_CLICK_HELPER,[targetPID],{encoding:'utf8'}));
+  await evaluate(`(()=>{const image=document.querySelector('[data-haituo-viber-account]:not([hidden]) img'),r=image.getBoundingClientRect(),scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale;image.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+(r.width-width)/2+${point.x}*width,clientY:r.top+(r.height-height)/2+${point.y}*height}))})()`);
+  await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) [role=status]').textContent.includes('点击已发送')`);
+  cp.execFileSync(process.env.HAITUO_VIBER_STACK_HELPER,[hostPID,targetPID],{stdio:'inherit'});
+ });
+ await check('source exit clears Ready/image and reconnects the same preserved account',async()=>{
+  assert(selectedNativePID);process.kill(selectedNativePID,'SIGTERM');
+  await until(`!document.querySelector('[data-haituo-viber-account]:not([hidden]) img')`,15000);
+  await evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='重新连接').click()})()`);
+  await until(`!!document.querySelector('[data-haituo-viber-account]:not([hidden]) img')`,100000);
+ });
+ }
+ await check('returning to Signal hides every Viber pane',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await until(`document.querySelectorAll('[data-haituo-viber-account]:not([hidden])').length===0`)});
+ report.ok=true;report.fixtureCalls=fixtureCalls;
+ }catch(error){report.ok=false;report.error=String(error.stack||error);
+ try{report.fixtureCalls=fixtureCalls;report.snapshot=await evaluate(`({shell:!!document.querySelector('.CaishengPlatformShell'),nativeAccount:document.querySelector('.CaishengPlatformShell__content')?.dataset.haituoNativeAccount,platform:typeof process==='undefined'?'missing':process.platform,panes:[...document.querySelectorAll('[data-haituo-viber-account]')].map(node=>({id:node.dataset.haituoViberAccount,hidden:node.hidden,status:node.querySelector('[role=status]')?.textContent,image:!!node.querySelector('img'),source:node.querySelector('textarea[aria-label="Viber 翻译原文"]')?.value,translation:node.querySelector('textarea[aria-label="Viber 译文"]')?.value,buttons:[...node.querySelectorAll('button')].map(button=>({label:button.textContent,disabled:button.disabled}))})),tabs:[...document.querySelectorAll('button[data-caisheng-tab-workspace]')].map(node=>({id:node.dataset.caishengTabWorkspace,label:node.textContent})),last:localStorage.getItem('caisheng.lastWorkspace'),workspaces:localStorage.getItem('caisheng.workspaces.v3')})`);console.log('SYNTHETIC_SHELL_STATE='+JSON.stringify({fixtureCalls,...report.snapshot}))}catch{}
+ throw error}
+ finally{if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}}await pause(500);try{const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){try{process.kill(Number(line.trim().split(/\s+/)[0]),'SIGTERM')}catch{}}}catch{}if(!realMode){fs.writeFileSync(helper,original,{mode:0o755});fs.chmodSync(helper,0o755);}cp.execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',app],{stdio:'inherit'});fixture.close();await fsp.writeFile(path.join(output,realMode?'viber-shell-unlinked-real.json':'viber-shell-synthetic.json'),JSON.stringify(report,null,2));}
+})().catch(error=>{console.error(error.message);process.exitCode=1});

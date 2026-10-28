@@ -29745,10 +29745,45 @@ function caishengShowTopMenu(title, items) {
     });
 }
 
+let haituoViberBridge;
+function haituoNativeViber() {
+    if(!haituoViberBridge) {
+        const fs=require('node:fs'),path=require('node:path');
+        const binary=path.join(__dirname,'../native/haituo-viber-fusion').replace(/app\.asar([/\\])/,'app.asar.unpacked$1');
+        const mapping=path.join(p.app.getPath('appData'),'Haituo','viber-account-slots.json');
+        haituoViberBridge=require('../js/haituo-viber-bridge.js').createBridge({binary,
+            getBlockChinese:()=> $p().blockChineseOutgoing!==false,
+            readAccounts:()=>haituoProtectedRead(mapping,{}),
+            saveAccounts:value=>{if(haituoProtectedWrite(mapping,value)!==true)throw Error('Viber 账号目录映射保存失败');},
+            hostBounds:()=>Z&&!Z.isDestroyed()&&Z.isVisible()&&!Z.isMinimized()?Z.getBounds():null,
+            onEvent:value=>{if(Z&&!Z.isDestroyed())Z.webContents.send('haituo:viber-event',value);}
+        });
+        p.app.once('will-quit',()=>haituoViberBridge?.close());
+        if(Z&&!Z.__haituoViberEvents){
+            Z.__haituoViberEvents=true;
+            for(const event of ['move','resize'])Z.on(event,()=>{try{haituoViberBridge?.geometry()}catch{}});
+            for(const event of ['hide','minimize'])Z.on(event,()=>{haituoViberBridge?.close();haituoViberBridge=null;});
+            for(const event of ['show','restore'])Z.on(event,()=>{if(!Z.isDestroyed())Z.webContents.send('haituo:viber-event',{type:'reconnect'});});
+        }
+    }
+    return haituoViberBridge;
+}
+p.ipcMain.handle('haituo:viber-command',async(event,type,payload)=>{
+    if($u!=='signal-main'||event.sender!==Z?.webContents||event.senderFrame!==event.sender.mainFrame)throw Error('无效 Viber 控制来源');
+    const bridge=haituoNativeViber();
+    if(type==='select')return bridge.select(payload?.id);
+    if(type==='hide')return bridge.hide(payload?.id,payload?.epoch);
+    if(type==='click')return bridge.click(payload?.id,payload?.epoch,payload?.x,payload?.y);
+    if(type==='insert')return bridge.insert(payload?.id,payload?.epoch,payload?.text);
+    if(type==='ocr')return bridge.ocr(payload?.id,payload?.epoch);
+    throw Error('不支持的 Viber 命令');
+});
+
 p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新增账号`, [
     { value: `signal`, label: `新增 Signal` },
     { value: `whatsapp`, label: `新增 WhatsApp 账号` },
-    { value: `telegram`, label: `新增 Telegram 账号` }
+    { value: `telegram`, label: `新增 Telegram 账号` },
+    ...(process.platform===`darwin` ? [{value:`viber`,label:`新增 Viber 账号（原生预览）`}] : [])
 ])), p.ipcMain.handle(`caisheng:show-account-menu`, async () => caishengShowTopMenu(`账号管理`, [
     { value: `edit`, label: `编辑备注` },
     { value: `refresh`, label: `刷新账号` },

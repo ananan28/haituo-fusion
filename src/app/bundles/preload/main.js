@@ -615,6 +615,8 @@ http://jedwatson.github.io/classnames
             caishengGetWebUnreadCount(e) {
                 return u.ipcRenderer.invoke(`caisheng:get-web-unread-count`, e);
             },
+            caishengViberCommand(type,payload) {return u.ipcRenderer.invoke('haituo:viber-command',type,payload)},
+            caishengOnViber(callback) {const handler=(_event,value)=>callback(value);u.ipcRenderer.on('haituo:viber-event',handler);return()=>u.ipcRenderer.removeListener('haituo:viber-event',handler)},
             caishengLaunchSignalProfile(e) {
                 return u.ipcRenderer.invoke(`caisheng:launch-signal-profile`, e);
             },
@@ -230109,6 +230111,7 @@ function haituoCachedSignalTranslation(text) {
                 allowedHosts: [ `web.whatsapp.com` ],
                 defaultIcon: `whatsapp`
             },
+            viber: {id:`viber`,label:`Viber`,runtime:`native-capture`,defaultIcon:`viber`},
             telegram: {
                 id: `telegram`,
                 label: `Telegram`,
@@ -230128,7 +230131,7 @@ function haituoCachedSignalTranslation(text) {
         }
     }
     function bCr(e, t) {
-        return e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
+        return e === `viber` ? process.platform===`darwin` : e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
     }
     function xCr() {
         try {
@@ -230142,18 +230145,25 @@ function haituoCachedSignalTranslation(text) {
                 }
                 if (!a || typeof a != `object`) continue;
                 let o = a;
-                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
+                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram` || o.platformId === `viber`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
             }
             return r || t.unshift(ECr), t;
         } catch {
             return [ ECr ];
         }
     }
+    let haituoViberPane;
     function SCr({signal: e}) {
+        haituoViberPane ||= require('../../js/haituo-viber-pane.js').createPane(D9,{
+            command:(type,payload)=>window.SignalContext.caishengViberCommand(type,payload),
+            onEvent:callback=>window.SignalContext.caishengOnViber(callback),
+            config:()=>window.SignalContext.caishengGetTranslationConfig(),
+            translate:request=>window.SignalContext.caishengTranslate(request)
+        });
         let {user: t} = lCr(), [r, a] = (0, D9.useState)(xCr), [o, s] = (0, D9.useState)(() => {
             try {
                 let e = localStorage.getItem(`caisheng.lastWorkspace`), t = xCr();
-                return e && t.some(t => t.id === e) ? e : `signal-main`;
+                return e && t.some(t => t.id === e && (t.platformId !== `viber` || window.SignalContext.OS.platform === `darwin`)) ? e : `signal-main`;
             } catch {
                 return `signal-main`;
             }
@@ -230503,6 +230513,7 @@ function haituoCachedSignalTranslation(text) {
             n === null && requestAnimationFrame(() => A(o));
         }
         async function ne(e) {
+            if(e.platformId===`viber`){s(`signal-main`);requestAnimationFrame(()=>s(e.id));return;}
             if (x(void 0), e.id === `signal-main`) {
                 A(`signal-main`, 0, !0), await window.SignalContext.caishengRefreshSignalProfile(`signal-main`), requestAnimationFrame(() => A(`signal-main`, 0, !0));
                 return;
@@ -230608,7 +230619,8 @@ function haituoCachedSignalTranslation(text) {
                             alt: ``
                         }) : (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__iconFallback is-${e.platformId}`,
-                            children: `T`
+                            style: e.platformId === `viber` ? {background:`#7360f2`} : undefined,
+                            children: e.platformId === `viber` ? `V` : `T`
                         }), (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__tabLabel`,
                             children: e.label
@@ -230993,7 +231005,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         type: `button`,
                         children: `打开账号`
-                    }), j.platformId === `signal` ? null : (0, O9.jsx)(`button`, {
+                    }), (j.platformId === `signal` || j.platformId === `viber`) ? null : (0, O9.jsx)(`button`, {
                         onClick: () => void B(j),
                         type: `button`,
                         children: `清除缓存`
@@ -231021,6 +231033,7 @@ function haituoCachedSignalTranslation(text) {
                     children: e
                 }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` && e.platformId !== `telegram` || qLoaded.includes(e.id))).map(e => {
                     let t = gCr(e.platformId);
+                    if(e.platformId===`viber`)return (0,D9.createElement)(haituoViberPane,{key:e.id,account:e,active:!haituoHome&&o===e.id});
                     return t.startUrl ? (0, D9.createElement)(`webview`, {
                         className: `CaishengPlatformShell__webview`,
                         style: {

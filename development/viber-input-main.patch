@@ -1,0 +1,20 @@
+diff --git a/src/app/bundles/main.js b/src/app/bundles/main.js
+index e0a6143..aefada8 100644
+--- a/src/app/bundles/main.js
++++ b/src/app/bundles/main.js
+@@ -29752,6 +29752,7 @@ function haituoNativeViber() {
+         const binary=path.join(__dirname,'../native/haituo-viber-fusion').replace(/app\.asar([/\\])/,'app.asar.unpacked$1');
+         const mapping=path.join(p.app.getPath('appData'),'Haituo','viber-account-slots.json');
+         haituoViberBridge=require('../js/haituo-viber-bridge.js').createBridge({binary,
++            getBlockChinese:()=> $p().blockChineseOutgoing!==false,
+             readAccounts:()=>haituoProtectedRead(mapping,{}),
+             saveAccounts:value=>{if(haituoProtectedWrite(mapping,value)!==true)throw Error('Viber 账号目录映射保存失败');},
+             hostBounds:()=>Z&&!Z.isDestroyed()&&Z.isVisible()&&!Z.isMinimized()?Z.getBounds():null,
+@@ -29773,6 +29774,7 @@ p.ipcMain.handle('haituo:viber-command',async(event,type,payload)=>{
+     if(type==='select')return bridge.select(payload?.id);
+     if(type==='hide')return bridge.hide(payload?.id,payload?.epoch);
+     if(type==='click')return bridge.click(payload?.id,payload?.epoch,payload?.x,payload?.y);
++    if(type==='insert')return bridge.insert(payload?.id,payload?.epoch,payload?.text);
+     if(type==='ocr')return bridge.ocr(payload?.id,payload?.epoch);
+     throw Error('不支持的 Viber 命令');
+ });
