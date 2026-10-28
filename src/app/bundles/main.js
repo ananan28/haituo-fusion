@@ -29778,7 +29778,7 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
             }
             view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
         register(workspaceId, view) { const contentsId=view.webContents.id;views.set(workspaceId, view); sender.set(contentsId, workspaceId); view.webContents.once(`destroyed`,()=>{sender.delete(contentsId);if(views.get(workspaceId)===view){views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId)}}); },
-        dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
+        dispose(workspaceId){const view=views.get(workspaceId);if(view){view.__haituoMedia?.dispose();sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
 
     };
     p.ipcMain.handle(`haituo-child-invoke`, (event, payload) => {

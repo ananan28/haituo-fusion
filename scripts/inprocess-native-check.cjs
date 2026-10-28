@@ -122,7 +122,7 @@ async function check(id,work){try{const result=await work();report.checks.push({
     let root;
     for(const contextId of childClient.contexts){const r=await childClient.call('Runtime.evaluate',{expression:`window.SignalContext?.config?.userDataPath`,contextId,returnByValue:true});if(typeof r.result?.value==='string'){root=r.result.value;break}}
     if(!root?.endsWith('signal-ci-inprocess'))throw Error('Refuse media fixture outside isolated profile');
-    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1sAAAAASUVORK5CYII=','base64');
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64');
     const fixtures=[['attachment','attachments.noindex'],['draft','drafts.noindex'],['sticker','stickers.noindex'],['avatarData','avatars.noindex']];
     try{
      for(const [kind,dir] of fixtures){fs.mkdirSync(path.join(root,dir),{recursive:true});fs.writeFileSync(path.join(root,dir,'haituo-media-ci.png'),png)}
