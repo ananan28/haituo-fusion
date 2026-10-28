@@ -2,7 +2,7 @@ name: Viber native shell integration
 on:
   push:
     branches: ['fusion/viber-shell']
-    paths: ['development/fusion-shell.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml']
+    paths: ['development/fusion-shell.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml', '!scripts/viber-shell-native-check.cjs']
 permissions:
   contents: read
 concurrency:
