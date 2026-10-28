@@ -14,8 +14,6 @@ jobs:
         os: [windows-2025, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    env:
-      HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,5 +31,7 @@ jobs:
         shell: bash
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Synthetic DOM and Signal component lifecycle
+        env:
+          HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
         shell: bash
         run: node --test scripts/*.dom.cjs
