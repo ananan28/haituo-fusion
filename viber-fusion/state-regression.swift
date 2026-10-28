@@ -52,6 +52,21 @@ check(subject.viewer.image == nil && wrong.onFrame != nil,"wrong slot accepted f
 subject.selected=3; subject.generation += 1; wrong.deliver(syntheticImage)
 check(subject.viewer.image == nil && !subject.window.title.contains("Ready"),"stale generation accepted frame")
 subject.invalidateConnection()
+// A stream error owns only its own connection, including a buffered callback after cancellation.
+let failedSink=connection(4)
+let stopped=StreamTermination();subject.installTermination(stopped,frameSink:failedSink,token:subject.generation);subject.termination=stopped
+let bufferedStop=stopped.onStop
+subject.pending=true;subject.buttons[0].isEnabled=false
+stopped.deliverStop(NSError(domain:"synthetic",code:1,userInfo:[NSLocalizedDescriptionKey:"synthetic capture closed"]))
+check(subject.selected==0 && subject.viewer.image==nil && subject.sink==nil,"stream error did not invalidate capture")
+check(!subject.pending && subject.buttons[0].isEnabled,"owned stream failure did not finish its connection")
+check(subject.window.title=="Fusion: Capture failed" && subject.status.stringValue.contains("synthetic capture closed"),"stream error lost its real failure")
+check(stopped.onStop==nil,"retired stream delegate callback was not discarded")
+let afterStop=connection(5);let afterStopToken=subject.generation
+subject.pending=true;subject.buttons[0].isEnabled=false
+bufferedStop?(NSError(domain:"synthetic",code:2))
+check(subject.generation==afterStopToken && subject.sink===afterStop && subject.pending && !subject.buttons[0].isEnabled,"buffered old stop altered a newer connection or pending state")
+subject.pending=false;subject.buttons[0].isEnabled=true;subject.invalidateConnection()
 // Reuse the real detached-stop operation with a controllable synthetic async stop.
 var stopContinuation: CheckedContinuation<Void,Never>?
 var stopFinished=false

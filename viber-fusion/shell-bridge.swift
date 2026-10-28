@@ -62,6 +62,10 @@ func command(_ object: [String:Any]) {
     }
 }
 let stateTimer=Timer.scheduledTimer(withTimeInterval:0.1,repeats:true) { _ in
+    if !bridgeDelegate.pending,bridgeDelegate.selected>0,bridgeDelegate.viewer.target?.isTerminated != false {
+        bridgeDelegate.invalidateConnection("Viber 已退出，请重新连接账号")
+        bridgeDelegate.window.title="Fusion: Source exited"
+    }
     let title=bridgeDelegate.window.title
     let state=title+bridgeDelegate.status.stringValue+String(bridgeDelegate.pending)
     if state != lastState {

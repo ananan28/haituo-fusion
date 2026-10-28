@@ -169,6 +169,14 @@ final class FrameSink: NSObject, SCStreamOutput {
     }
     func cancel() { isCurrent=nil; onFrame=nil }
 }
+final class StreamTermination: NSObject, SCStreamDelegate {
+    var onStop: ((Error)->Void)?
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        DispatchQueue.main.async { [weak self] in self?.deliverStop(error) }
+    }
+    func deliverStop(_ error: Error) { precondition(Thread.isMainThread); onStop?(error) }
+    func cancel() { onStop=nil }
+}
 func largestAXWindow(_ application: AXUIElement) -> AXUIElement? {
     var raw:CFTypeRef?
     guard AXUIElementCopyAttributeValue(application,kAXWindowsAttribute as CFString,&raw) == .success, let windows=raw as? [AXUIElement] else { return nil }
@@ -186,6 +194,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var viewer:FusionView!
     var status:NSTextField!
     var sink:FrameSink?
+    var termination:StreamTermination?
     var generation = 0
     var geometryValid = false
     var stream:SCStream?
@@ -218,13 +227,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess(); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许屏幕录制，然后重启并重试。"; return }
         if !AXIsProcessTrusted() { let options=[kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary; _ = AXIsProcessTrustedWithOptions(options); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许辅助功能权限，然后重试。"; return }
         window.title="Fusion: Loading slot \(slot)"
-        if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { connect(slot); return }
+        if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).contains(where:{!$0.isTerminated}) { connect(slot); return }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             do {
                 let target=try prepare(slot)
                 guard DispatchQueue.main.sync(execute:{ self?.generation == selectionToken }) else { return }
-                if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { _ = try run("/usr/bin/open",["-n",target.path]) }
-                for _ in 0..<40 { if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { break }; Thread.sleep(forTimeInterval:0.5) }
+                if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).contains(where:{!$0.isTerminated}) { _ = try run("/usr/bin/open",["-n",target.path]) }
+                for _ in 0..<40 { if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).contains(where:{!$0.isTerminated}) { break }; Thread.sleep(forTimeInterval:0.5) }
                 DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.connect(slot) }
             } catch { DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.done("启动失败：\(error.localizedDescription)") } }
         }
@@ -234,7 +243,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func invalidateConnection(_ message: String? = nil) {
         generation += 1; geometryValid=false; selected=0
         viewer.target=nil; viewer.targetFrame = .zero; viewer.image=nil; viewer.needsDisplay=true
-        sink?.cancel(); sink=nil
+        sink?.cancel(); sink=nil; termination?.cancel(); termination=nil
         let old=stream; stream=nil
         if let message=message {
             window.title="Fusion: Alignment failed"
@@ -270,12 +279,22 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             frameSink?.onFrame=nil
         }
     }
+    func installTermination(_ listener: StreamTermination, frameSink: FrameSink, token: Int) {
+        listener.onStop={ [weak self, weak frameSink] error in
+            guard let self=self,let frameSink=frameSink,self.generation==token,self.sink===frameSink else { return }
+            let message="Viber 捕获已断开：\(error.localizedDescription)"
+            self.invalidateConnection()
+            self.window.title="Fusion: Capture failed"
+            // This is completion of the still-owned connection, not generic cleanup.
+            self.done(message)
+        }
+    }
     func connect(_ slot:Int) {
         let token=generation
-        guard let initialApp=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).first else { done("账号未启动"); return }
+        guard let initialApp=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).first(where:{!$0.isTerminated}) else { done("账号未启动"); return }
         geometryValid=false
         // Normally selection already detached this; direct reconnects use the same ownership rule.
-        let old=stream; stream=nil; sink?.cancel(); sink=nil
+        let old=stream; stream=nil; sink?.cancel(); sink=nil; termination?.cancel(); termination=nil
         Task { @MainActor in
             var app=initialApp
             var local: SCStream?
@@ -284,7 +303,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if let old=old { try? await old.stopCapture(); guard generation == token else { return } }
                 guard generation == token else { return }
                 for n in 1...5 {
-                    guard let candidate=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(n)).first else { continue }
+                    guard let candidate=NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(n)).first(where:{!$0.isTerminated}) else { continue }
                     let element=AXUIElementCreateApplication(candidate.processIdentifier)
                     if let item=largestAXWindow(element) {
                         let result=AXUIElementSetAttributeValue(item,kAXMinimizedAttribute as CFString,(n == slot ? kCFBooleanFalse : kCFBooleanTrue))
@@ -316,11 +335,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
                 guard let target=discovered else { throw NSError(domain:"fusion",code:1,userInfo:[NSLocalizedDescriptionKey:"等待 Viber 启动窗口超时，已停止连接；可重新选择账号重试"]) }
                 let config=SCStreamConfiguration(); config.width=Int(target.frame.width); config.height=Int(target.frame.height); config.minimumFrameInterval=CMTime(value:1,timescale:10); config.queueDepth=3; config.showsCursor=false
-                let next=SCStream(filter:SCContentFilter(desktopIndependentWindow:target),configuration:config,delegate:nil)
-                local=next
                 let frameSink=FrameSink(viewer); localSink=frameSink
                 installCallbacks(frameSink,token:token,slot:slot)
                 sink=frameSink
+                let listener=StreamTermination()
+                installTermination(listener,frameSink:frameSink,token:token); termination=listener
+                let next=SCStream(filter:SCContentFilter(desktopIndependentWindow:target),configuration:config,delegate:listener)
+                local=next
                 try next.addStreamOutput(frameSink,type:.screen,sampleHandlerQueue:DispatchQueue(label:"haituo.viber.frames"))
                 selected=slot
                 try await next.startCapture()

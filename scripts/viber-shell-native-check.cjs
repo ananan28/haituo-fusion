@@ -47,15 +47,22 @@ async function stopApp(){
   await clickFill();await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) [role=status]').textContent.includes('尚未发送')`);
  });
  }else{
+ let selectedNativePID;
  await check('real unlinked Viber AX click through the actual shell image',async()=>{
   const rows=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');
   const target=rows.find(line=>line.includes('/profiles/slot-1/Viber.app/Contents/MacOS/Viber'));
   const host=rows.find(line=>line.includes(app+'/Contents/MacOS/')&&line.includes('--user-data-dir='+profile)&&!line.includes('--type='));
-  assert(target&&host,'real host/target process missing');const targetPID=target.trim().split(/\s+/)[0],hostPID=host.trim().split(/\s+/)[0];
+  assert(target&&host,'real host/target process missing');const targetPID=target.trim().split(/\s+/)[0],hostPID=host.trim().split(/\s+/)[0];selectedNativePID=Number(targetPID);
   const point=JSON.parse(cp.execFileSync(process.env.HAITUO_VIBER_CLICK_HELPER,[targetPID],{encoding:'utf8'}));
   await evaluate(`(()=>{const image=document.querySelector('[data-haituo-viber-account]:not([hidden]) img'),r=image.getBoundingClientRect(),scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale;image.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+(r.width-width)/2+${point.x}*width,clientY:r.top+(r.height-height)/2+${point.y}*height}))})()`);
   await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) [role=status]').textContent.includes('点击已发送')`);
   cp.execFileSync(process.env.HAITUO_VIBER_STACK_HELPER,[hostPID,targetPID],{stdio:'inherit'});
+ });
+ await check('source exit clears Ready/image and reconnects the same preserved account',async()=>{
+  assert(selectedNativePID);process.kill(selectedNativePID,'SIGTERM');
+  await until(`!document.querySelector('[data-haituo-viber-account]:not([hidden]) img')`,15000);
+  await evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='重新连接').click()})()`);
+  await until(`!!document.querySelector('[data-haituo-viber-account]:not([hidden]) img')`,100000);
  });
  }
  await check('returning to Signal hides every Viber pane',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await until(`document.querySelectorAll('[data-haituo-viber-account]:not([hidden])').length===0`)});
