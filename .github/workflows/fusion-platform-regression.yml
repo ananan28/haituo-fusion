@@ -2,8 +2,12 @@ name: Fusion platform regression
 on:
   push:
     branches: ['fusion/signal', 'fusion/whatsapp', 'fusion/telegram']
+    paths: ['src/**', 'scripts/**', '.github/workflows/fusion-platform-regression.yml']
   pull_request:
     paths: ['src/app/js/**', 'scripts/**', '.github/workflows/fusion-platform-regression.yml']
+concurrency:
+  group: platform-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -36,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=(scripts/signal-attachments.dom.cjs scripts/wa-rollback.dom.cjs)
+          files=(scripts/signal-attachments.dom.cjs scripts/wa-rollback.dom.cjs scripts/message-attachments.dom.cjs)
           for optional in scripts/telegram-message-identity.dom.cjs scripts/wa-retranslate-lifecycle.dom.cjs; do
             [ ! -f "$optional" ] || files+=("$optional")
           done
@@ -46,9 +50,10 @@ jobs:
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'REPORT'
           Active observer-mode and Signal component gates run above.
-          The initial full DOM sweep found 18 inherited failures in local-chat-view.dom.cjs,
-          whatsapp-records-scanner.dom.cjs and message-attachments.dom.cjs.
-          Those suites target retired resident-storage behavior and are retained unchanged.
+          The initial full DOM sweep found 18 failures. The observer late-result cache defect
+          is now fixed and message-attachments.dom.cjs runs as an active gate above.
+          The other 17 failures in local-chat-view.dom.cjs and whatsapp-records-scanner.dom.cjs
+          concern retired resident-storage behavior; those files are retained unchanged.
           Initial evidence: https://github.com/ananan28/haituo-fusion/actions/runs/40627663708
           A passing active gate does not certify those legacy suites or real logged-in accounts.
           REPORT
