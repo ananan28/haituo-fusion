@@ -2,7 +2,7 @@ name: Viber real unlinked shell integration
 on:
   push:
     branches: ['fusion/viber-shell']
-    paths: ['scripts/viber-shell-native-check.cjs', 'viber-fusion/normalized-click-point.swift', '.github/workflows/viber-shell-real.yml']
+    paths: ['scripts/viber-shell-native-check.cjs', 'viber-fusion/normalized-click-point.swift', 'scripts/ci-viber-tcc.py', '.github/workflows/viber-shell-real.yml']
 permissions:
   contents: read
   actions: read
@@ -54,6 +54,7 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/shell-dmg" packaged/macos/out/*.dmg
           trap 'hdiutil detach "$RUNNER_TEMP/shell-dmg" || true' EXIT
           ditto "$RUNNER_TEMP/shell-dmg/海拓.app" "macos/out/海拓-darwin-arm64/海拓.app"
+          python3 scripts/ci-viber-tcc.py "$PWD/macos/out/海拓-darwin-arm64/海拓.app"
           swiftc viber-fusion/normalized-click-point.swift -o "$RUNNER_TEMP/normalized-click"
           swiftc viber-fusion/stack-check.swift -o "$RUNNER_TEMP/stack-check"
           node scripts/viber-shell-native-check.cjs --real-viber
