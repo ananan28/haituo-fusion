@@ -86,6 +86,7 @@ final class FusionView: NSView {
     func forwardMouse(_ screen: CGPoint, target: NSRunningApplication) {
         var stack=[AXUIElementCreateApplication(target.processIdentifier)], candidates: [(AXUIElement,CGFloat)] = []
         var visited=0
+        var editableTargets:[(AXUIElement,CGFloat)]=[]
         while let element=stack.popLast(), visited<1500 {
             visited += 1
             var actions: CFArray?, position: CFTypeRef?, sizeRef: CFTypeRef?
@@ -96,12 +97,45 @@ final class FusionView: NSView {
                 var origin=CGPoint.zero, dimensions=CGSize.zero
                 if AXValueGetValue(pos as! AXValue,.cgPoint,&origin), AXValueGetValue(siz as! AXValue,.cgSize,&dimensions), CGRect(origin:origin,size:dimensions).contains(screen) { candidates.append((element,dimensions.width*dimensions.height)) }
             }
+            var role:CFTypeRef?,focusable:DarwinBoolean=false,fieldPosition:CFTypeRef?,fieldSize:CFTypeRef?
+            if AXUIElementCopyAttributeValue(element,kAXRoleAttribute as CFString,&role) == .success,
+               let role=role as? String,[kAXTextFieldRole as String,kAXTextAreaRole as String].contains(role),
+               AXUIElementIsAttributeSettable(element,kAXFocusedAttribute as CFString,&focusable) == .success,focusable.boolValue,
+               AXUIElementCopyAttributeValue(element,kAXPositionAttribute as CFString,&fieldPosition) == .success,
+               AXUIElementCopyAttributeValue(element,kAXSizeAttribute as CFString,&fieldSize) == .success,
+               let point=fieldPosition,let size=fieldSize,CFGetTypeID(point)==AXValueGetTypeID(),CFGetTypeID(size)==AXValueGetTypeID() {
+                var p=CGPoint.zero,z=CGSize.zero
+                if AXValueGetValue(point as! AXValue,.cgPoint,&p),AXValueGetValue(size as! AXValue,.cgSize,&z),CGRect(origin:p,size:z).contains(screen) { editableTargets.append((element,z.width*z.height)) }
+            }
             var children: CFTypeRef?
             if AXUIElementCopyAttributeValue(element,kAXChildrenAttribute as CFString,&children) == .success, let nodes=children as? [AXUIElement] { stack.append(contentsOf:nodes) }
         }
-        guard let hit=candidates.sorted(by:{$0.1 < $1.1}).first else { feedback?("此区域尚不支持点击；请在官方窗口操作"); return }
+        guard let hit=candidates.sorted(by:{$0.1 < $1.1}).first else {
+            if let field=editableTargets.sorted(by:{$0.1<$1.1}).first {
+                let result=AXUIElementSetAttributeValue(field.0,kAXFocusedAttribute as CFString,kCFBooleanTrue)
+                feedback?(result == .success ? "输入框已选中，可填入译文" : "输入框无法取得焦点：\(result.rawValue)")
+            } else { feedback?("此区域尚不支持点击；请在官方窗口操作") }
+            return
+        }
         let result=AXUIElementPerformAction(hit.0,kAXPressAction as CFString)
         if result != .success { feedback?("点击转发失败：\(result.rawValue)") } else { feedback?("点击已发送") }
+    }
+    @discardableResult
+    func insertFocusedText(_ text: String) -> Bool {
+        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,text.utf16.count<=30000,let target=target else { feedback?("当前账号或待填入文字无效"); return false }
+        let application=AXUIElementCreateApplication(target.processIdentifier)
+        var raw:CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application,kAXFocusedUIElementAttribute as CFString,&raw) == .success,
+              let raw=raw,CFGetTypeID(raw)==AXUIElementGetTypeID() else { feedback?("请先点击 Viber 画面中的输入框"); return false }
+        let field=raw as! AXUIElement
+        var pid:pid_t=0,role:CFTypeRef?,settable:DarwinBoolean=false
+        guard AXUIElementGetPid(field,&pid) == .success,pid==target.processIdentifier,
+              AXUIElementCopyAttributeValue(field,kAXRoleAttribute as CFString,&role) == .success,
+              let role=role as? String,[kAXTextFieldRole as String,kAXTextAreaRole as String].contains(role),
+              AXUIElementIsAttributeSettable(field,kAXValueAttribute as CFString,&settable) == .success,settable.boolValue else { feedback?("当前控件不能写入文字，请先选中可编辑输入框"); return false }
+        let result=AXUIElementSetAttributeValue(field,kAXValueAttribute as CFString,text as CFString)
+        feedback?(result == .success ? "译文已填入 Viber 输入框（尚未发送）" : "填入失败：\(result.rawValue)")
+        return result == .success
     }
     override func keyDown(with event: NSEvent) {
         guard !event.modifierFlags.contains(.command), let target=target, let cg=event.cgEvent else { super.keyDown(with:event); return }

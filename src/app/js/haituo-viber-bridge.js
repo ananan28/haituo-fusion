@@ -2,7 +2,8 @@
 // Private native-helper pipe. Neither images nor OCR text are written to logs or account files.
 const {EventEmitter}=require('node:events');
 const validID=id=>typeof id==='string'&&/^viber-[a-z0-9][a-z0-9_-]{0,47}$/.test(id);
-function createBridge({binary,platform=process.platform,spawn=require('node:child_process').spawn,exists=require('node:fs').existsSync,readAccounts=()=>({}),saveAccounts=()=>{},hostBounds,onEvent=()=>{},recognize=require('./haituo-ocr').recognize}){
+function validateOutgoing(text,blockChinese=true){if(typeof text!=='string'||!text.trim()||text.length>30000)throw Error('待填入文字无效或过长');if(blockChinese&&/\p{Script=Han}/u.test(text))throw Error('已启用禁止中文发送，请先翻译为目标语言或在设置中关闭该选项');return text}
+function createBridge({getBlockChinese=()=>true,binary,platform=process.platform,spawn=require('node:child_process').spawn,exists=require('node:fs').existsSync,readAccounts=()=>({}),saveAccounts=()=>{},hostBounds,onEvent=()=>{},recognize=require('./haituo-ocr').recognize}){
  let child=null,epoch=0,active=null,ready=false,lastFrame=null,buffer='',closed=false;
  const saved=readAccounts(),accounts=new Map();
  for(const [id,slot] of Object.entries(saved||{}))if(validID(id)&&Number.isInteger(slot)&&slot>=1&&slot<=5&&![...accounts.values()].includes(slot))accounts.set(id,slot);
@@ -41,8 +42,9 @@ function createBridge({binary,platform=process.platform,spawn=require('node:chil
  function hide(id,token){if(!current(id,token))return;write({type:'hide',epoch:++epoch});reset();active=null}
  function geometry(){if(active&&child)write({type:'bounds',epoch,bounds:bounds()})}
  function click(id,token,x,y){if(!current(id,token)||!ready)return false;if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>1||y<0||y>1)throw Error('点击坐标无效');write({type:'click',epoch,x,y});return true}
+ function insert(id,token,text){if(!current(id,token)||!ready)return false;const value=validateOutgoing(text,getBlockChinese());write({type:'insert',epoch,text:value});return true}
  async function ocr(id,token){if(!current(id,token)||!ready||lastFrame?.epoch!==epoch)throw Error('当前 Viber 画面尚未就绪');const snapshot=lastFrame;const result=await recognize(Buffer.from(snapshot.image,'base64'));if(!current(id,token)||!ready)throw Error('账号已切换，已丢弃旧画面识字结果');return{original:result.original}}
  function close(){if(closed)return;closed=true;const proc=child;child=null;epoch++;ready=false;lastFrame=null;active=null;if(proc){proc.stdin.end();const timer=setTimeout(()=>proc.kill(),2000);timer.unref?.();proc.once('exit',()=>clearTimeout(timer))}events.removeAllListeners()}
- return{available,select,hide,geometry,click,ocr,close,onEvent(fn){events.on('event',fn);return()=>events.removeListener('event',fn)}};
+ return{available,select,hide,geometry,click,insert,ocr,close,onEvent(fn){events.on('event',fn);return()=>events.removeListener('event',fn)}};
 }
-module.exports={createBridge,validID};
+module.exports={createBridge,validID,validateOutgoing};

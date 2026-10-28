@@ -36,3 +36,15 @@ test('unsupported OS and invalid host geometry cannot reserve accounts or launch
  const unsupported=fixture({platform:'win32'});assert.throws(()=>unsupported.bridge.select('viber-a'),/macOS/);assert.equal(unsupported.saved.length,0);unsupported.bridge.close();
  const invalid=fixture();invalid.setBox(null);assert.throws(()=>invalid.bridge.select('viber-a'),/几何/);assert.equal(invalid.children.length,0);invalid.bridge.close();
 });
+test('text insertion is scoped to the current account and honors the live Chinese-send setting',()=>{
+ let blocked=true;const x=fixture({getBlockChinese:()=>blocked});try{
+ const a=x.bridge.select('viber-a');x.send({type:'state',epoch:a.epoch,slot:1,ready:true});
+ assert.throws(()=>x.bridge.insert('viber-a',a.epoch,'合成中文'),/禁止中文发送/);
+ assert.equal(x.bridge.insert('viber-a',a.epoch,'Synthetic translated message'),true);
+ assert.equal(x.children[0].commands.at(-1).type,'insert');
+ blocked=false;assert.equal(x.bridge.insert('viber-a',a.epoch,'合成中文'),true);
+ assert.equal(x.children[0].commands.at(-1).text,'合成中文');
+ x.bridge.select('viber-b');const count=x.children[0].commands.length;
+ assert.equal(x.bridge.insert('viber-a',a.epoch,'Old account text'),false);assert.equal(x.children[0].commands.length,count);
+ }finally{x.bridge.close()}
+});

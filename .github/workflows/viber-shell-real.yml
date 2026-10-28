@@ -17,8 +17,8 @@ jobs:
           node-version: '22'
       - uses: actions/download-artifact@v4
         with:
-          name: fusion-viber-shell-macos-2dde34ae3feb8520b43808ef4464b35a1a998f2e
-          run-id: 40630076576
+          name: fusion-viber-shell-macos-570d5bf46014365bd53a057e8fe0a3baa9e8ee19
+          run-id: 40633134845
           github-token: ${{ github.token }}
           path: packaged
       - name: Prepare runner display and official unlinked Viber

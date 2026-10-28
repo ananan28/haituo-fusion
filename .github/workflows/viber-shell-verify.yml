@@ -2,7 +2,7 @@ name: Viber native shell integration
 on:
   push:
     branches: ['fusion/viber-shell']
-    paths: ['development/fusion-shell.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml', '!scripts/viber-shell-native-check.cjs']
+    paths: ['development/fusion-shell.patch', 'development/viber-input-main.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml', '!scripts/viber-shell-native-check.cjs']
 permissions:
   contents: read
 concurrency:
@@ -34,6 +34,13 @@ jobs:
             git push origin HEAD:fusion/viber-shell
           else
             git apply --reverse --check development/fusion-shell.patch
+          fi
+          if ! rg -Fq 'getBlockChinese:' src/app/bundles/main.js; then
+            git apply --index development/viber-input-main.patch
+            git config user.name 'Haituo Fusion'
+            git config user.email 'fusion@users.noreply.github.com'
+            git commit -m 'feat(viber): wire focused input with the shared Chinese-send setting'
+            git push origin HEAD:fusion/viber-shell
           fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   verify:
@@ -82,6 +89,9 @@ jobs:
           cat viber-fusion/main.swift viber-fusion/state-regression.swift > "$RUNNER_TEMP/main.swift"
           swiftc -swift-version 5 -D STATE_REGRESSION "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/state-regression"
           "$RUNNER_TEMP/state-regression"
+          cat viber-fusion/main.swift viber-fusion/input-regression.swift > "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -D STATE_REGRESSION "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/input-regression"
+          "$RUNNER_TEMP/input-regression"
       - name: Build development package
         run: python scripts/build.py --target ${{ matrix.target }}
       - name: Verify fresh native startup and settings

@@ -52,6 +52,8 @@ func command(_ object: [String:Any]) {
         guard (object["epoch"] as? Int)==clientEpoch else { return }
         if type=="bounds",let bounds=object["bounds"] as? [String:Any],let host=frame(bounds) {
             bridgeDelegate.externalHostFrame=host;bridgeDelegate.alignSourceWindow()
+        } else if type=="insert",bridgeDelegate.geometryValid,let text=object["text"] as? String {
+            bridgeDelegate.viewer.insertFocusedText(text)
         } else if type=="click",bridgeDelegate.geometryValid,let target=bridgeDelegate.viewer.target,
                   let x=object["x"] as? Double,let y=object["y"] as? Double,x.isFinite,y.isFinite,(0...1).contains(x),(0...1).contains(y) {
             let r=bridgeDelegate.viewer.targetFrame
