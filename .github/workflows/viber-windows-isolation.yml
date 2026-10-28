@@ -1,0 +1,34 @@
+name: Viber Windows account isolation
+on:
+  push:
+    branches: ['fusion/viber-windows']
+    paths: ['viber-windows/**', '.github/workflows/viber-windows-isolation.yml']
+permissions:
+  contents: read
+jobs:
+  isolate:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install signed official client on ephemeral runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'ViberSetup.msi'
+          Invoke-WebRequest https://download.cdn.viber.com/desktop/windows/29.1.0/ViberSetup.msi -OutFile $msi
+          $sig=Get-AuthenticodeSignature $msi
+          if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Viber'){throw 'Invalid official publisher signature'}
+          $installed=Start-Process msiexec.exe -ArgumentList @('/i',$msi,'/qn','/norestart') -Wait -PassThru
+          if($installed.ExitCode -notin @(0,3010)){throw 'Official Viber installation failed'}
+          $roots=@((Join-Path $env:LOCALAPPDATA 'Viber'),(Join-Path $env:ProgramFiles 'Viber'),(Join-Path ${env:ProgramFiles(x86)} 'Viber'))
+          $exe=$roots | Where-Object {Test-Path $_} | ForEach-Object {Get-ChildItem $_ -Filter Viber.exe -File -Recurse -ErrorAction SilentlyContinue} | Select-Object -First 1
+          if(-not $exe){throw 'Official Viber executable missing'}
+          if((Get-AuthenticodeSignature $exe.FullName).Status -ne 'Valid'){throw 'Installed client signature invalid'}
+          Get-Process Viber -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          ./viber-windows/isolation-probe.ps1 -Executable $exe.FullName
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-windows-isolation-report
+          path: audit-results/viber-windows-isolation.json
