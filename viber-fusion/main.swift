@@ -188,6 +188,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             do {
                 let target=try prepare(slot)
+                guard DispatchQueue.main.sync(execute:{ self?.generation == selectionToken }) else { return }
                 if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { _ = try run("/usr/bin/open",["-n",target.path]) }
                 for _ in 0..<40 { if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { break }; Thread.sleep(forTimeInterval:0.5) }
                 DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.connect(slot) }
@@ -257,9 +258,23 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
                 try await Task.sleep(nanoseconds:600_000_000)
                 guard generation == token else { return }
-                let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
-                guard generation == token else { return }
-                guard let target=content.windows.first(where:{$0.owningApplication?.processID == app.processIdentifier && $0.frame.width > 100 && $0.frame.height > 100}) else { throw NSError(domain:"fusion",code:1,userInfo:[NSLocalizedDescriptionKey:"没有找到 Viber 窗口"]) }
+                // A running process may precede Qt's first window by several seconds.
+                // Keep geometry invalid while waiting, and cancel every stale discovery continuation.
+                var discovered: SCWindow?
+                for _ in 0..<60 {
+                    guard generation == token else { return }
+                    if let source=largestAXWindow(AXUIElementCreateApplication(app.processIdentifier)) {
+                        let result=AXUIElementSetAttributeValue(source,kAXMinimizedAttribute as CFString,kCFBooleanFalse)
+                        guard result == .success else { throw NSError(domain:"fusion",code:Int(result.rawValue),userInfo:[NSLocalizedDescriptionKey:"Viber 窗口尚无法恢复，辅助功能权限或窗口状态异常"]) }
+                    }
+                    let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true)
+                    guard generation == token else { return }
+                    discovered=content.windows.filter({$0.owningApplication?.processID == app.processIdentifier && $0.frame.width > 100 && $0.frame.height > 100}).max(by:{$0.frame.width*$0.frame.height < $1.frame.width*$1.frame.height})
+                    if discovered != nil { break }
+                    try await Task.sleep(nanoseconds:250_000_000)
+                    guard generation == token else { return }
+                }
+                guard let target=discovered else { throw NSError(domain:"fusion",code:1,userInfo:[NSLocalizedDescriptionKey:"等待 Viber 启动窗口超时，已停止连接；可重新选择账号重试"]) }
                 let config=SCStreamConfiguration(); config.width=Int(target.frame.width); config.height=Int(target.frame.height); config.minimumFrameInterval=CMTime(value:1,timescale:10); config.queueDepth=3; config.showsCursor=false
                 let next=SCStream(filter:SCContentFilter(desktopIndependentWindow:target),configuration:config,delegate:nil)
                 local=next
