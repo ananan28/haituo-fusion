@@ -1,0 +1,98 @@
+name: Viber macOS integrated-view prototype
+on:
+  push:
+    branches: ['spike/viber-macos-fusion']
+    paths: ['viber-fusion/main.swift', 'viber-fusion/integrated-click-test.swift', 'viber-fusion/stack-check.swift', '.github/workflows/viber-fusion-ui.yml']
+permissions:
+  contents: read
+jobs:
+  prototype:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build prototype and prepare five unlinked Viber instances
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -O -swift-version 5 viber-mac-preview/main.swift -o "$RUNNER_TEMP/launch-viber"
+          APP="$RUNNER_TEMP/Haituo Viber Fusion.app"
+          mkdir -p "$APP/Contents/MacOS"
+          swiftc -O -swift-version 5 viber-fusion/main.swift -o "$APP/Contents/MacOS/HaituoViberFusion"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>com.haituo.viberfusion.prototype</string>
+          <key>CFBundleExecutable</key><string>HaituoViberFusion</string>
+          <key>CFBundleName</key><string>Haituo Viber Fusion</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>0.0.1</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>LSMinimumSystemVersion</key><string>14.0</string>
+          </dict></plist>
+          PLIST
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          curl --fail --location --retry 2 --max-time 180 'https://download.viber.com/desktop/mac/online/Viber.dmg' -o "$RUNNER_TEMP/Viber.dmg"
+          mkdir -p "$RUNNER_TEMP/viber-volume"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/viber-volume" "$RUNNER_TEMP/Viber.dmg"
+          trap 'hdiutil detach "$RUNNER_TEMP/viber-volume" || true' EXIT
+          sourceApp="$(find "$RUNNER_TEMP/viber-volume" -maxdepth 2 -type d -name '*.app' -print -quit)"
+          test -n "$sourceApp"
+          codesign --verify --deep --strict "$sourceApp"
+          ditto "$sourceApp" /Applications/Viber.app
+          open -n /Applications/Viber.app
+          for i in {1..50}; do
+            version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Viber.app/Contents/Info.plist 2>/dev/null || true)
+            [ "$version" != "1.0.0.110" ] && [ -n "$version" ] && break
+            sleep 3
+          done
+          test "$version" != "1.0.0.110"
+          pkill -f '^/Applications/Viber.app/Contents/MacOS/Viber' || true
+          sleep 3
+          "$RUNNER_TEMP/launch-viber" --smoke-viber
+      - name: Test integrated view and account buttons
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Haituo Viber Fusion.app"
+          cp "$APP/Contents/MacOS/HaituoViberFusion" "$RUNNER_TEMP/fusion-test-runner"
+          "$RUNNER_TEMP/fusion-test-runner" &
+          sleep 3
+          for round in 1 2 3; do
+          for index in 1 2 3 4 5; do
+            osascript -e "tell application \"System Events\" to tell process \"fusion-test-runner\" to click button \"Viber $index\" of window 1"
+            ready=0
+            for attempt in {1..35}; do
+              title="$(osascript -e 'tell application "System Events" to tell process "fusion-test-runner" to get name of window 1' 2>/dev/null || true)"
+              if [ "$title" = "Fusion: Ready slot $index" ]; then ready=1; break; fi
+              sleep 1
+            done
+            echo "FUSION_ROUND_${round}_SLOT_${index}=$ready"
+            if [ "$ready" != 1 ]; then
+              echo "Prototype status:"
+              osascript -e 'tell application "System Events" to tell process "fusion-test-runner" to get value of every static text of window 1' || true
+              echo "Window title=$title"
+            fi
+            test "$ready" = 1
+          done
+          done
+          swiftc viber-fusion/integrated-click-test.swift -o "$RUNNER_TEMP/integrated-click-test"
+          host_pid="$(pgrep -f "^$RUNNER_TEMP/fusion-test-runner" | head -1)"
+          target_pid="$(pgrep -f '/profiles/slot-5/Viber.app/Contents/MacOS/Viber' | head -1)"
+          test -n "$host_pid"
+          test -n "$target_pid"
+          "$RUNNER_TEMP/integrated-click-test" "$host_pid" "$target_pid"
+          sleep 2
+          status="$(osascript -e 'tell application "System Events" to tell process "fusion-test-runner" to get value of every static text of window 1')"
+          echo "Prototype status after click=$status"
+          if [[ "$status" != *"点击已发送"* ]]; then echo "CLICK_FORWARDING_FAILED"; exit 9; fi
+          swiftc viber-fusion/stack-check.swift -o "$RUNNER_TEMP/stack-check"
+          "$RUNNER_TEMP/stack-check" "$host_pid" "$target_pid"
+          osascript -e 'tell application "System Events" to tell process "fusion-test-runner" to set size of window 1 to {800, 600}'
+          osascript -e 'tell application "System Events" to tell process "fusion-test-runner" to set position of window 1 to {100, 90}'
+          sleep 1
+          echo 'STACK_AFTER_MOVE_AND_RESIZE'
+          "$RUNNER_TEMP/stack-check" "$host_pid" "$target_pid"
+          echo 'UNTESTED: installed app TCC, logged-in accounts, data isolation, typing, IME, scrolling, WhatsApp/Signal/Telegram integration'

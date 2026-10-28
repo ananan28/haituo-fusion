@@ -1,0 +1,78 @@
+name: Viber macOS in-window capture feasibility
+on:
+  push:
+    branches: ['spike/viber-macos-fusion']
+    paths: ['viber-fusion/**', '.github/workflows/viber-macos-fusion.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build macOS preview and verify launcher logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Haituo Viber Preview.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" out
+          swiftc -O viber-mac-preview/main.swift -o "$APP/Contents/MacOS/HaituoViberPreview"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>com.haituo.viberpreview</string>
+          <key>CFBundleExecutable</key><string>HaituoViberPreview</string>
+          <key>CFBundleName</key><string>Haituo Viber Preview</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>LSMinimumSystemVersion</key><string>12.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          "$APP/Contents/MacOS/HaituoViberPreview" --self-test
+      - name: Install official Viber in temporary runner and test five launcher instances
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 --max-time 180 'https://download.viber.com/desktop/mac/online/Viber.dmg' -o "$RUNNER_TEMP/Viber.dmg"
+          mkdir -p "$RUNNER_TEMP/viber-volume"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/viber-volume" "$RUNNER_TEMP/Viber.dmg"
+          trap 'hdiutil detach "$RUNNER_TEMP/viber-volume" || true' EXIT
+          sourceApp="$(find "$RUNNER_TEMP/viber-volume" -maxdepth 2 -type d -name '*.app' -print -quit)"
+          test -n "$sourceApp"
+          codesign --verify --deep --strict "$sourceApp"
+          ditto "$sourceApp" /Applications/Viber.app
+          open -n /Applications/Viber.app
+          for i in {1..50}; do
+            version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Viber.app/Contents/Info.plist 2>/dev/null || true)
+            [ "$version" != "1.0.0.110" ] && [ -n "$version" ] && break
+            sleep 3
+          done
+          test "$version" != "1.0.0.110"
+          pkill -f '^/Applications/Viber.app/Contents/MacOS/Viber' || true
+          sleep 3
+          "$RUNNER_TEMP/Haituo Viber Preview.app/Contents/MacOS/HaituoViberPreview" --smoke-viber
+          swiftc viber-switch/window-switch-test.swift -o "$RUNNER_TEMP/viber-switch-test"
+          "$RUNNER_TEMP/viber-switch-test"
+          swiftc -parse-as-library viber-fusion/capture-check.swift -o "$RUNNER_TEMP/viber-capture-check"
+          "$RUNNER_TEMP/viber-capture-check"
+      - name: Package diagnostic DMG and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dmg-root"
+          ditto "$RUNNER_TEMP/Haituo Viber Preview.app" "$RUNNER_TEMP/dmg-root/Haituo Viber Preview.app"
+          ln -s /Applications "$RUNNER_TEMP/dmg-root/Applications"
+          hdiutil create -volname 'Haituo Viber Preview' -srcfolder "$RUNNER_TEMP/dmg-root" -ov -format UDZO out/Haituo-Viber-macOS-Preview-0.1.0.dmg
+          hdiutil verify out/Haituo-Viber-macOS-Preview-0.1.0.dmg
+          ditto -c -k --keepParent viber-mac-preview out/Haituo-Viber-macOS-Preview-0.1.0-Source.zip
+          shasum -a 256 out/* > out/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haituo-Viber-macOS-Preview
+          path: out/*
