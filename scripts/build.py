@@ -95,6 +95,11 @@ def prepare(target):
                 shutil.copytree(path, nested/path.name, dirs_exist_ok=True)
     if target == 'macos':
         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
+        bridge_source=ROOT/'viber-fusion/shell-bridge.swift'
+        if bridge_source.exists():
+            combined=tools/'viber-bridge-main.swift'
+            combined.write_text((ROOT/'viber-fusion/main.swift').read_text(encoding='utf-8')+'\n'+bridge_source.read_text(encoding='utf-8'),encoding='utf-8')
+            run(['swiftc','-O','-swift-version','5','-D','FUSION_BRIDGE',combined,'-o',app/'native/haituo-viber-fusion'])
     if target == 'windows':
         # Always stage a clean bundle; the runtime test hook is injected later
         # into a separate test build, never into the release package.
@@ -209,11 +214,13 @@ def macos(app, tools):
          '--platform=darwin','--arch=arm64','--electron-version='+CFG['tools']['electron'],
          '--app-version='+version,'--build-version='+version,'--icon='+str(icon),
          '--app-bundle-id=com.haituo.desktop','--out=macos/out','--overwrite',
-         '--asar.unpack={**/*.node,native/haituo-ocr}','--extend-info=macos/Info.plist'])
+         '--asar.unpack={**/*.node,native/haituo-ocr,native/haituo-viber-fusion}','--extend-info=macos/Info.plist'])
     bundle = ROOT/'macos/out/海拓-darwin-arm64/海拓.app'
     ocr_dest = bundle/'Contents/Resources/app.asar.unpacked/native/haituo-ocr'
     ocr_dest.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(app/'native/haituo-ocr',ocr_dest)
+    if (app/'native/haituo-viber-fusion').exists():
+        shutil.copy2(app/'native/haituo-viber-fusion',ocr_dest.parent/'haituo-viber-fusion')
     ocr_dest.chmod(0o755)
     p = bundle/'Contents/Info.plist'
     info = plistlib.loads(p.read_bytes());info['LSUIElement']=False;info.pop('LSBackgroundOnly',None)

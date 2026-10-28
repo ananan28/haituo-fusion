@@ -59,7 +59,8 @@ func prepare(_ slot: Int) throws -> URL {
 }
 
 final class FusionView: NSView {
-    var image: CGImage?
+    var imageChanged: ((CGImage?) -> Void)?
+    var image: CGImage? { didSet { imageChanged?(image) } }
     var target: NSRunningApplication?
     var targetFrame: CGRect = .zero
     var feedback: ((String)->Void)?
@@ -80,6 +81,9 @@ final class FusionView: NSView {
         let r = CGRect(x:(bounds.width-CGFloat(image.width)*scale)/2,y:(bounds.height-CGFloat(image.height)*scale)/2,width:CGFloat(image.width)*scale,height:CGFloat(image.height)*scale)
         guard r.contains(p) else { return }
         let screen = CGPoint(x:targetFrame.minX + (p.x-r.minX)/r.width*targetFrame.width, y:targetFrame.minY + (p.y-r.minY)/r.height*targetFrame.height)
+        forwardMouse(screen,target:target)
+    }
+    func forwardMouse(_ screen: CGPoint, target: NSRunningApplication) {
         var stack=[AXUIElementCreateApplication(target.processIdentifier)], candidates: [(AXUIElement,CGFloat)] = []
         var visited=0
         while let element=stack.popLast(), visited<1500 {
@@ -154,6 +158,8 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var buttons:[NSButton]=[]
     var selected=0
     var pending=false
+    var showHost=true
+    var externalHostFrame: CGRect?
     func applicationDidFinishLaunching(_ notification:Notification) {
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:780),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title="Viber 同窗口融合实验"; window.center(); window.minSize=NSSize(width:700,height:500); window.delegate=self
@@ -166,12 +172,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         viewer=FusionView(); viewer.setAccessibilityElement(true); viewer.setAccessibilityRole(.group); viewer.setAccessibilityLabel("Fusion viewport"); viewer.translatesAutoresizingMaskIntoConstraints=false; root.addSubview(viewer)
         viewer.feedback={ [weak self] message in self?.status.stringValue=message }
         NSLayoutConstraint.activate([header.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:12),header.topAnchor.constraint(equalTo:root.topAnchor,constant:10),header.heightAnchor.constraint(equalToConstant:32),status.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:12),status.topAnchor.constraint(equalTo:header.bottomAnchor,constant:5),status.trailingAnchor.constraint(equalTo:root.trailingAnchor,constant:-12),viewer.leadingAnchor.constraint(equalTo:root.leadingAnchor),viewer.trailingAnchor.constraint(equalTo:root.trailingAnchor),viewer.topAnchor.constraint(equalTo:status.bottomAnchor,constant:8),viewer.bottomAnchor.constraint(equalTo:root.bottomAnchor)])
-        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
+        if showHost { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     }
     @objc func selectSlot(_ sender:NSButton) {
         guard !pending else { return }
         let slot=sender.tag; pending=true; buttons.forEach{$0.isEnabled=false}
         invalidateConnection()
+        let selectionToken=generation
         status.stringValue="正在启动账号 \(slot)……首次准备可能需要几分钟。"
         if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess(); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许屏幕录制，然后重启并重试。"; return }
         if !AXIsProcessTrusted() { let options=[kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary; _ = AXIsProcessTrustedWithOptions(options); pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue="请允许辅助功能权限，然后重试。"; return }
@@ -182,8 +189,8 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let target=try prepare(slot)
                 if NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { _ = try run("/usr/bin/open",["-n",target.path]) }
                 for _ in 0..<40 { if !NSRunningApplication.runningApplications(withBundleIdentifier:bundleID(slot)).isEmpty { break }; Thread.sleep(forTimeInterval:0.5) }
-                DispatchQueue.main.async { self?.connect(slot) }
-            } catch { DispatchQueue.main.async { self?.done("启动失败：\(error.localizedDescription)") } }
+                DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.connect(slot) }
+            } catch { DispatchQueue.main.async { guard let self=self, self.generation==selectionToken else { return }; self.done("启动失败：\(error.localizedDescription)") } }
         }
     }
     func done(_ text:String) { pending=false; buttons.forEach{$0.isEnabled=true}; status.stringValue=text }
@@ -263,7 +270,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try await next.startCapture()
                 guard generation == token else { frameSink.cancel(); try? await next.stopCapture(); return }
                 stream=next; local=nil; viewer.target=app; viewer.targetFrame=target.frame
-                window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true)
+                if showHost { window.makeKeyAndOrderFront(nil); window.makeFirstResponder(viewer); NSApp.activate(ignoringOtherApps:true) }
                 // Alignment owns validity. Frames arriving before validation keep the first-frame callback.
                 alignSourceWindow(whileConnecting:true)
                 guard generation == token else {
@@ -292,10 +299,16 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         func fail(_ message: String) {
             geometryFailed(message,source:source,application:application)
         }
-        guard let rows=CGWindowListCopyWindowInfo([.optionIncludingWindow],CGWindowID(window.windowNumber)) as? [[String:Any]],
-              let row=rows.first, let bounds=row[kCGWindowBounds as String] as? [String:Any],
-              let x=(bounds["X"] as? NSNumber)?.doubleValue, let y=(bounds["Y"] as? NSNumber)?.doubleValue,
-              let width=(bounds["Width"] as? NSNumber)?.doubleValue, let height=(bounds["Height"] as? NSNumber)?.doubleValue else { fail("无法获取宿主窗口几何，已暂停操作。"); return }
+        let host: CGRect?
+        if let external=externalHostFrame { host=external }
+        else if let rows=CGWindowListCopyWindowInfo([.optionIncludingWindow],CGWindowID(window.windowNumber)) as? [[String:Any]],
+                let row=rows.first,let bounds=row[kCGWindowBounds as String] as? [String:Any],
+                let x=(bounds["X"] as? NSNumber)?.doubleValue,let y=(bounds["Y"] as? NSNumber)?.doubleValue,
+                let width=(bounds["Width"] as? NSNumber)?.doubleValue,let height=(bounds["Height"] as? NSNumber)?.doubleValue {
+            host=CGRect(x:x,y:y,width:width,height:height)
+        } else { host=nil }
+        guard let host=host, !host.isEmpty, !host.isInfinite, !host.isNull else { fail("无法获取宿主窗口几何，已暂停操作。"); return }
+        let x=host.minX,y=host.minY,width=host.width,height=host.height
         guard let source=source else { fail("无法识别 Viber 主窗口，已暂停操作。"); return }
         var desiredSize=CGSize(width:max(1,width-20),height:max(1,height-90))
         var desiredPosition=CGPoint(x:x+10,y:y+80)
@@ -319,7 +332,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool { true }
 }
-#if !STATE_REGRESSION
+#if !STATE_REGRESSION && !FUSION_BRIDGE
 let app=NSApplication.shared
 let delegate=Delegate(); app.delegate=delegate; app.setActivationPolicy(.regular); app.run()
 
