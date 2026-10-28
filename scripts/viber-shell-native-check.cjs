@@ -13,13 +13,25 @@ async function evaluate(expression,contextId){const r=await client.call('Runtime
 async function api(expression){for(const contextId of client.contexts){let exists=false;try{exists=await evaluate("typeof window.SignalContext?.caishengViberCommand==='function'",contextId)}catch{}if(exists)return evaluate(expression,contextId)}throw Error('Viber preload API unavailable')}
 async function until(expression,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){try{const value=await evaluate(expression);if(value)return value}catch{}await pause(100)}throw Error('Condition timeout: '+expression)}
 async function check(name,work){await work();report.checks.push({name,ok:true})}
-(async()=>{await new Promise(resolve=>fixture.listen(0,'127.0.0.1',resolve));try{
- fs.copyFileSync(fake,helper);fs.chmodSync(helper,0o755);
+async function startApp(){
  processHandle=cp.spawn('/usr/bin/open',['-n','-a',app,'--args','--user-data-dir='+profile,'--remote-debugging-address=127.0.0.1','--remote-debugging-port=19347'],{stdio:'ignore'});
  const deadline=Date.now()+40000;while(Date.now()<deadline&&!client){try{const list=await(await fetch('http://127.0.0.1:19347/json/list')).json(),target=list.find(item=>item.type==='page'&&item.url.includes('background.html'));if(target)client=await connect(target)}catch{}if(!client)await pause(200)}
  assert(client,'packaged app CDP page unavailable');await client.call('Runtime.enable');await until("!!document.querySelector('.CaishengPlatformShell')");
+
+}
+async function stopApp(){
+ if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}client=null}
+ await pause(500);
+ try{const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){try{process.kill(Number(line.trim().split(/\s+/)[0]),'SIGTERM')}catch{}}}catch{}
+ await pause(500);
+}
+
+(async()=>{await new Promise(resolve=>fixture.listen(0,'127.0.0.1',resolve));try{
+ fs.copyFileSync(fake,helper);fs.chmodSync(helper,0o755);
+ await startApp();
  await check('packaged Viber preload IPC',async()=>{const config=await api('window.SignalContext.caishengGetTranslationConfig()');restoreConfig=config;await api('window.SignalContext.caishengSetTranslationConfig('+JSON.stringify({...config,chatTranslationProvider:'openai',inputTranslationProvider:'openai',apiKey:'synthetic-viber-key',endpoint:'http://127.0.0.1:'+fixture.address().port+'/v1',model:'synthetic-model',openaiApiProfiles:[],openaiApiKeys:[]})+')')});
- await evaluate(`localStorage.setItem('caisheng.workspaces.v3',JSON.stringify([{id:'signal-main',platformId:'signal',label:'Signal',createdAt:1},{id:'viber-synthetic-a',platformId:'viber',label:'Viber synthetic A',createdAt:2},{id:'viber-synthetic-b',platformId:'viber',label:'Viber synthetic B',createdAt:3}]));localStorage.setItem('caisheng.lastWorkspace','viber-synthetic-a');location.reload()`);
+ await evaluate(`localStorage.setItem('caisheng.workspaces.v3',JSON.stringify([{id:'signal-main',platformId:'signal',label:'Signal',createdAt:1},{id:'viber-synthetic-a',platformId:'viber',label:'Viber synthetic A',createdAt:2},{id:'viber-synthetic-b',platformId:'viber',label:'Viber synthetic B',createdAt:3}]));localStorage.setItem('caisheng.lastWorkspace','viber-synthetic-a')`);
+ await stopApp();await startApp();
  await until("!!document.querySelector('[data-haituo-viber-account=\"viber-synthetic-a\"] img')");
  await check('15 account switches through actual React shell',async()=>{for(let index=0;index<15;index++){const id=index%2?'viber-synthetic-a':'viber-synthetic-b';await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="${id}"]').click()`);await until(`!!document.querySelector('[data-haituo-viber-account="${id}"]:not([hidden]) img')`);assert.equal(await evaluate(`document.querySelectorAll('[data-haituo-viber-account]:not([hidden])').length`),1)}});
  await check('local OCR on generated native frame',async()=>{await evaluate(`(()=>{const pane=document.querySelector('[data-haituo-viber-account]:not([hidden])');[...pane.querySelectorAll('button')].find(button=>button.textContent==='识别当前画面文字').click()})()`);await until(`document.querySelector('[data-haituo-viber-account]:not([hidden]) textarea[aria-label="Viber 翻译原文"]').value.includes('SYNTHETIC')`,50000)});
@@ -27,7 +39,7 @@ async function check(name,work){await work();report.checks.push({name,ok:true})}
  await check('returning to Signal hides every Viber pane',async()=>{await evaluate(`document.querySelector('button[data-caisheng-tab-workspace="signal-main"]').click()`);await until(`document.querySelectorAll('[data-haituo-viber-account]:not([hidden])').length===0`)});
  report.ok=true;report.fixtureCalls=fixtureCalls;
  }catch(error){report.ok=false;report.error=String(error.stack||error);
- try{report.snapshot=await evaluate(`({shell:!!document.querySelector('.CaishengPlatformShell'),panes:[...document.querySelectorAll('[data-haituo-viber-account]')].map(node=>({id:node.dataset.haituoViberAccount,hidden:node.hidden,status:node.querySelector('[role=status]')?.textContent,image:!!node.querySelector('img')})),tabs:[...document.querySelectorAll('button[data-caisheng-tab-workspace]')].map(node=>({id:node.dataset.caishengTabWorkspace,label:node.textContent})),last:localStorage.getItem('caisheng.lastWorkspace'),workspaces:localStorage.getItem('caisheng.workspaces.v3')})`);console.log('SYNTHETIC_SHELL_STATE='+JSON.stringify(report.snapshot))}catch{}
+ try{report.snapshot=await evaluate(`({shell:!!document.querySelector('.CaishengPlatformShell'),nativeAccount:document.querySelector('.CaishengPlatformShell__content')?.dataset.haituoNativeAccount,platform:typeof process==='undefined'?'missing':process.platform,panes:[...document.querySelectorAll('[data-haituo-viber-account]')].map(node=>({id:node.dataset.haituoViberAccount,hidden:node.hidden,status:node.querySelector('[role=status]')?.textContent,image:!!node.querySelector('img')})),tabs:[...document.querySelectorAll('button[data-caisheng-tab-workspace]')].map(node=>({id:node.dataset.caishengTabWorkspace,label:node.textContent})),last:localStorage.getItem('caisheng.lastWorkspace'),workspaces:localStorage.getItem('caisheng.workspaces.v3')})`);console.log('SYNTHETIC_SHELL_STATE='+JSON.stringify(report.snapshot))}catch{}
  throw error}
  finally{if(client){try{await client.call('Browser.close')}catch{}try{client.ws.close()}catch{}}await pause(500);try{const lines=cp.execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');for(const line of lines)if(line.includes('--user-data-dir='+profile)){try{process.kill(Number(line.trim().split(/\s+/)[0]),'SIGTERM')}catch{}}}catch{}fs.writeFileSync(helper,original,{mode:0o755});fs.chmodSync(helper,0o755);cp.execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',app],{stdio:'inherit'});fixture.close();await fsp.writeFile(path.join(output,'viber-shell-synthetic.json'),JSON.stringify(report,null,2));}
 })().catch(error=>{console.error(error.message);process.exitCode=1});
