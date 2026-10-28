@@ -9,11 +9,11 @@ function createRegistry(){
  return {handlers,handle(protocol,scheme,handler){if(!SCHEMES.has(scheme))throw Error('Unsupported media scheme');const result=protocol.handle(scheme,handler);handlers.set(scheme,handler);return result;}};
 }
 function serve(endpoint,handlers){
- const streams=new Map();
- const send=message=>new Promise((resolve,reject)=>{if(!endpoint.connected)return reject(Error('Backend disconnected'));endpoint.send({type:CHANNEL,...message},error=>error?reject(error):resolve());});
+ const streams=new Map();let closed=false;
+ const send=message=>new Promise((resolve,reject)=>{if(closed||!endpoint.connected)return reject(Error('Backend disconnected'));endpoint.send({type:CHANNEL,...message},error=>error?reject(error):resolve());});
  const close=id=>{const state=streams.get(id);streams.delete(id);state?.abort.abort();state?.reader?.cancel().catch(()=>{});};
  const listener=async message=>{
-  if(message?.type!==CHANNEL||message.side!=='request'||typeof message.id!=='string')return;
+  if(closed||message?.type!==CHANNEL||message.side!=='request'||typeof message.id!=='string')return;
   const {id,op}=message;
   try{
    if(op==='cancel'){close(id);return;}
@@ -38,8 +38,9 @@ function serve(endpoint,handlers){
    }
   }catch{close(id);await send({side:'response',id,op:'error'}).catch(()=>{});}
  };
- endpoint.on('message',listener);endpoint.once('disconnect',()=>{for(const id of streams.keys())close(id)});
- return {close(){endpoint.removeListener('message',listener);for(const id of streams.keys())close(id)}};
+ const disconnect=()=>{for(const id of streams.keys())close(id)};
+ endpoint.on('message',listener);endpoint.once('disconnect',disconnect);
+ return {close(){if(closed)return;closed=true;endpoint.removeListener('message',listener);endpoint.removeListener('disconnect',disconnect);for(const id of streams.keys())close(id)}};
 }
 function install(session,child){
  const requests=new Map();let disposed=false;

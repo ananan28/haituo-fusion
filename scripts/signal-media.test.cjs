@@ -8,3 +8,29 @@ test('same resource URL in two account partitions cannot cross backend stores',a
 test('fonts and emoji use the registered account handlers, preserving failures',async()=>{const x=fixture({asset:()=>new Response('font'),emoji:()=>new Response('missing',{status:404})});try{assert.equal(await(await x.registered.get('asset')(new Request('asset:///font'))).text(),'font');const r=await x.registered.get('emoji')(new Request('emoji:///?emoji=smile'));assert.equal(r.status,404);assert.equal(await r.text(),'missing')}finally{x.close()}});
 test('cancellation closes backend stream; disconnect rejects an active read',async()=>{let cancelled=false;const x=fixture({attachment:()=>new Response(new ReadableStream({pull(){},cancel(){cancelled=true}}))});try{const r=await x.registered.get('attachment')(new Request('attachment://v1/test'));await r.body.cancel();await new Promise(resolve=>setImmediate(resolve));assert.equal(cancelled,true);const r2=await x.registered.get('attachment')(new Request('attachment://v1/test'));const pending=r2.arrayBuffer();x.parent.emit('disconnect');await assert.rejects(pending,/unavailable/)}finally{x.close()}});
 test('registry retains official handlers without replacing their file/decryption logic',()=>{const x=createRegistry(),calls=[],handler=()=>{};x.handle({handle:(...args)=>calls.push(args)},'attachment',handler);assert.equal(x.handlers.get('attachment'),handler);assert.deepEqual(calls,[['attachment',handler]]);assert.throws(()=>x.handle({},'https',handler),/Unsupported/)});
+
+// Repeated account refresh must release backend listeners, not just protocol bindings.
+test('15 media backend refreshes release disconnect listeners and ignore retired opens',async()=>{
+ const {parent,backend}=pair();let calls=0;
+ for(let index=0;index<15;index++){
+  const server=serve(backend,new Map([['attachment',()=>{calls++;return new Response('synthetic')}]]));
+  assert.equal(backend.listenerCount('disconnect'),1);
+  server.close();server.close();
+  assert.equal(backend.listenerCount('message'),0);
+  assert.equal(backend.listenerCount('disconnect'),0);
+  parent.send({type:'haituo-signal-media-v1',side:'request',id:'retired-'+index,op:'open',url:'attachment://v1/synthetic',method:'GET',headers:[]});
+ }
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,0);
+ const current=serve(backend,new Map([['attachment',()=>new Response('new synthetic account')]]));
+ const registered=new Map,bridge=install({protocol:{handle:(scheme,handler)=>registered.set(scheme,handler),unhandle:scheme=>registered.delete(scheme)}},parent);
+ try{assert.equal(await(await registered.get('attachment')(new Request('attachment://v1/synthetic'))).text(),'new synthetic account')}
+ finally{bridge.dispose();current.close()}
+});
+test('retiring backend aborts an in-flight handler and never publishes its late result',async()=>{
+ const {parent,backend}=pair();let release,signal;const messages=[];
+ parent.on('message',message=>messages.push(message));
+ const server=serve(backend,new Map([['attachment',async request=>{signal=request.signal;await new Promise(resolve=>{release=resolve});return new Response('retired synthetic image')}]]));
+ parent.send({type:'haituo-signal-media-v1',side:'request',id:'late',op:'open',url:'attachment://v1/synthetic',method:'GET',headers:[]});
+ await new Promise(resolve=>setImmediate(resolve));server.close();assert.equal(signal.aborted,true);release();
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(messages.length,0);
+});
