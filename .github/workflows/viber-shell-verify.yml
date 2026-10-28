@@ -95,6 +95,16 @@ jobs:
           set -euo pipefail
           swiftc viber-fusion/synthetic-shell-helper.swift -o "$RUNNER_TEMP/synthetic-viber-helper"
           node scripts/viber-shell-native-check.cjs "$RUNNER_TEMP/synthetic-viber-helper"
+      - name: Record verified platform coverage
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'REPORT'
+          Native Viber pane/OCR/shared-translation integration is macOS-only in this development candidate.
+          Windows retains Signal, WhatsApp and Telegram; no Windows Viber runtime is claimed.
+          All account, media and translation fixtures are synthetic. Installed-app TCC and logged-in accounts remain unverified.
+          The separate real unlinked Viber prototype passed 15 switches, AX click forwarding and normal-size containment.
+          Its original 800x600 visibility assertion remains red after safe source minimization; it was not removed.
+          REPORT
       - name: Package editable source
         run: python scripts/package-source.py --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
