@@ -1,0 +1,100 @@
+name: Viber native shell integration
+on:
+  push:
+    branches: ['fusion/viber-shell']
+    paths: ['development/fusion-shell.patch', 'src/**', 'scripts/**', 'viber-fusion/**', '.github/workflows/viber-shell-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: viber-shell-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply reviewable native integration patch
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git apply --check development/fusion-shell.patch; then
+            git apply --index development/fusion-shell.patch
+            git config user.name 'Haituo Fusion'
+            git config user.email 'fusion@users.noreply.github.com'
+            git commit -m 'feat(viber): embed native capture, local OCR and shared translation in the macOS shell'
+            git push origin HEAD:fusion/viber-shell
+          else
+            git apply --reverse --check development/fusion-shell.patch
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: windows
+          - os: macos-15
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Production syntax and synthetic bridge regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/app/bundles/main.js
+          node --check src/app/bundles/preload/main.js
+          node --test scripts/*.test.cjs
+      - name: Install isolated DOM fixtures
+        shell: bash
+        run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
+      - name: Active platform and native-pane DOM regression
+        env:
+          HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
+        run: node --test scripts/signal-attachments.dom.cjs scripts/wa-rollback.dom.cjs scripts/message-attachments.dom.cjs scripts/telegram-message-identity.dom.cjs scripts/wa-retranslate-lifecycle.dom.cjs scripts/viber-pane.dom.cjs
+      - name: Compile native capture bridge and verify shared state machine
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat viber-fusion/main.swift viber-fusion/shell-bridge.swift > "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -D FUSION_BRIDGE "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/native-viber"
+          cat viber-fusion/main.swift viber-fusion/state-regression.swift > "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -D STATE_REGRESSION "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/state-regression"
+          "$RUNNER_TEMP/state-regression"
+      - name: Build development package
+        run: python scripts/build.py --target ${{ matrix.target }}
+      - name: Verify fresh native startup and settings
+        timeout-minutes: 8
+        run: node scripts/native-attachments-check.cjs
+      - name: Package editable source
+        run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fusion-viber-shell-${{ matrix.target }}-${{ needs.source.outputs.commit }}
+          retention-days: 14
+          path: |
+            windows/out/*Setup.exe
+            windows/out/*Source.zip
+            macos/out/*.dmg
+            macos/out/*Source.zip
+            audit-results/**
