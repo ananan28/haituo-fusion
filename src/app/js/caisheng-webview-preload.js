@@ -1811,12 +1811,18 @@ function haituoInstallMessageScanner() {
                     lineHeight: "1"
                 }), retryButton.onclick = async t => {
                     t.preventDefault(), t.stopPropagation();
+                    const stillCurrent=()=>webTranslationActive() && item.conversation===conversationScope() && haituoCurrentWebMessage(item) && mount?.isConnected && e.contains(mount) && o.isConnected && e.contains(o);
+                    if(!stillCurrent()) return;
                     const a = t.currentTarget;
                     a.disabled = !0, a.textContent = "…";
                     try {
-                        const result=await translateMessage(n,!0,item.messageId);if(isWhatsApp())sessionTranslations.set(item.memoKey,result);translationText.textContent=formatMessageParagraphs(n,result);a.textContent="✨";
+                        const result=await translateMessage(n,!0,item.messageId);
+                        if(!stillCurrent()) return;
+                        if(isWhatsApp())sessionTranslations.set(item.memoKey,result);
+                        translationText.textContent=formatMessageParagraphs(n,result);a.textContent="✨";
                     } catch (e) {
-                        toast(e instanceof Error ? e.message : "智能重新翻译失败", !0), a.textContent = "✨";
+                        if(stillCurrent()) toast(e instanceof Error ? e.message : "智能重新翻译失败", !0);
+                        a.textContent = "✨";
                     } finally {
                         a.disabled = !1;
                     }
