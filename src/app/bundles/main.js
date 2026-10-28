@@ -18,6 +18,9 @@ let p = require(`electron`), m = require(`node:fs`), h = require(`node:events`),
 if(process.argv.includes(`--haituo-legacy-windows`))process.env.HAITUO_INPROCESS=`0`;
 else if(process.env.HAITUO_INPROCESS!==`0` || process.argv.includes(`--haituo-inprocess`))process.env.HAITUO_INPROCESS=`1`;
 const haituoInprocessBackend = process.env.HAITUO_INPROCESS === `1` && process.argv.some(arg=>arg.startsWith(`--caisheng-profile=`) && arg!==`--caisheng-profile=signal-main`) ? require('../js/haituo-inprocess-ipc.js').capture(p.ipcMain) : null;
+const haituoMediaModule = require('../js/haituo-signal-media.js');
+const haituoMediaProtocols = haituoMediaModule.createRegistry();
+if(haituoInprocessBackend)haituoMediaModule.serve(process,haituoMediaProtocols.handlers);
 
 
 h = e.o(h);
@@ -4688,7 +4691,7 @@ function Tt({configDir: e, sql: n}) {
         await t.F(e);
         let r = Date.now() - n;
         ut.info(`cleanupDownloads: took ${r}ms`);
-    }), p.protocol.handle(`attachment`, Et);
+    }), haituoMediaProtocols.handle(p.protocol, `attachment`, Et);
 }
 
 async function Et(e) {
@@ -26486,7 +26489,7 @@ var wm = class e {
         max: 10
     });
     constructor(e, n) {
-        this.#e = e, p.protocol.handle(`emoji`, async e => {
+        this.#e = e, haituoMediaProtocols.handle(p.protocol, `emoji`, async e => {
             let n = new URL(e.url).searchParams.get(`emoji`);
             return n == null || !t.t.isEmoji(n) ? new Response(`invalid`, {
                 status: 400
@@ -26538,7 +26541,7 @@ process.mas || (Em.add(`fonts/emoji.woff2`), Dm.set(`optional-fonts/emoji-large.
 var Om = class e {
     #e;
     constructor(e) {
-        this.#e = e, p.protocol.handle(`asset`, async e => {
+        this.#e = e, haituoMediaProtocols.handle(p.protocol, `asset`, async e => {
             let n = new URL(e.url);
             try {
                 return await this.#t(n.pathname);
@@ -29767,7 +29770,13 @@ p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新�
         rendererReady(workspaceId){const view=views.get(workspaceId);if(view){viewSecurity.resetFocus(view.webContents);globalThis.caishengBridge.syncVisibility(Zg?.id);}},
         configFor(event){return configs.get(sender.get(event?.sender?.id));},
         syncFor(event,channel){return syncData.get(sender.get(event?.sender?.id))?.[channel];},
-        ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
+        ready(workspaceId,config,sync){const view=views.get(workspaceId);if(!view||!config||typeof config.userDataPath!==`string`)return;configs.set(workspaceId,config);syncData.set(workspaceId,sync||{});
+            if(!view.__haituoMedia){
+                view.__haituoMedia=haituoMediaModule.install(view.webContents.session,Yg.get(workspaceId));
+                Oh({session:view.webContents.session,userDataPath:config.userDataPath,installPath:$,isWindows:process.platform===`win32`});
+                view.webContents.once(`destroyed`,()=>view.__haituoMedia?.dispose());
+            }
+            view.webContents.loadURL(G_([ $, `background.html` ])).catch(error=>X.error(`inprocess view load failed: ${error.message}`));},
         register(workspaceId, view) { const contentsId=view.webContents.id;views.set(workspaceId, view); sender.set(contentsId, workspaceId); view.webContents.once(`destroyed`,()=>{sender.delete(contentsId);if(views.get(workspaceId)===view){views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId)}}); },
         dispose(workspaceId){const view=views.get(workspaceId);if(view){sender.delete(view.webContents.id);views.delete(workspaceId);configs.delete(workspaceId);syncData.delete(workspaceId);Z?.contentView?.removeChildView(view);view.webContents.close();}for(const [key,value] of pending)if(value.workspaceId===workspaceId){pending.delete(key);clearTimeout(value.timer);value.reject(Error(`子账号已关闭`));}}
 

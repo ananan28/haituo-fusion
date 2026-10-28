@@ -1,7 +1,7 @@
-name: Haituo 1.6.5 Windows and macOS Signal diagnostic - NOT A RELEASE
+name: Haituo 1.6.6 Windows and macOS Signal diagnostic - NOT A RELEASE
 on:
   push:
-    branches: ['fix/macos-signal-input-165']
+    branches: ['fix/1.6.6-signal-media']
   workflow_dispatch:
 permissions:
   contents: write
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'windows'
         with:
-          name: Haituo-1.6.5-diagnostic-windows
+          name: Haituo-1.6.6-diagnostic-windows
           path: |
             windows/out/*Setup.exe
             source-packages/*.zip
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.5-diagnostic-verification-${{ matrix.target }}
+          name: Haituo-1.6.6-diagnostic-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
@@ -112,7 +112,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'macos'
         with:
-          name: Haituo-1.6.5-diagnostic-${{ matrix.target }}
+          name: Haituo-1.6.6-diagnostic-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg

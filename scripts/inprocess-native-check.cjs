@@ -118,6 +118,28 @@ async function check(id,work){try{const result=await work();report.checks.push({
     await childClient.call('Runtime.evaluate',{expression:`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`,returnByValue:true});
     const result=await operation;if(result.error)throw result.error;if(result.value!==null)throw Error('Account label cancel did not return null');return{shown:true,cancelled:true};
    });
+   await check('CHILD-PARTITION-MEDIA-AND-SYMBOL-FONT',async()=>{
+    let root;
+    for(const contextId of childClient.contexts){const r=await childClient.call('Runtime.evaluate',{expression:`window.SignalContext?.config?.userDataPath`,contextId,returnByValue:true});if(typeof r.result?.value==='string'){root=r.result.value;break}}
+    if(!root?.endsWith('signal-ci-inprocess'))throw Error('Refuse media fixture outside isolated profile');
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1sAAAAASUVORK5CYII=','base64');
+    const fixtures=[['attachment','attachments.noindex'],['draft','drafts.noindex'],['sticker','stickers.noindex'],['avatarData','avatars.noindex']];
+    try{
+     for(const [kind,dir] of fixtures){fs.mkdirSync(path.join(root,dir),{recursive:true});fs.writeFileSync(path.join(root,dir,'haituo-media-ci.png'),png)}
+     const expression=`(async()=>{
+      const font=await new FontFace('HaituoSymbolProbe','url("asset:///fonts/signal-symbols/SignalSymbolsVariable.woff2")').load();document.fonts.add(font);if(font.status!=='loaded')throw Error('Symbol font failed');
+      const results=[];
+      for(const disposition of ['attachment','draft','sticker','avatarData']){
+       const url='attachment://v1/haituo-media-ci.png?contentType=image%2Fpng&size=${png.length}&disposition='+disposition;
+       const response=await fetch(url);if(!response.ok||response.headers.get('content-type')!=='image/png')throw Error('Media response failed '+disposition);
+       const bytes=await response.arrayBuffer();const image=new Image();image.src=url;await image.decode();if(image.naturalWidth!==1||bytes.byteLength!==${png.length})throw Error('Media decode failed '+disposition);
+       results.push({disposition,width:image.naturalWidth,bytes:bytes.byteLength});
+      }
+      return{font:font.status,images:results,fixtureOnly:true,realAccountSend:'UNTESTED'};
+     })()`;
+     const result=await childClient.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);return result.result.value;
+    }finally{for(const [,dir] of fixtures)fs.rmSync(path.join(root,dir,'haituo-media-ci.png'),{force:true})}
+   });
    await check('CHILD-VIEW-SCREENSHOT',async()=>{const screenshot=await childClient.call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,'inprocess-child.png'),Buffer.from(screenshot.data,'base64'));return{file:'inprocess-child.png'}});
    childClient.ws.close();
   }
