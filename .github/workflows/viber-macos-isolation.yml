@@ -1,0 +1,29 @@
+name: Viber macOS isolation probe
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'scripts/viber-macos-isolation.ps1'
+      - '.github/workflows/viber-macos-isolation.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Viber macOS isolation probe
+        shell: pwsh
+        run: ./scripts/viber-macos-isolation.ps1
+      - name: Print evidence JSON
+        if: always()
+        shell: pwsh
+        run: Get-Content audit-results/viber-macos-isolation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-macos-isolation
+          path: audit-results/viber-macos-isolation.json
+          if-no-files-found: error
