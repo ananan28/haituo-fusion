@@ -397,15 +397,33 @@ function Compare-IsolationAudit($Before, $After) {
 
 function Get-ProfileManifest([string]$homeRoot) {
     $root = Join-Path $homeRoot 'Library/Application Support/ViberPC'
-    if (-not (Test-Path $root)) { return [ordered]@{ root = $root; exists = $false; files = 0; digest = $null; top = @() } }
-    $files = @(Get-ChildItem $root -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($root.Length + 1) + '|' + $_.Length } | Sort-Object)
-    $digest = $null
+    if (-not (Test-Path $root)) { return [ordered]@{ root = $root; exists = $false; files = 0; digest = $null; content_digest = $null; top = @() } }
+    $sha = $null
+    try { $sha = [System.Security.Cryptography.SHA256]::Create() } catch {}
+    $entries = @()
+    foreach ($f in @(Get-ChildItem $root -Recurse -Force -File -ErrorAction SilentlyContinue)) {
+        $rel = $f.FullName.Substring($root.Length + 1)
+        $ch = $null
+        try { if ($sha) { $ch = ([BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName))) -replace '-', '').ToLower().Substring(0, 16) } } catch {}
+        $entries += ('{0}|{1}|{2}' -f $rel, $f.Length, $ch)
+    }
+    $entries = @($entries | Sort-Object)
+    $digest = $null; $contentDigest = $null
     try {
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($files -join "`n"))
-        $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLower()
+        if ($sha) {
+            $digest = ([BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($entries -join "`n")))) -replace '-', '').ToLower()
+            $contentDigest = ([BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes((@($entries | ForEach-Object { ($_ -split '\|')[2] }) -join "`n")))) -replace '-', '').ToLower()
+        }
     } catch {}
-    return [ordered]@{ root = $root; exists = $true; files = $files.Count; digest = $digest; top = @($files | Select-Object -First 15) }
+    $db = Join-Path $root 'config.db'
+    $inode = $null
+    if (Test-Path $db) {
+        try {
+            $r = Run-Native 'stat' @('-f', '%i:%d', $db)
+            if ($r.output -and $r.output.Count -gt 0) { $inode = [string]$r.output[0] }
+        } catch {}
+    }
+    return [ordered]@{ root = $root; exists = $true; files = $entries.Count; digest = $digest; content_digest = $contentDigest; config_db_inode = $inode; top = @($entries | Select-Object -First 15) }
 }
 
 function Read-LogTail([string]$path, [int]$lines) {
@@ -798,7 +816,10 @@ function Invoke-DualEnvTest {
         $t.real_domain_changed = @(Compare-IsolationAudit $t.isolation_before $t.isolation_after)
         if ($homeA) { $t.manifest_a = Get-ProfileManifest $homeA }
         if ($homeB) { $t.manifest_b = Get-ProfileManifest $homeB }
-        $t.profiles_distinct = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.digest -and $t.manifest_b.digest -and ($t.manifest_a.digest -ne $t.manifest_b.digest))
+        $sharedInode = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.config_db_inode -and $t.manifest_b.config_db_inode -and ($t.manifest_a.config_db_inode -eq $t.manifest_b.config_db_inode))
+        $t.profiles_separate_roots = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.exists -and $t.manifest_b.exists -and ($t.manifest_a.root -ne $t.manifest_b.root) -and (-not $sharedInode))
+        $t.profile_content_identical = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.content_digest -and $t.manifest_b.content_digest -and ($t.manifest_a.content_digest -eq $t.manifest_b.content_digest))
+        $t.profiles_distinct = $t.profiles_separate_roots
         Stop-ProcQuiet $pA
         Stop-ProcQuiet $pB
         Stop-AllViber
@@ -852,12 +873,12 @@ function Invoke-CapacityTest([string]$exe, [int]$MaxInstances = 8) {
     $procs = @()
     for ($n = 1; $n -le $MaxInstances; $n++) {
         $step = [ordered]@{ n = $n; started_at_utc = (Get-UtcStamp); errors = @() }
-        $home = Join-Path $work ("cap_home_{0}" -f $n)
-        $tmp = Join-Path $work ("cap_tmp_{0}" -f $n)
-        New-FakeHome $home
-        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $capHome = Join-Path $work ("cap_home_{0}" -f $n)
+        $capTmp = Join-Path $work ("cap_tmp_{0}" -f $n)
+        New-FakeHome $capHome
+        New-Item -ItemType Directory -Force -Path $capTmp | Out-Null
         try {
-            $p = Start-AppWithEnv $exe @{ HOME = $home; CFFIXED_USER_HOME = $home; TMPDIR = $tmp } $home (Join-Path $work ("cap_{0}" -f $n))
+            $p = Start-AppWithEnv $exe @{ HOME = $capHome; CFFIXED_USER_HOME = $capHome; TMPDIR = $capTmp } $capHome (Join-Path $work ("cap_{0}" -f $n))
             $procs += $p
             $step.pid = $p.Id
             $w = Wait-ForWindow -TimeoutSec 120 -WaitPid $p.Id
@@ -938,6 +959,13 @@ if ($inst.exe_exists) {
         $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-full-isolation' -mechanism 'both instances direct exec with separate HOME + CFFIXED_USER_HOME + TMPDIR' -envA @{ HOME = $fullHomeA; CFFIXED_USER_HOME = $fullHomeA; TMPDIR = $fullTmpA } -envB @{ HOME = $fullHomeB; CFFIXED_USER_HOME = $fullHomeB; TMPDIR = $fullTmpB } -homeA $fullHomeA -homeB $fullHomeB -tmpA $fullTmpA -tmpB $fullTmpB
         if ($r) { $ev.launch_tests += $r }
     } catch { $ev.errors += "dual-full-isolation: $($_.Exception.Message)" }
+    Save-Evidence
+    try {
+        $npHomeA = Join-Path $work 'home_np_a'; $npTmpA = Join-Path $work 'tmp_np_a'
+        $npHomeB = Join-Path $work 'home_np_b'; $npTmpB = Join-Path $work 'tmp_np_b'
+        $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-full-isolation-noprefs-daemon' -mechanism 'both instances direct exec with separate HOME + CFFIXED_USER_HOME + TMPDIR + CFPREFERENCES_AVOID_DAEMON=1' -envA @{ HOME = $npHomeA; CFFIXED_USER_HOME = $npHomeA; TMPDIR = $npTmpA; CFPREFERENCES_AVOID_DAEMON = '1' } -envB @{ HOME = $npHomeB; CFFIXED_USER_HOME = $npHomeB; TMPDIR = $npTmpB; CFPREFERENCES_AVOID_DAEMON = '1' } -homeA $npHomeA -homeB $npHomeB -tmpA $npTmpA -tmpB $npTmpB
+        if ($r) { $ev.launch_tests += $r }
+    } catch { $ev.errors += "dual-full-isolation-noprefs-daemon: $($_.Exception.Message)" }
     Save-Evidence
     try { $r = Invoke-CapacityTest $inst.exeA 8; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "capacity: $($_.Exception.Message)" }
     Save-Evidence
@@ -1038,6 +1066,7 @@ try {
     $tmpOnly = & $get 'dual-tmpdir-only'
     $tmpHome = & $get 'dual-tmpdir-plus-home'
     $fullSep = & $get 'dual-full-isolation'
+    $fullSepNoPrefs = & $get 'dual-full-isolation-noprefs-daemon'
     $toolBlind = (-not $script:winlistOk) -or ($null -eq $script:winTotal) -or ($script:winTotal -le 0)
     $baseOk = $false
     if ($baseTest) { $baseOk = [bool]$baseTest.app_functional }
@@ -1072,7 +1101,10 @@ try {
         $sfA = 0; $sfB = 0
         if ($fullSep.sockets_a -and $fullSep.sockets_a.sensitive_files) { $sfA = @($fullSep.sockets_a.sensitive_files).Count }
         if ($fullSep.sockets_b -and $fullSep.sockets_b.sensitive_files) { $sfB = @($fullSep.sockets_b.sensitive_files).Count }
-        $reasons += ("isolation audit (full separation): real-domain paths changed={0} | A files={1} B files={2} | profile digests distinct={3} (A={4}, B={5}) | sensitive files opened A={6} B={7}" -f ((@($fullSep.real_domain_changed)) -join ', '), $fullSep.manifest_a.files, $fullSep.manifest_b.files, $fullSep.profiles_distinct, $da, $db, $sfA, $sfB)
+        $reasons += ("isolation audit (full separation): real-domain paths changed={0} | A files={1} B files={2} | separate roots={3} (inodes {4} vs {5}) | profile content identical={6} | sensitive files opened A={7} B={8}" -f ((@($fullSep.real_domain_changed)) -join ', '), $fullSep.manifest_a.files, $fullSep.manifest_b.files, $fullSep.profiles_separate_roots, $fullSep.manifest_a.config_db_inode, $fullSep.manifest_b.config_db_inode, $fullSep.profile_content_identical, $sfA, $sfB)
+    }
+    if ($fullSepNoPrefs) {
+        $reasons += ("isolation audit (full separation + CFPREFERENCES_AVOID_DAEMON=1): A window={0} B window={1} | real-domain paths changed={2} | separate roots={3} | sensitive files opened A={4} B={5}" -f $fullSepNoPrefs.a_window, $fullSepNoPrefs.b_window, ((@($fullSepNoPrefs.real_domain_changed)) -join ', '), $fullSepNoPrefs.profiles_separate_roots, (@($fullSepNoPrefs.sockets_a.sensitive_files)).Count, (@($fullSepNoPrefs.sockets_b.sensitive_files)).Count)
     }
     $cap = & $get 'capacity-sweep'
     if ($cap) {
@@ -1117,7 +1149,10 @@ try {
         primary_second_instances = $prim.Count
         guard_inventory_collected = [bool]($ev.guard_object -and $ev.guard_object.Contains('sockets'))
         isolation_profiles_distinct = $(if ($fullSep) { $fullSep.profiles_distinct } else { $null })
+        isolation_profiles_separate_roots = $(if ($fullSep) { $fullSep.profiles_separate_roots } else { $null })
+        isolation_profile_content_identical = $(if ($fullSep) { $fullSep.profile_content_identical } else { $null })
         isolation_real_domain_changed = $(if ($fullSep) { @($fullSep.real_domain_changed) } else { @() })
+        isolation_real_domain_changed_noprefs = $(if ($fullSepNoPrefs) { @($fullSepNoPrefs.real_domain_changed) } else { $null })
         capacity_max_instances_with_window = $(if ($cap) { $cap.max_instances_with_window } else { $null })
         capacity_rss_per_instance_mb = $(if ($cap) { $cap.rss_per_instance_mb } else { $null })
     }
