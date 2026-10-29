@@ -7,6 +7,10 @@ $outFile = Join-Path $outDir 'viber-macos-isolation.json'
 $work = Join-Path $env:RUNNER_TEMP 'viber_macos_probe'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
+$InitTimeout = 150
+$SecondWindow = 90
+$ShortWindow = 60
+
 function Get-UtcStamp { (Get-Date).ToUniversalTime().ToString('o') }
 
 function Get-PathStat([string]$p) {
@@ -52,7 +56,7 @@ function Stop-AllViber {
 }
 
 $ev = [ordered]@{
-    schema = 'haituo-fusion/viber-macos-isolation/v1'
+    schema = 'haituo-fusion/viber-macos-isolation/v2'
     generated_at_utc = (Get-UtcStamp)
     runner = [ordered]@{}
     baseline = [ordered]@{}
@@ -63,19 +67,23 @@ $ev = [ordered]@{
     locks = [ordered]@{}
     errors = @()
     scope_limitations = [ordered]@{
-        host = 'GitHub Actions macos-latest runner (single GUI-session user)'
+        host = 'GitHub Actions macos-latest runner (one GUI session, one user)'
         account_verification = 'none: no real Viber accounts or credentials are used anywhere in this probe'
         verified_scope = 'process survival, per-PID windows (CGWindowList), profile-directory writes'
-        not_verified = 'second macOS GUI user session (not available on CI), real dual-account messaging'
+        not_verified = 'separate macOS user account (no second GUI login session on CI); LSEnvironment HOME redirect through LaunchServices; real dual-account messaging'
     }
     verdict = [ordered]@{}
 }
 
 function Save-Evidence {
-    $ev.generated_at_utc = (Get-UtcStamp)
-    $json = $ev | ConvertTo-Json -Depth 12
-    [IO.File]::WriteAllText($outFile, $json)
+    try {
+        $json = $ev | ConvertTo-Json -Depth 12
+        [System.IO.File]::WriteAllText($outFile, $json, (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        Write-Host ("!! evidence save failed: {0}" -f $_.Exception.Message)
+    }
 }
+Save-Evidence
 
 # ---------- runner + baseline ----------
 $ev.runner.os_name = (@(& sw_vers -productName 2>$null) -join '')
@@ -83,6 +91,7 @@ $ev.runner.os_version = (@(& sw_vers -productVersion 2>$null) -join '')
 $ev.runner.arch = (@(& uname -m 2>$null) -join '')
 $ev.runner.ps_version = $PSVersionTable.PSVersion.ToString()
 $ev.runner.user = $env:USER
+$ev.runner.home = $HOME
 $ev.runner.windowserver = [bool](& pgrep -x WindowServer 2>$null)
 try { $ev.runner.rosetta_available = ((Run-Native 'arch' @('-x86_64', '/usr/bin/true')).code -eq 0) } catch { $ev.runner.rosetta_available = $null }
 $ev.baseline.viber_processes = @(Get-Pids 'Contents/MacOS/Viber').Count
@@ -171,6 +180,7 @@ if ($inst.app_source) {
     $inst.app_build = (@(& plutil -extract CFBundleVersion raw -o - $plist 2>$null) -join '').Trim()
     $inst.min_macos = (@(& plutil -extract LSMinimumSystemVersion raw -o - $plist 2>$null) -join '').Trim()
     $inst.bundle_id = (@(& plutil -extract CFBundleIdentifier raw -o - $plist 2>$null) -join '').Trim()
+    $inst.plist_flags = @(& plutil -p $plist 2>$null | Where-Object { $_ -match 'MultipleInstances|LSEnvironment|LSUIElement|LSBackgroundOnly|CFBundleIdentifier' })
     $inst.appA = $appA
     $inst.appB = $appB
     $inst.exeA = Join-Path $appA "Contents/MacOS/$exeName"
@@ -181,10 +191,13 @@ if ($inst.app_source) {
     $lipo = Run-Native 'lipo' @('-info', $inst.exeA)
     $inst.arch_info = @($lipo.output | Select-Object -First 5)
     $inst.bundle_size_bytes = (Get-ChildItem $appA -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    try {
+        $inst.cli_profile_flags = @(& grep -a -o -E -- '--(user-data-dir|profile|data-dir|userdir)[A-Za-z0-9=-]*' $inst.exeA 2>$null | Select-Object -Unique -First 20)
+    } catch { $inst.cli_profile_flags = @() }
 }
 $ev.install = $inst
 Save-Evidence
-Write-Host ("install: mounted={0} app={1} exe_exists={2} version={3} arch={4}" -f $inst.mounted, $inst.app_source, $inst.exe_exists, $inst.app_version, ($inst.arch_info -join ' '))
+Write-Host ("install: mounted={0} exe_exists={1} version={2} arch={3}" -f $inst.mounted, $inst.exe_exists, $inst.app_version, ($inst.arch_info -join ' '))
 
 # ---------- window counter (Swift -> CGWindowList) ----------
 $winSrc = Join-Path $work 'winlist.swift'
@@ -246,19 +259,20 @@ function New-FakeHome([string]$p) {
     }
 }
 
+function Start-App([string]$exe, [string]$wd, [string]$logBase) {
+    if ($logBase) {
+        return Start-Process -FilePath $exe -WorkingDirectory $wd -PassThru -RedirectStandardOutput "$logBase.out.log" -RedirectStandardError "$logBase.err.log"
+    }
+    return Start-Process -FilePath $exe -WorkingDirectory $wd -PassThru
+}
+
 function Start-AppWithHome([string]$exe, [string]$fakeHome, [string]$logBase) {
     $oldH = $env:HOME
     $oldC = $env:CFFIXED_USER_HOME
     $env:HOME = $fakeHome
     $env:CFFIXED_USER_HOME = $fakeHome
     try {
-        if ($logBase) {
-            $so = "$logBase.out.log"
-            $se = "$logBase.err.log"
-            $p = Start-Process -FilePath $exe -WorkingDirectory $fakeHome -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
-        } else {
-            $p = Start-Process -FilePath $exe -WorkingDirectory $fakeHome -PassThru
-        }
+        $p = Start-App $exe $fakeHome $logBase
     } finally {
         $env:HOME = $oldH
         $env:CFFIXED_USER_HOME = $oldC
@@ -267,212 +281,255 @@ function Start-AppWithHome([string]$exe, [string]$fakeHome, [string]$logBase) {
 }
 
 function Read-LogTail([string]$path, [int]$lines) {
-    if (-not (Test-Path $path)) { return @() }
-    return @(Get-Content $path -ErrorAction SilentlyContinue | Select-Object -Last $lines)
+    if (-not (Test-Path $path)) { return $null }
+    return @(Get-Content $path -Tail $lines -ErrorAction SilentlyContinue)
 }
 
-# ---------- tests ----------
-$SurvivalSeconds = 45
+function Get-Snapshot([string]$FakeHome, [bool]$TrackReal, [double]$Elapsed) {
+    $pids = @(Get-Pids 'Contents/MacOS/Viber')
+    $wins = Get-WindowCounts $pids
+    $s = [ordered]@{
+        at_utc = (Get-UtcStamp)
+        elapsed_s = $Elapsed
+        pids = @($pids)
+        windows = @($pids | ForEach-Object { [ordered]@{ pid = [int]$_; windows = $wins[[int]$_] } })
+        viber_process_count = $pids.Count
+    }
+    if ($FakeHome) { $s.fake_home = Get-PathStat $FakeHome }
+    if ($TrackReal) {
+        $s.real_viber = [ordered]@{}
+        foreach ($p in (Get-ViberDataPaths)) { $s.real_viber[$p] = Get-PathStat $p }
+    }
+    return $s
+}
 
-function Invoke-DualLaunchTest([string]$name, [string]$exeA, [string]$exeB, [string]$mechanism) {
-    $tdir = Join-Path $work ("test_" + $name)
-    New-Item -ItemType Directory -Force -Path $tdir | Out-Null
-    $homeA = Join-Path $tdir 'homeA'
-    $homeB = Join-Path $tdir 'homeB'
-    $homeC = Join-Path $tdir 'homeC'
-    New-FakeHome $homeA
-    New-FakeHome $homeB
-    New-FakeHome $homeC
-    Stop-AllViber
-    $t = [ordered]@{
-        name = $name
-        mechanism = $mechanism
-        started_at_utc = (Get-UtcStamp)
-        homeA = $homeA
-        homeB = $homeB
-        profileA_before = (Get-PathStat $homeA)
-        profileB_before = (Get-PathStat $homeB)
-        real_viber_before = [ordered]@{}
-        samples = @()
-        procA_windows_max = 0
-        procB_windows_max = 0
-        errors = @()
-    }
-    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
-    $pA = $null; $pB = $null; $pC = $null
-    try {
-        $pA = Start-AppWithHome $exeA $homeA (Join-Path $tdir 'A')
-        $t.procA_pid = $pA.Id
-        $t.procA_launched_at_utc = (Get-UtcStamp)
-        Write-Host ("[{0}] A pid={1}" -f $name, $pA.Id)
-        Start-Sleep -Seconds 12
-        $pB = Start-AppWithHome $exeB $homeB (Join-Path $tdir 'B')
-        $t.procB_pid = $pB.Id
-        $t.procB_launched_at_utc = (Get-UtcStamp)
-        Write-Host ("[{0}] B pid={1}" -f $name, $pB.Id)
-        $sw = [Diagnostics.Stopwatch]::StartNew()
-        $thirdDone = $false
-        while ($sw.Elapsed.TotalSeconds -lt $SurvivalSeconds) {
-            Start-Sleep -Seconds 5
-            try { $pA.Refresh() } catch {}
-            try { $pB.Refresh() } catch {}
-            $aAlive = -not $pA.HasExited
-            $bAlive = -not $pB.HasExited
-            $aExit = if ($pA.HasExited) { $pA.ExitCode } else { $null }
-            $bExit = if ($pB.HasExited) { $pB.ExitCode } else { $null }
-            $pids = @()
-            if ($aAlive) { $pids += [int]$pA.Id }
-            if ($bAlive) { $pids += [int]$pB.Id }
-            $wins = Get-WindowCounts $pids
-            $t.samples += [ordered]@{
-                at_utc = (Get-UtcStamp)
-                elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 1)
-                procA_alive = $aAlive
-                procB_alive = $bAlive
-                procA_exit_code = $aExit
-                procB_exit_code = $bExit
-                procA_windows = $wins[[int]$pA.Id]
-                procB_windows = $wins[[int]$pB.Id]
-                viber_process_count = @(Get-Pids 'Contents/MacOS/Viber').Count
-                profileA = (Get-PathStat $homeA)
-                profileB = (Get-PathStat $homeB)
-                real_viber = [ordered]@{}
-            }
-            foreach ($p in (Get-ViberDataPaths)) { $t.samples[-1].real_viber[$p] = Get-PathStat $p }
-            if (-not $thirdDone -and $sw.Elapsed.TotalSeconds -ge 22) {
-                $thirdDone = $true
-                try {
-                    $pC = Start-AppWithHome $exeB $homeC (Join-Path $tdir 'C')
-                    $t.third_instance = [ordered]@{ started_pid = $pC.Id; started_at_utc = (Get-UtcStamp); launched_after_s = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
-                    Write-Host ("[{0}] third pid={1}" -f $name, $pC.Id)
-                } catch { $t.errors += "third launch: $($_.Exception.Message)" }
-            }
+function Wait-ForWindow {
+    param(
+        [int]$TimeoutSec,
+        [int]$WaitPid = 0,
+        [int]$MinPidCount = 0,
+        [string]$FakeHome = $null,
+        [bool]$TrackReal = $false
+    )
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $samples = @()
+    $ready = $false
+    $latency = $null
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        Start-Sleep -Seconds 5
+        $s = Get-Snapshot $FakeHome $TrackReal ([math]::Round($sw.Elapsed.TotalSeconds, 1))
+        $samples += $s
+        if ($WaitPid -gt 0) {
+            foreach ($w in $s.windows) { if ($w.pid -eq $WaitPid -and $null -ne $w.windows -and $w.windows -gt 0) { $ready = $true } }
+        } elseif ($MinPidCount -gt 0) {
+            if ($s.viber_process_count -ge $MinPidCount) { $ready = $true }
+        } else {
+            foreach ($w in $s.windows) { if ($null -ne $w.windows -and $w.windows -gt 0) { $ready = $true } }
         }
-        if ($pC) {
-            try { $pC.Refresh() } catch {}
-            $aliveC = -not $pC.HasExited
-            $t.third_instance.alive_at_window_end = $aliveC
-            $t.third_instance.exit_code = if ($pC.HasExited) { $pC.ExitCode } else { $null }
-            $t.third_instance.seconds_observed = [math]::Floor(($SurvivalSeconds - [double]$t.third_instance.launched_after_s))
-        }
-    } catch {
-        $t.errors += $_.Exception.Message
-    } finally {
-        foreach ($pp in @($pA, $pB, $pC)) {
-            if ($pp) { try { if (-not $pp.HasExited) { Stop-Process -Id $pp.Id -Force } } catch {} }
-        }
-        Stop-AllViber
+        if ($ready) { $latency = $s.elapsed_s; break }
     }
-    $t.procA_stderr_tail = Read-LogTail (Join-Path $tdir 'A.err.log') 20
-    $t.procB_stderr_tail = Read-LogTail (Join-Path $tdir 'B.err.log') 20
-    $t.procA_stdout_tail = Read-LogTail (Join-Path $tdir 'A.out.log') 10
-    $t.procB_stdout_tail = Read-LogTail (Join-Path $tdir 'B.out.log') 10
-    $t.profileA_after = Get-PathStat $homeA
-    $t.profileB_after = Get-PathStat $homeB
-    $t.profileA_written = Test-StatWrote $t.profileA_before $t.profileA_after
-    $t.profileB_written = Test-StatWrote $t.profileB_before $t.profileB_after
-    $t.redirect_effective = $t.profileA_written -or $t.profileB_written
-    $realAfter = [ordered]@{}
-    foreach ($p in (Get-ViberDataPaths)) { $realAfter[$p] = Get-PathStat $p }
-    $t.real_viber_after = $realAfter
-    $realWritten = $false
-    foreach ($k in @($realAfter.Keys)) {
-        if (Test-StatWrote $t.real_viber_before[$k] $realAfter[$k]) { $realWritten = $true }
+    return [ordered]@{ samples = $samples; ready = $ready; latency_s = $latency }
+}
+
+function Get-WindowsMax($Samples) {
+    $m = 0
+    foreach ($s in $Samples) {
+        foreach ($w in $s.windows) { if ($null -ne $w.windows -and $w.windows -gt $m) { $m = [int]$w.windows } }
     }
-    $t.real_viber_written = $realWritten
-    if ($t.samples.Count -gt 0) {
-        $lastOne = $t.samples[-1]
-        $t.procA_alive_after_window = $lastOne.procA_alive
-        $t.procB_alive_after_window = $lastOne.procB_alive
-        $t.procB_exit_code = $lastOne.procB_exit_code
-        $t.both_alive_full_window = ($lastOne.procA_alive -and $lastOne.procB_alive -and $lastOne.elapsed_s -ge 30)
-        $aMax = @($t.samples | ForEach-Object { $_.procA_windows } | Where-Object { $null -ne $_ } | Measure-Object -Maximum).Maximum
-        $bMax = @($t.samples | ForEach-Object { $_.procB_windows } | Where-Object { $null -ne $_ } | Measure-Object -Maximum).Maximum
-        if ($null -eq $aMax) { $aMax = 0 }
-        if ($null -eq $bMax) { $bMax = 0 }
-        $t.procA_windows_max = [int]$aMax
-        $t.procB_windows_max = [int]$bMax
-        $t.procA_had_window = $t.procA_windows_max -gt 0
-        $t.procB_had_window = $t.procB_windows_max -gt 0
-    } else {
-        $t.both_alive_full_window = $false
-        $t.procA_had_window = $false
-        $t.procB_had_window = $false
+    return $m
+}
+
+function Get-PidWindowsMax($Samples, [int]$Pid) {
+    $m = 0
+    foreach ($s in $Samples) {
+        foreach ($w in $s.windows) { if ($w.pid -eq $Pid -and $null -ne $w.windows -and $w.windows -gt $m) { $m = [int]$w.windows } }
     }
-    $t.result = if ($t.both_alive_full_window -and $t.procA_had_window -and $t.procB_had_window -and $t.profileA_written -and $t.profileB_written) { 'observed' } else { 'not_observed' }
-    Write-Host ("[{0}] result={1} both={2} winsA={3} winsB={4} profA={5} profB={6}" -f $name, $t.result, $t.both_alive_full_window, $t.procA_windows_max, $t.procB_windows_max, $t.profileA_written, $t.profileB_written)
-    return $t
+    return $m
+}
+
+function Test-RealWrites($Before, $After) {
+    foreach ($k in @($After.Keys)) {
+        if (Test-StatWrote $Before[$k] $After[$k]) { return $true }
+    }
+    return $false
+}
+
+function Stop-ProcQuiet($p) {
+    if ($p) { try { $p.Refresh(); if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force } } catch {} }
 }
 
 function Invoke-SingleBaseline([string]$appPath) {
     Stop-AllViber
-    $t = [ordered]@{ name = 'single-baseline-open-a'; mechanism = 'open -a single instance only (real ~/Library profile)'; started_at_utc = (Get-UtcStamp); samples = @(); errors = @() }
+    $t = [ordered]@{ name = 'single-baseline-open-a'; mechanism = 'open -a ViberA.app, single instance, real HOME'; started_at_utc = (Get-UtcStamp); errors = @() }
     $t.real_viber_before = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
     $r = Run-Native 'open' @($appPath)
     $t.open = [ordered]@{ code = $r.code; output = @($r.output) }
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($sw.Elapsed.TotalSeconds -lt 30) {
-        Start-Sleep -Seconds 5
-        $pids = @(Get-Pids 'Contents/MacOS/Viber')
-        $wins = Get-WindowCounts $pids
-        $t.samples += [ordered]@{
-            at_utc = (Get-UtcStamp)
-            elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 1)
-            viber_process_count = $pids.Count
-            windows = @($pids | ForEach-Object { [ordered]@{ pid = [int]$_; windows = $wins[[int]$_] } })
-            real_viber = [ordered]@{}
-        }
-        foreach ($p in (Get-ViberDataPaths)) { $t.samples[-1].real_viber[$p] = Get-PathStat $p }
+    $w = Wait-ForWindow -TimeoutSec $InitTimeout -TrackReal $true
+    $t.samples = $w.samples
+    $t.app_functional = $w.ready
+    $t.latency_s = $w.latency_s
+    if ($w.ready) {
+        Start-Sleep -Seconds 10
+        $settle = Get-Snapshot $null $true 0
+        $t.settle_sample = $settle
+        $t.samples = @($t.samples + $settle)
     }
+    $t.windows_max = Get-WindowsMax $t.samples
     $pidsEnd = @(Get-Pids 'Contents/MacOS/Viber')
     $t.viber_process_count_end = $pidsEnd.Count
     if ($pidsEnd.Count -gt 0) {
         $psr = Run-Native 'ps' @('-o', 'pid=,ppid=,stat=,etime=,command=', '-p', ($pidsEnd -join ','))
         $t.ps = @($psr.output | Select-Object -First 10)
     }
-    $wmax = 0
-    foreach ($s in $t.samples) { foreach ($w in $s.windows) { if ($w.windows -gt $wmax) { $wmax = $w.windows } } }
-    $t.windows_max = $wmax
     $t.real_viber_after = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
-    $realWritten = $false
-    foreach ($k in @($t.real_viber_after.Keys)) {
-        if (Test-StatWrote $t.real_viber_before[$k] $t.real_viber_after[$k]) { $realWritten = $true }
-    }
-    $t.real_viber_written = $realWritten
-    $t.app_functional = ($wmax -gt 0)
+    $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
     Stop-AllViber
-    Write-Host ("[single-baseline] procs_end={0} wins_max={1} real_writes={2} total_windows_system={3}" -f $pidsEnd.Count, $wmax, $realWritten, $script:winTotal)
+    Write-Host ("[single-baseline] functional={0} latency={1}s wins_max={2} real_writes={3}" -f $t.app_functional, $t.latency_s, $t.windows_max, $t.real_viber_written)
+    return $t
+}
+
+function Invoke-SingleDirectExec([string]$exe) {
+    Stop-AllViber
+    $tdir = Join-Path $work 'test_single_direct'
+    New-Item -ItemType Directory -Force -Path $tdir | Out-Null
+    $t = [ordered]@{ name = 'single-direct-exec-real-home'; mechanism = 'Contents/MacOS/Viber executed directly (Start-Process), real HOME'; started_at_utc = (Get-UtcStamp); errors = @() }
+    $t.real_viber_before = [ordered]@{}
+    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
+    $p = Start-App $exe $tdir (Join-Path $tdir 'single')
+    $t.pid = $p.Id
+    $w = Wait-ForWindow -TimeoutSec $InitTimeout -TrackReal $true
+    $t.samples = $w.samples
+    $t.app_functional = $w.ready
+    $t.latency_s = $w.latency_s
+    $t.windows_max = Get-WindowsMax $w.samples
+    $t.stderr_tail = Read-LogTail (Join-Path $tdir 'single.err.log') 20
+    $t.stdout_tail = Read-LogTail (Join-Path $tdir 'single.out.log') 10
+    $t.real_viber_after = [ordered]@{}
+    foreach ($p2 in (Get-ViberDataPaths)) { $t.real_viber_after[$p2] = Get-PathStat $p2 }
+    $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
+    Stop-ProcQuiet $p
+    Stop-AllViber
+    Write-Host ("[single-direct] functional={0} latency={1}s wins_max={2}" -f $t.app_functional, $t.latency_s, $t.windows_max)
+    return $t
+}
+
+function Invoke-DualDirectExec([string]$exeA, [string]$exeB) {
+    Stop-AllViber
+    $tdir = Join-Path $work 'test_dual_direct'
+    New-Item -ItemType Directory -Force -Path $tdir | Out-Null
+    $homeB = Join-Path $tdir 'homeB'
+    New-FakeHome $homeB
+    $t = [ordered]@{
+        name = 'dual-direct-exec-fake-home'
+        mechanism = 'A: direct exec real HOME; B: second copied bundle direct exec with HOME/CFFIXED_USER_HOME redirected'
+        started_at_utc = (Get-UtcStamp)
+        homeB = $homeB
+        fake_home_before = (Get-PathStat $homeB)
+        real_viber_before = [ordered]@{}
+        errors = @()
+    }
+    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
+    $pA = $null; $pB = $null
+    try {
+        $pA = Start-App $exeA $tdir (Join-Path $tdir 'A')
+        $t.procA_pid = $pA.Id
+        Write-Host ("[dual-direct] A pid={0}" -f $pA.Id)
+        $wa = Wait-ForWindow -TimeoutSec $InitTimeout -TrackReal $true
+        $t.first_instance_functional = $wa.ready
+        $t.first_latency_s = $wa.latency_s
+        $t.a_samples = $wa.samples
+        $t.a_windows_max = Get-WindowsMax $wa.samples
+        if ($wa.ready) {
+            $pB = Start-AppWithHome $exeB $homeB (Join-Path $tdir 'B')
+            $t.procB_pid = $pB.Id
+            Write-Host ("[dual-direct] B pid={0}" -f $pB.Id)
+            $wb = Wait-ForWindow -TimeoutSec $SecondWindow -WaitPid $pB.Id -FakeHome $homeB -TrackReal $true
+            $t.b_samples = $wb.samples
+            $t.b_window = $wb.ready
+            $t.b_latency_s = $wb.latency_s
+            $t.b_windows_max = Get-PidWindowsMax $wb.samples $pB.Id
+            $t.b_stderr_tail = Read-LogTail (Join-Path $tdir 'B.err.log') 20
+            $t.b_stdout_tail = Read-LogTail (Join-Path $tdir 'B.out.log') 10
+        } else {
+            $t.b_window = $false
+            $t.b_samples = @()
+        }
+    } catch {
+        $t.errors += $_.Exception.Message
+    } finally {
+        $t.fake_home_after = Get-PathStat $homeB
+        $t.fake_home_written = Test-StatWrote $t.fake_home_before $t.fake_home_after
+        if ($pA) { try { $pA.Refresh(); $t.a_alive_end = -not $pA.HasExited } catch { $t.a_alive_end = $false } }
+        if ($pB) {
+            try { $pB.Refresh(); $t.b_alive_end = -not $pB.HasExited; if ($pB.HasExited) { $t.b_exit_code = $pB.ExitCode } } catch {}
+        }
+        $t.real_viber_after = [ordered]@{}
+        foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
+        $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
+        Stop-ProcQuiet $pA
+        Stop-ProcQuiet $pB
+        Stop-AllViber
+    }
+    $t.second_instance_usable = ($t.first_instance_functional -eq $true) -and ($t.b_window -eq $true) -and ($t.fake_home_written -eq $true) -and ($t.a_alive_end -eq $true)
+    Write-Host ("[dual-direct] first={0} b_window={1} fake_writes={2} usable={3}" -f $t.first_instance_functional, $t.b_window, $t.fake_home_written, $t.second_instance_usable)
+    return $t
+}
+
+function Invoke-DualOpenCopies([string]$appA, [string]$appB) {
+    Stop-AllViber
+    $tdir = Join-Path $work 'test_dual_open'
+    New-Item -ItemType Directory -Force -Path $tdir | Out-Null
+    $t = [ordered]@{ name = 'dual-open-a-copied-bundle'; mechanism = 'A then B both launched through LaunchServices (open -a), two copied bundles, real HOME'; started_at_utc = (Get-UtcStamp); errors = @() }
+    $t.real_viber_before = [ordered]@{}
+    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
+    $r1 = Run-Native 'open' @($appA)
+    $t.open1 = [ordered]@{ code = $r1.code; output = @($r1.output) }
+    $wa = Wait-ForWindow -TimeoutSec $InitTimeout -TrackReal $true
+    $t.first_instance_functional = $wa.ready
+    $t.first_latency_s = $wa.latency_s
+    $t.a_samples = $wa.samples
+    $before = @(Get-Pids 'Contents/MacOS/Viber')
+    $t.pids_before_second = $before
+    $r2 = Run-Native 'open' @($appB)
+    $t.open2 = [ordered]@{ code = $r2.code; output = @($r2.output) }
+    $wb = Wait-ForWindow -TimeoutSec $ShortWindow -MinPidCount ($before.Count + 1) -TrackReal $true
+    $t.b_samples = $wb.samples
+    $t.samples = $wb.samples
+    $t.second_process_spawned = $wb.ready
+    $after = @(Get-Pids 'Contents/MacOS/Viber')
+    $t.pids_at_end = $after
+    $t.new_pids = @($after | Where-Object { $before -notcontains $_ })
+    $t.new_window = Get-PidWindowsMax $wb.samples ([int]($t.new_pids | Select-Object -First 1))
+    $t.viber_process_count_end = $after.Count
+    $t.real_viber_after = [ordered]@{}
+    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
+    $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
+    $t.isolated_profile_written = $false
+    $t.second_instance_usable = $false
+    Stop-AllViber
+    Write-Host ("[dual-open] first={0} spawned={1} new_pids={2} new_windows={3}" -f $t.first_instance_functional, $t.second_process_spawned, (($t.new_pids) -join ','), $t.new_window)
     return $t
 }
 
 function Invoke-OpenNTest([string]$appPath) {
     Stop-AllViber
-    $t = [ordered]@{ name = 'open-n-same-bundle'; mechanism = 'open -n (LaunchServices request for a new instance, same real HOME/profile)'; started_at_utc = (Get-UtcStamp); samples = @(); errors = @() }
+    $t = [ordered]@{ name = 'open-n-same-bundle'; mechanism = 'A via open -a; second instance requested with open -n (same bundle, real HOME)'; started_at_utc = (Get-UtcStamp); errors = @() }
     $t.real_viber_before = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
-    $r1 = Run-Native 'open' @('-n', $appPath)
+    $r1 = Run-Native 'open' @($appPath)
     $t.open1 = [ordered]@{ code = $r1.code; output = @($r1.output) }
-    Start-Sleep -Seconds 12
-    $t.pids_after_first = @(Get-Pids 'Contents/MacOS/Viber')
+    $wa = Wait-ForWindow -TimeoutSec $InitTimeout
+    $t.first_functional = $wa.ready
+    $t.first_latency_s = $wa.latency_s
     $r2 = Run-Native 'open' @('-n', $appPath)
     $t.open2 = [ordered]@{ code = $r2.code; output = @($r2.output) }
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($sw.Elapsed.TotalSeconds -lt 30) {
-        Start-Sleep -Seconds 5
-        $pids = @(Get-Pids 'Contents/MacOS/Viber')
-        $wins = Get-WindowCounts $pids
-        $t.samples += [ordered]@{
-            at_utc = (Get-UtcStamp)
-            elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 1)
-            viber_process_count = $pids.Count
-            windows = @($pids | ForEach-Object { [ordered]@{ pid = [int]$_; windows = $wins[[int]$_] } })
-        }
-    }
+    $wb = Wait-ForWindow -TimeoutSec $ShortWindow -MinPidCount 2
+    $t.samples = $wb.samples
+    $t.second_instance_observed = $wb.ready
     $pidsEnd = @(Get-Pids 'Contents/MacOS/Viber')
     $t.viber_process_count_end = $pidsEnd.Count
-    $t.second_instance_observed = $pidsEnd.Count -ge 2
     if ($pidsEnd.Count -gt 0) {
         $psr = Run-Native 'ps' @('-o', 'pid=,ppid=,stat=,etime=,command=', '-p', ($pidsEnd -join ','))
         $t.ps = @($psr.output | Select-Object -First 10)
@@ -480,7 +537,7 @@ function Invoke-OpenNTest([string]$appPath) {
     $t.real_viber_after = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
     Stop-AllViber
-    Write-Host ("[open-n] open1={0} open2={1} procs_end={2}" -f $r1.code, $r2.code, $pidsEnd.Count)
+    Write-Host ("[open-n] open1={0} open2={1} first_ready={2} procs_end={3}" -f $t.open1.code, $t.open2.code, $t.first_functional, $pidsEnd.Count)
     return $t
 }
 
@@ -489,9 +546,11 @@ try {
     if ($inst.exe_exists) {
         $ev.launch_tests += Invoke-SingleBaseline $inst.appA
         Save-Evidence
-        $ev.launch_tests += Invoke-DualLaunchTest 'copied-bundles-fresh-homes' $inst.exeA $inst.exeB 'each instance: separate copied .app bundle + redirected HOME/CFFIXED_USER_HOME'
+        $ev.launch_tests += Invoke-SingleDirectExec $inst.exeA
         Save-Evidence
-        $ev.launch_tests += Invoke-DualLaunchTest 'same-bundle-fresh-homes' $inst.exeA $inst.exeA 'both instances: same .app bundle path, distinct redirected HOME/CFFIXED_USER_HOME'
+        $ev.launch_tests += Invoke-DualDirectExec $inst.exeA $inst.exeB
+        Save-Evidence
+        $ev.launch_tests += Invoke-DualOpenCopies $inst.appA $inst.appB
         Save-Evidence
         $ev.launch_tests += Invoke-OpenNTest $inst.appA
         Save-Evidence
@@ -524,7 +583,7 @@ try {
             $pl.Refresh()
             if ($pl.HasExited) { $ev.locks.exit_code = $pl.ExitCode }
         } finally {
-            if ($pl) { try { if (-not $pl.HasExited) { Stop-Process -Id $pl.Id -Force } } catch {} }
+            Stop-ProcQuiet $pl
             Stop-AllViber
         }
     }
@@ -534,37 +593,39 @@ try {
 
 # ---------- verdict ----------
 try {
-    $baseline = @($ev.launch_tests | Where-Object { $_.name -eq 'single-baseline-open-a' })
-    $baseTest = if ($baseline.Count -gt 0) { $baseline[0] } else { $null }
+    $get = { param($n) $x = @($ev.launch_tests | Where-Object { $_.name -eq $n }); if ($x.Count -gt 0) { $x[0] } else { $null } }
+    $baseTest = & $get 'single-baseline-open-a'
+    $directTest = & $get 'single-direct-exec-real-home'
+    $dual1 = & $get 'dual-direct-exec-fake-home'
+    $dual2 = & $get 'dual-open-a-copied-bundle'
+    $openN = & $get 'open-n-same-bundle'
     $toolBlind = (-not $script:winlistOk) -or ($null -eq $script:winTotal) -or ($script:winTotal -le 0)
-    $appFunctional = $false
-    if ($baseTest) { $appFunctional = [bool]$baseTest.app_functional }
-    $observed = @($ev.launch_tests | Where-Object { $_.result -eq 'observed' })
-    $dualTests = @($ev.launch_tests | Where-Object { $_.name -ne 'open-n-same-bundle' -and $_.name -ne 'single-baseline-open-a' })
+    $baseOk = $false
+    if ($baseTest) { $baseOk = [bool]$baseTest.app_functional }
+    $usable = @($ev.launch_tests | Where-Object { $_.second_instance_usable -eq $true })
+    $dualValid = @($ev.launch_tests | Where-Object { ($_.name -eq 'dual-direct-exec-fake-home' -or $_.name -eq 'dual-open-a-copied-bundle') -and $_.first_instance_functional -eq $true })
     $reasons = @()
-    foreach ($t in $dualTests) {
-        $reasons += ("{0}: both_alive_full_window={1}, windows A/B={2}/{3}, redirected-profile writes A/B={4}/{5}, real ~/Library writes={6}, B exit={7}" -f $t.name, $t.both_alive_full_window, $t.procA_windows_max, $t.procB_windows_max, $t.profileA_written, $t.profileB_written, $t.real_viber_written, $t.procB_exit_code)
-    }
-    foreach ($t in @($ev.launch_tests | Where-Object { $_.name -eq 'open-n-same-bundle' })) {
-        $reasons += ("open -n: open exit codes {0}/{1}, Viber processes alive at end={2} (second_instance_observed={3})" -f $t.open1.code, $t.open2.code, $t.viber_process_count_end, $t.second_instance_observed)
-    }
-    if ($baseTest) {
-        $reasons += ("single-instance baseline: open exit={0}, processes at end={1}, windows max={2}, real ~/Library writes={3}" -f $baseTest.open.code, $baseTest.viber_process_count_end, $baseTest.windows_max, $baseTest.real_viber_written)
-    }
+    if ($baseTest) { $reasons += ("single baseline (open -a, real HOME): window={0} after {1}s, windows_max={2}, real profile writes={3}" -f $baseTest.app_functional, $baseTest.latency_s, $baseTest.windows_max, $baseTest.real_viber_written) }
+    if ($directTest) { $reasons += ("single direct-exec (real HOME): window={0} after {1}s, windows_max={2}, stderr={3}" -f $directTest.app_functional, $directTest.latency_s, $directTest.windows_max, (($directTest.stderr_tail -join ' | '))) }
+    if ($dual1) { $reasons += ("dual direct-exec: A functional={0} ({1}s), B pid {2} window={3} after {4}s, B fake-home writes={5}, A alive at end={6}, B exit={7}" -f $dual1.first_instance_functional, $dual1.first_latency_s, $dual1.procB_pid, $dual1.b_window, $dual1.b_latency_s, $dual1.fake_home_written, $dual1.a_alive_end, $dual1.b_exit_code) }
+    if ($dual2) { $reasons += ("dual open -a copies: A functional={0} ({1}s), second process spawned={2} (new pids {3}), new-process window={4}, isolated-profile writes={5}" -f $dual2.first_instance_functional, $dual2.first_latency_s, $dual2.second_process_spawned, (($dual2.new_pids) -join ','), $dual2.new_window, $dual2.isolated_profile_written) }
+    if ($openN) { $reasons += ("open -n twice: first functional={0} ({1}s), processes end={2}, second_instance_observed={3}" -f $openN.first_functional, $openN.first_latency_s, $openN.viber_process_count_end, $openN.second_instance_observed) }
     $conclusion = 'inconclusive'
     $summary = ''
     if (-not $inst.exe_exists) {
         $summary = 'Setup failed before launch tests (installer/mount/staging); no isolation verdict is possible.'
     } elseif ($toolBlind) {
         $summary = 'Window evidence unavailable on this runner (CGWindowList returned no windows system-wide), so per-instance window criteria cannot be verified.'
-    } elseif (-not $appFunctional) {
-        $summary = 'A single Viber instance never produced a window on this runner within 30s, so dual-instance results are not attributable to single-instance protection.'
-    } elseif ($observed.Count -gt 0) {
+    } elseif (-not $baseOk) {
+        $summary = 'A single Viber instance launched via LaunchServices never produced a window within the wait budget, so dual-instance results are not attributable to single-instance protection.'
+    } elseif ($usable.Count -gt 0) {
         $conclusion = 'feasible'
-        $summary = 'At least one launch test met all criteria (dual survival >=30s, windows per process, redirected profile writes per dir).'
+        $summary = 'At least one dual mechanism produced a second instance with its own window and isolated profile writes.'
+    } elseif ($dualValid.Count -eq 0) {
+        $summary = 'No dual mechanism could even bring a first instance to a functional window, so the single-instance guard could not be exercised.'
     } else {
         $conclusion = 'infeasible'
-        $summary = 'No launch test met all criteria (dual survival >=30s, windows per process, redirected profile writes per dir).'
+        $summary = 'With a functional single instance, no tested dual mechanism produced a second usable instance (window + isolated profile) on one macOS user session.'
     }
     $ev.verdict = [ordered]@{
         conclusion = $conclusion
@@ -572,7 +633,9 @@ try {
         reasons    = $reasons
         window_tool_available = $script:winlistOk
         windows_system_total = $script:winTotal
-        single_instance_functional = $appFunctional
+        single_instance_functional = $baseOk
+        dual_mechanisms_with_functional_first = $dualValid.Count
+        usable_second_instances = $usable.Count
     }
 } catch {
     $ev.errors += "verdict: $($_.Exception.Message)"
