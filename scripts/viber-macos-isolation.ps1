@@ -56,7 +56,7 @@ function Stop-AllViber {
 }
 
 $ev = [ordered]@{
-    schema = 'haituo-fusion/viber-macos-isolation/v2'
+    schema = 'haituo-fusion/viber-macos-isolation/v3'
     generated_at_utc = (Get-UtcStamp)
     runner = [ordered]@{}
     baseline = [ordered]@{}
@@ -65,12 +65,13 @@ $ev = [ordered]@{
     window_check = [ordered]@{}
     launch_tests = @()
     locks = [ordered]@{}
+    guard_object = [ordered]@{}
     errors = @()
     scope_limitations = [ordered]@{
         host = 'GitHub Actions macos-latest runner (one GUI session, one user)'
         account_verification = 'none: no real Viber accounts or credentials are used anywhere in this probe'
-        verified_scope = 'process survival, per-PID windows (CGWindowList), profile-directory writes'
-        not_verified = 'separate macOS user account (no second GUI login session on CI); LSEnvironment HOME redirect through LaunchServices; real dual-account messaging'
+        verified_scope = 'process survival, per-PID windows (CGWindowList), per-PID unix sockets and TCP endpoints, profile-directory writes, /private/tmp and DARWIN_USER_TEMP_DIR contents'
+        not_verified = 'separate macOS user account (no second GUI login session on CI); LSEnvironment HOME redirect through LaunchServices; per-instance network egress; real dual-account messaging'
     }
     verdict = [ordered]@{}
 }
@@ -198,6 +199,12 @@ if ($inst.app_source) {
     try {
         $inst.cli_profile_flags = @(& grep -a -o -E -- '--(user-data-dir|profile|data-dir|userdir)[A-Za-z0-9=-]*' $inst.exeA 2>$null | Select-Object -Unique -First 20)
     } catch { $inst.cli_profile_flags = @() }
+    try {
+        $inst.socket_name_strings = @(& grep -a -o -E 'Viber-[0-9]+-[0-9]+|Viber-[0-9]+' $inst.exeA 2>$null | Select-Object -Unique -First 10)
+    } catch { $inst.socket_name_strings = @() }
+    try {
+        $inst.qlocalserver_symbol = [int](@(& grep -a -c 'QLocalServer' $inst.exeA 2>$null) | Select-Object -First 1)
+    } catch { $inst.qlocalserver_symbol = $null }
 }
 $ev.install = $inst
 Save-Evidence
@@ -282,6 +289,72 @@ function Start-AppWithHome([string]$exe, [string]$fakeHome, [string]$logBase) {
         $env:CFFIXED_USER_HOME = $oldC
     }
     return $p
+}
+
+function Start-AppWithEnv([string]$exe, [hashtable]$Env, [string]$wd, [string]$logBase) {
+    $saved = @{}
+    if ($Env) {
+        foreach ($k in @($Env.Keys)) {
+            $saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process')
+            [Environment]::SetEnvironmentVariable($k, [string]$Env[$k], 'Process')
+        }
+    }
+    try {
+        return Start-App $exe $wd $logBase
+    } finally {
+        foreach ($k in @($saved.Keys)) {
+            [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process')
+        }
+    }
+}
+
+function Get-DarwinTempDir {
+    $d = $null
+    try { $d = (@(& getconf DARWIN_USER_TEMP_DIR 2>$null) -join '').Trim() } catch {}
+    if (-not $d) { $d = $env:TMPDIR }
+    return $d
+}
+
+function Get-ViberSocketInventory([int]$TargetPid) {
+    $res = [ordered]@{ pid = $TargetPid; unix = @(); net = @(); errors = @() }
+    if ($TargetPid -le 0) { return $res }
+    try {
+        $r = Run-Native 'lsof' @('-a', '-p', "$TargetPid", '-U', '-Fn')
+        $res.unix = @($r.output | Where-Object { $_ -like 'n*' } | ForEach-Object { $_.Substring(1) } | Select-Object -Unique)
+    } catch { $res.errors += "lsof -U: $($_.Exception.Message)" }
+    try {
+        $r = Run-Native 'lsof' @('-a', '-p', "$TargetPid", '-i', '-Fn')
+        $res.net = @($r.output | Where-Object { $_ -like 'n*' } | ForEach-Object { $_.Substring(1) } | Select-Object -Unique)
+    } catch { $res.errors += "lsof -i: $($_.Exception.Message)" }
+    return $res
+}
+
+function Get-TempViberItems {
+    $res = [ordered]@{ dirs = @(); user_temp = @(); private_tmp = @(); errors = @() }
+    $dirs = @('/private/tmp', (Get-DarwinTempDir)) | Where-Object { $_ } | Select-Object -Unique
+    $res.dirs = @($dirs)
+    foreach ($d in $dirs) {
+        try {
+            if (-not (Test-Path $d)) { continue }
+            $items = @(Get-ChildItem $d -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(?i)viber' } | Select-Object -First 30 | ForEach-Object {
+                [ordered]@{ path = $_.FullName; kind = $(if ($_.PSIsContainer) { 'dir' } else { 'file' }); bytes = $_.Length; mtime_utc = $_.LastWriteTimeUtc.ToString('o') }
+            })
+            if ($d -eq '/private/tmp') { $res.private_tmp = $items } else { $res.user_temp = @($items) }
+        } catch { $res.errors += "scan ${d}: $($_.Exception.Message)" }
+    }
+    return $res
+}
+
+function Get-ViberLockFiles {
+    $res = @()
+    foreach ($rel in @('Library/Application Support/ViberPC', 'Library/Application Support/com.viber.osx', 'Library/Caches/com.viber.osx')) {
+        $base = Join-Path $HOME $rel
+        if (-not (Test-Path $base)) { continue }
+        try {
+            $res += @(Get-ChildItem $base -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(?i)(\.lock$|\.sock$|\.pid$|socket|singleton)' } | Select-Object -First 25 | ForEach-Object { $_.FullName })
+        } catch {}
+    }
+    return @($res | Select-Object -Unique)
 }
 
 function Read-LogTail([string]$path, [int]$lines) {
@@ -591,6 +664,97 @@ function Invoke-OpenNTest([string]$appPath) {
     return $t
 }
 
+function Invoke-DualEnvTest {
+    param(
+        [string]$exeA,
+        [string]$exeB,
+        [string]$name,
+        [string]$mechanism,
+        [hashtable]$envA = $null,
+        [hashtable]$envB = $null,
+        [string]$homeA = $null,
+        [string]$homeB = $null,
+        [string]$tmpA = $null,
+        [string]$tmpB = $null,
+        [int]$bTimeout = 150
+    )
+    Stop-AllViber
+    $tdir = Join-Path $work ("test_" + $name)
+    New-Item -ItemType Directory -Force -Path $tdir | Out-Null
+    $t = [ordered]@{
+        name = $name; mechanism = $mechanism; started_at_utc = (Get-UtcStamp)
+        envA = $envA; envB = $envB; homeA = $homeA; homeB = $homeB; tmpA = $tmpA; tmpB = $tmpB
+        errors = @()
+    }
+    foreach ($h in @($homeA, $homeB)) { if ($h) { New-FakeHome $h } }
+    foreach ($d in @($tmpA, $tmpB)) { if ($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null } }
+    $t.fake_home_before = [ordered]@{}
+    foreach ($h in @($homeA, $homeB)) { if ($h) { $t.fake_home_before[$h] = Get-PathStat $h } }
+    $t.temp_before = Get-TempViberItems
+    $t.real_viber_before = [ordered]@{}
+    foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
+    $pA = $null; $pB = $null
+    try {
+        $wdA = if ($homeA) { $homeA } else { $tdir }
+        $pA = Start-AppWithEnv $exeA $envA $wdA (Join-Path $tdir 'A')
+        $t.procA_pid = $pA.Id
+        Write-Host ("[{0}] A pid={1}" -f $name, $pA.Id)
+        $wa = Wait-ForWindow -TimeoutSec $InitTimeout -TrackReal $true
+        $t.a_window = $wa.ready
+        $t.a_latency_s = $wa.latency_s
+        $t.a_samples = $wa.samples
+        $t.a_windows_max = Get-PidWindowsMax $wa.samples $pA.Id
+        $t.sockets_a = Get-ViberSocketInventory $pA.Id
+        $t.temp_after_a = Get-TempViberItems
+        if ($wa.ready) {
+            $wdB = if ($homeB) { $homeB } else { $tdir }
+            $pB = Start-AppWithEnv $exeB $envB $wdB (Join-Path $tdir 'B')
+            $t.procB_pid = $pB.Id
+            Write-Host ("[{0}] B pid={1}" -f $name, $pB.Id)
+            Start-Sleep -Seconds 3
+            $t.sockets_b_initial = Get-ViberSocketInventory $pB.Id
+            $wb = Wait-ForWindow -TimeoutSec $bTimeout -WaitPid $pB.Id -TrackReal $true
+            $t.b_samples = $wb.samples
+            $t.b_window = $wb.ready
+            $t.b_latency_s = $wb.latency_s
+            $t.b_windows_max = Get-PidWindowsMax $wb.samples $pB.Id
+            $t.b_stderr_tail = Read-LogTail (Join-Path $tdir 'B.err.log') 20
+            $t.b_stdout_tail = Read-LogTail (Join-Path $tdir 'B.out.log') 10
+            $t.sockets_b = Get-ViberSocketInventory $pB.Id
+        } else {
+            $t.b_window = $false
+            $t.b_samples = @()
+        }
+        $t.temp_after_b = Get-TempViberItems
+        $t.lock_files_after = Get-ViberLockFiles
+    } catch {
+        $t.errors += $_.Exception.Message
+    } finally {
+        $t.fake_home_after = [ordered]@{}
+        $t.fake_home_written = [ordered]@{}
+        foreach ($h in @($homeA, $homeB)) {
+            if (-not $h) { continue }
+            $t.fake_home_after[$h] = Get-PathStat $h
+            $t.fake_home_written[$h] = Test-StatWrote $t.fake_home_before[$h] $t.fake_home_after[$h]
+        }
+        if ($pA) { try { $pA.Refresh(); $t.a_alive_end = -not $pA.HasExited } catch { $t.a_alive_end = $false } }
+        if ($pB) { try { $pB.Refresh(); $t.b_alive_end = -not $pB.HasExited; if ($pB.HasExited) { $t.b_exit_code = $pB.ExitCode } } catch {} }
+        $t.real_viber_after = [ordered]@{}
+        foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
+        $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
+        Stop-ProcQuiet $pA
+        Stop-ProcQuiet $pB
+        Stop-AllViber
+    }
+    $ownB = $false
+    if ($homeB -and $t.fake_home_written.Contains($homeB)) { $ownB = [bool]$t.fake_home_written[$homeB] }
+    $t.b_primary = ($t.b_window -eq $true) -and ($t.b_alive_end -eq $true) -and ($t.a_alive_end -eq $true)
+    $t.b_own_profile_written = $ownB
+    $t.second_instance_usable = ($t.a_window -eq $true) -and ($t.b_window -eq $true) -and $ownB -and ($t.a_alive_end -eq $true)
+    Write-Host ("[{0}] a_window={1} b_window={2} b_primary={3} own_profile_b={4} usable={5}" -f $name, $t.a_window, $t.b_window, $t.b_primary, $ownB, $t.second_instance_usable)
+    return $t
+}
+
 # ---------- run tests ----------
 if ($inst.exe_exists) {
     try { $r = Invoke-SingleBaseline $inst.appA; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "baseline: $($_.Exception.Message)" }
@@ -604,6 +768,28 @@ if ($inst.exe_exists) {
     try { $r = Invoke-DualOpenCopies $inst.appA $inst.appB; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "dual-open: $($_.Exception.Message)" }
     Save-Evidence
     try { $r = Invoke-OpenNTest $inst.appA; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "open-n: $($_.Exception.Message)" }
+    Save-Evidence
+    $tmpdirOnlyB = Join-Path $work 'tmpdir_only_b'
+    try {
+        $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-tmpdir-only' -mechanism 'A: direct exec, real HOME+TMPDIR; B: direct exec, real HOME, TMPDIR redirected' -envB @{ TMPDIR = $tmpdirOnlyB } -tmpB $tmpdirOnlyB
+        if ($r) { $ev.launch_tests += $r }
+    } catch { $ev.errors += "dual-tmpdir-only: $($_.Exception.Message)" }
+    Save-Evidence
+    $tmpHomeB = Join-Path $work 'home_tmp_home_b'
+    $tmpHomeBTmp = Join-Path $work 'tmp_home_b'
+    try {
+        $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-tmpdir-plus-home' -mechanism 'A: direct exec, real HOME+TMPDIR; B: direct exec with TMPDIR + HOME + CFFIXED_USER_HOME redirected' -envB @{ TMPDIR = $tmpHomeBTmp; HOME = $tmpHomeB; CFFIXED_USER_HOME = $tmpHomeB } -homeB $tmpHomeB -tmpB $tmpHomeBTmp
+        if ($r) { $ev.launch_tests += $r }
+    } catch { $ev.errors += "dual-tmpdir-plus-home: $($_.Exception.Message)" }
+    Save-Evidence
+    $fullHomeA = Join-Path $work 'home_full_a'
+    $fullTmpA = Join-Path $work 'tmp_full_a'
+    $fullHomeB = Join-Path $work 'home_full_b'
+    $fullTmpB = Join-Path $work 'tmp_full_b'
+    try {
+        $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-full-isolation' -mechanism 'both instances direct exec with separate HOME + CFFIXED_USER_HOME + TMPDIR' -envA @{ HOME = $fullHomeA; CFFIXED_USER_HOME = $fullHomeA; TMPDIR = $fullTmpA } -envB @{ HOME = $fullHomeB; CFFIXED_USER_HOME = $fullHomeB; TMPDIR = $fullTmpB } -homeA $fullHomeA -homeB $fullHomeB -tmpA $fullTmpA -tmpB $fullTmpB
+        if ($r) { $ev.launch_tests += $r }
+    } catch { $ev.errors += "dual-full-isolation: $($_.Exception.Message)" }
     Save-Evidence
 } else {
     $ev.install.errors += 'skipping launch tests: staged executable missing'
@@ -638,6 +824,58 @@ try {
     $ev.errors += "locks: $($_.Exception.Message)"
 }
 
+# ---------- guard object discovery (one functional instance, fake HOME) ----------
+try {
+    if ($inst.exe_exists) {
+        $gd = [ordered]@{
+            collected_at_utc = (Get-UtcStamp)
+            method = 'per-PID lsof (-U and -i) on a lone functional instance + /private/tmp and DARWIN_USER_TEMP_DIR inventory + direct probe of candidate socket names'
+            candidates = @('Viber-0-2', 'Viber-0-1', 'Viber-0-0', 'Viber', 'viber', 'Viber-0-2.lock', 'Viber.lock')
+            search_dirs = @('/private/tmp', (Get-DarwinTempDir))
+            present = @()
+            errors = @()
+        }
+        Stop-AllViber
+        $guardHome = Join-Path $work 'home_guard'
+        New-FakeHome $guardHome
+        $pg = $null
+        try {
+            $pg = Start-AppWithHome $inst.exeA $guardHome (Join-Path $work 'guard')
+            $wg = Wait-ForWindow -TimeoutSec $InitTimeout
+            $gd.instance_window = $wg.ready
+            $gd.instance_latency_s = $wg.latency_s
+            $gd.instance_pid = $pg.Id
+            if ($wg.ready) {
+                $gd.sockets = Get-ViberSocketInventory $pg.Id
+                $gd.temp = Get-TempViberItems
+                $gd.lock_files = Get-ViberLockFiles
+                foreach ($d in $gd.search_dirs) {
+                    if (-not $d -or -not (Test-Path $d)) { continue }
+                    foreach ($c in $gd.candidates) {
+                        $cand = Join-Path $d $c
+                        if (Test-Path $cand) {
+                            $st = Get-Item $cand -Force -ErrorAction SilentlyContinue
+                            $isDir = $false; $bytes = $null; $mt = $null
+                            if ($st) { $isDir = [bool]$st.PSIsContainer; $bytes = $st.Length; $mt = $st.LastWriteTimeUtc.ToString('o') }
+                            $gd.present += [ordered]@{ path = $cand; kind = $(if ($isDir) { 'dir' } else { 'node' }); bytes = $bytes; mtime_utc = $mt }
+                        }
+                    }
+                }
+                $lsofAll = Run-Native 'lsof' @('-a', '-p', "$($pg.Id)", '-Fn')
+                $gd.open_files_sample = @($lsofAll.output | Where-Object { $_ -like 'n*' } | ForEach-Object { $_.Substring(1) } | Where-Object { $_ -match '(?i)viber|\.lock$|\.sock' } | Select-Object -First 40)
+            }
+        } finally {
+            Stop-ProcQuiet $pg
+            Stop-AllViber
+        }
+        $ev.guard_object = $gd
+    }
+} catch {
+    $ev.errors += "guard_object: $($_.Exception.Message)"
+    $ev.guard_object = [ordered]@{ errors = @($_.Exception.Message) }
+}
+Save-Evidence
+
 # ---------- verdict ----------
 try {
     $get = { param($n) $x = @($ev.launch_tests | Where-Object { $_.name -eq $n }); if ($x.Count -gt 0) { $x[0] } else { $null } }
@@ -647,6 +885,9 @@ try {
     $dual1 = & $get 'dual-direct-exec-fake-home'
     $dual2 = & $get 'dual-open-a-copied-bundle'
     $openN = & $get 'open-n-same-bundle'
+    $tmpOnly = & $get 'dual-tmpdir-only'
+    $tmpHome = & $get 'dual-tmpdir-plus-home'
+    $fullSep = & $get 'dual-full-isolation'
     $toolBlind = (-not $script:winlistOk) -or ($null -eq $script:winTotal) -or ($script:winTotal -le 0)
     $baseOk = $false
     if ($baseTest) { $baseOk = [bool]$baseTest.app_functional }
@@ -656,7 +897,11 @@ try {
     $fakeOk = $false
     if ($fakeTest) { $fakeOk = [bool]$fakeTest.app_functional }
     $usable = @($ev.launch_tests | Where-Object { $_.second_instance_usable -eq $true })
-    $dualValid = @($ev.launch_tests | Where-Object { ($_.name -eq 'dual-direct-exec-fake-home' -or $_.name -eq 'dual-open-a-copied-bundle') -and $_.first_instance_functional -eq $true })
+    $prim = @($ev.launch_tests | Where-Object { $_.b_primary -eq $true })
+    $dualValid = @($ev.launch_tests | Where-Object {
+        (($_.name -eq 'dual-direct-exec-fake-home' -or $_.name -eq 'dual-open-a-copied-bundle') -and $_.first_instance_functional -eq $true) -or
+        (([string]$_.name) -like 'dual-*' -and $_.a_window -eq $true)
+    })
     $reasons = @()
     if ($baseTest) { $reasons += ("single baseline (open -a, real HOME): window={0} after {1}s, windows_max={2}, real profile writes={3}" -f $baseTest.app_functional, $baseTest.latency_s, $baseTest.windows_max, $baseTest.real_viber_written) }
     if ($directTest) { $reasons += ("single direct-exec (real HOME): window={0} after {1}s, windows_max={2}, stderr={3}" -f $directTest.app_functional, $directTest.latency_s, $directTest.windows_max, (($directTest.stderr_tail -join ' | '))) }
@@ -664,6 +909,12 @@ try {
     if ($dual1) { $reasons += ("dual direct-exec: A functional={0} ({1}s), B pid {2} window={3} after {4}s, B fake-home writes={5}, A alive at end={6}, B alive at end={7}, B exit={8}" -f $dual1.first_instance_functional, $dual1.first_latency_s, $dual1.procB_pid, $dual1.b_window, $dual1.b_latency_s, $dual1.fake_home_written, $dual1.a_alive_end, $dual1.b_alive_end, $dual1.b_exit_code) }
     if ($dual2) { $reasons += ("dual open -a copies: A functional={0} ({1}s), second process spawned={2} (new pids {3}), new-process window ready={4} after {5}s (max {6}), isolated-profile writes={7}" -f $dual2.first_instance_functional, $dual2.first_latency_s, $dual2.second_process_spawned, (($dual2.new_pids) -join ','), $dual2.new_window_ready, $dual2.new_window_latency_s, $dual2.new_window, $dual2.isolated_profile_written) }
     if ($openN) { $reasons += ("open -n twice: first functional={0} ({1}s), pids 2s after open -n={2}, extra pids={3}, new-process window ready={4}, processes end={5}" -f $openN.first_functional, $openN.first_latency_s, (($openN.pids_after_open2) -join ','), (($openN.new_pids) -join ','), $openN.new_window_ready, $openN.viber_process_count_end) }
+    if ($fullSep) { $reasons += ("dual full isolation (separate HOME+CFFIXED_USER_HOME+TMPDIR both sides): A window={0} ({1}s), B window={2} after {3}s (max {4}), B alive at end={5}, own-profile writes per instance={6}, real profile written={7}" -f $fullSep.a_window, $fullSep.a_latency_s, $fullSep.b_window, $fullSep.b_latency_s, $fullSep.b_windows_max, $fullSep.b_alive_end, (($fullSep.fake_home_written.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '; '), $fullSep.real_viber_written) }
+    if ($tmpHome) { $reasons += ("dual TMPDIR+HOME on B only: A window={0} ({1}s), B window={2} after {3}s (max {4}), B own profile written={5}, B alive at end={6}, real profile written={7}" -f $tmpHome.a_window, $tmpHome.a_latency_s, $tmpHome.b_window, $tmpHome.b_latency_s, $tmpHome.b_windows_max, $tmpHome.b_own_profile_written, $tmpHome.b_alive_end, $tmpHome.real_viber_written) }
+    if ($tmpOnly) { $reasons += ("dual TMPDIR only on B (real HOME kept): A window={0} ({1}s), B window={2} after {3}s (max {4}), B alive at end={5}, B exit={6}" -f $tmpOnly.a_window, $tmpOnly.a_latency_s, $tmpOnly.b_window, $tmpOnly.b_latency_s, $tmpOnly.b_windows_max, $tmpOnly.b_alive_end, $tmpOnly.b_exit_code) }
+    if ($ev.guard_object -and $ev.guard_object.sockets) {
+        $reasons += ("guard inventory: unix sockets={0} | tcp endpoints={1} | candidate guard files present={2}" -f ((@($ev.guard_object.sockets.unix)) -join ', '), ((@($ev.guard_object.sockets.net)) -join ', '), ((@($ev.guard_object.present | ForEach-Object { $_.path })) -join ', '))
+    }
     $conclusion = 'inconclusive'
     $summary = ''
     if (-not $inst.exe_exists) {
@@ -674,7 +925,10 @@ try {
         $summary = 'No single Viber instance produced a window within the wait budget, so dual-instance results are not attributable to single-instance protection.'
     } elseif ($usable.Count -gt 0) {
         $conclusion = 'feasible'
-        $summary = 'At least one dual mechanism produced a second instance with its own window and isolated profile writes.'
+        $summary = 'Environment isolation (per-instance TMPDIR with per-instance HOME/CFFIXED_USER_HOME) produced a second instance with its own window and its own profile writes.'
+    } elseif ($prim.Count -gt 0) {
+        $conclusion = 'feasible_partial'
+        $summary = 'A second instance becomes primary when TMPDIR is redirected, but profile isolation was incomplete in that variant (shared HOME or missing per-instance writes).'
     } elseif ($dual2 -and $dual2.new_window_ready -eq $true) {
         $conclusion = 'infeasible'
         $summary = 'A second LaunchServices instance can reach a window, but the LaunchServices path always uses the real HOME, so its profile is not isolated and dual accounts are not separate.'
@@ -697,6 +951,8 @@ try {
         single_with_redirected_home_functional = $fakeOk
         dual_mechanisms_with_functional_first = $dualValid.Count
         usable_second_instances = $usable.Count
+        primary_second_instances = $prim.Count
+        guard_inventory_collected = [bool]($ev.guard_object -and $ev.guard_object.Contains('sockets'))
     }
 } catch {
     $ev.errors += "verdict: $($_.Exception.Message)"
