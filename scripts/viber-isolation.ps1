@@ -183,7 +183,8 @@ if ($dl.installer_path) {
 $exe = Get-ExeCandidates
 $inst = [ordered]@{ attempts = @(); exe_path = $null; exe_signature = $null }
 if (-not $exe -and $dl.installer_path -and $dl.official_signature) {
-    $ext = [IO.Path]::GetExtension($dl.installer_path).ToLower()
+    $ext = if ($dl.installer_url -match '\.msi($|[?#])') { '.msi' } else { '.exe' }
+    $inst.installer_kind = $ext
     if ($ext -eq '.exe') {
         Write-Host 'installing bootstrapper with /S ...'
         $p = Start-Process -FilePath $dl.installer_path -ArgumentList '/S' -PassThru
@@ -247,9 +248,19 @@ function Get-LockAnalysis([int[]]$pids) {
         $mutantIndex = $null
         $self = [HaituoProbe.Nt]::GetCurrentProcess()
         $len = [uint32]0
-        [void][HaituoProbe.Nt]::NtQuerySystemInformation(64, [IntPtr]::Zero, 0, [ref]$len)
-        if ($len -le 0) { throw "SystemExtendedHandleInformation returned length 0" }
-        $buf = [Runtime.InteropServices.Marshal]::AllocHGlobal([int]$len)
+        $buf = [IntPtr]::Zero
+        $st = -1
+        for ($retry = 0; $retry -lt 4; $retry++) {
+            [void][HaituoProbe.Nt]::NtQuerySystemInformation(64, [IntPtr]::Zero, 0, [ref]$len)
+            if ($len -le 0) { break }
+            $buf = [Runtime.InteropServices.Marshal]::AllocHGlobal([int]$len)
+            $st = [HaituoProbe.Nt]::NtQuerySystemInformation(64, $buf, $len, [ref]$len)
+            if ($st -eq 0) { break }
+            [Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
+            $buf = [IntPtr]::Zero
+            $len = $len + 0x10000
+        }
+        if ($buf -eq [IntPtr]::Zero) { throw "SystemExtendedHandleInformation failed status 0x{0:X8}" -f $st }
         try {
             $st = [HaituoProbe.Nt]::NtQuerySystemInformation(64, $buf, $len, [ref]$len)
             if ($st -ne 0) { throw "SystemExtendedHandleInformation status 0x{0:X8}" -f $st }
@@ -484,10 +495,19 @@ function Invoke-SeparateUserTest {
 
         Get-Process -Name Viber -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
-        & net.exe user $uname $upass /add 2>&1 | Out-Null
-        $t.user_add_exit = $LASTEXITCODE
-        if ($LASTEXITCODE -ne 0) { throw "net user add failed exit $LASTEXITCODE" }
-        & net.exe localgroup "Users" $uname /add 2>&1 | Out-Null
+        $secPw = ConvertTo-SecureString $upass -AsPlainText -Force
+        $userCreated = $false
+        try {
+            New-LocalUser -Name $uname -Password $secPw -PasswordNeverExpires -AccountNeverExpires -ErrorAction Stop | Out-Null
+            $t.user_create = 'New-LocalUser'
+            $userCreated = $true
+        } catch {
+            $t.user_create_cmdlet_error = $_.Exception.Message
+            & net.exe user $uname $upass /add 2>&1 | Out-Null
+            $t.user_create = "net.exe fallback exit $LASTEXITCODE"
+            $userCreated = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $userCreated) { throw 'could not create local user (see evidence)' }
 
         $beforeA = Get-DirStat $dirA
         $userRoam = Join-Path "$env:SystemDrive\Users\$uname" 'AppData\Roaming'
@@ -531,6 +551,7 @@ function Invoke-SeparateUserTest {
         $t.result = 'not_observed'
     } finally {
         Get-Process -Name Viber -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-LocalUser -Name $uname -ErrorAction SilentlyContinue
         & net.exe user $uname /delete 2>&1 | Out-Null
         $t.user_delete_exit = $LASTEXITCODE
     }
