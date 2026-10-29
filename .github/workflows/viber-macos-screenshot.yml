@@ -1,6 +1,11 @@
 name: Viber macOS screenshot
 on:
   workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'scripts/viber-macos-screenshot.ps1'
+      - '.github/workflows/viber-macos-screenshot.yml'
 permissions:
   contents: read
 jobs:
