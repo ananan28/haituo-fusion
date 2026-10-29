@@ -511,22 +511,35 @@ function Invoke-DualOpenCopies([string]$appA, [string]$appB) {
     $t.pids_before_second = $before
     $r2 = Run-Native 'open' @($appB)
     $t.open2 = [ordered]@{ code = $r2.code; output = @($r2.output) }
-    $wb = Wait-ForWindow -TimeoutSec $ShortWindow -MinPidCount ($before.Count + 1) -TrackReal $true
-    $t.b_samples = $wb.samples
-    $t.samples = $wb.samples
-    $t.second_process_spawned = $wb.ready
+    $spawn = Wait-ForWindow -TimeoutSec 30 -MinPidCount ($before.Count + 1) -TrackReal $true
+    $t.spawn_samples = $spawn.samples
+    $t.second_process_spawned = $spawn.ready
+    $afterSpawn = @(Get-Pids 'Contents/MacOS/Viber')
+    $t.new_pids = @($afterSpawn | Where-Object { $before -notcontains $_ })
+    $t.new_window = 0
+    $t.new_window_ready = $false
+    if ($t.new_pids.Count -gt 0) {
+        $target = [int]$t.new_pids[0]
+        $wo = Wait-ForWindow -TimeoutSec $SecondWindow -WaitPid $target -TrackReal $true
+        $t.b_samples = $wo.samples
+        $t.new_window_ready = $wo.ready
+        $t.new_window_latency_s = $wo.latency_s
+        $t.new_window = Get-PidWindowsMax $wo.samples $target
+        $t.new_pid_alive_end = (@(Get-Pids 'Contents/MacOS/Viber') -contains $target)
+    } else {
+        $t.b_samples = @()
+    }
+    $t.samples = @($t.spawn_samples + $t.b_samples)
     $after = @(Get-Pids 'Contents/MacOS/Viber')
     $t.pids_at_end = $after
-    $t.new_pids = @($after | Where-Object { $before -notcontains $_ })
-    $t.new_window = Get-PidWindowsMax $wb.samples ([int]($t.new_pids | Select-Object -First 1))
     $t.viber_process_count_end = $after.Count
     $t.real_viber_after = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
     $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
     $t.isolated_profile_written = $false
-    $t.second_instance_usable = $false
+    $t.second_instance_usable = ($t.first_instance_functional -eq $true) -and ($t.new_window_ready -eq $true) -and ($t.isolated_profile_written -eq $true)
     Stop-AllViber
-    Write-Host ("[dual-open] first={0} spawned={1} new_pids={2} new_windows={3}" -f $t.first_instance_functional, $t.second_process_spawned, (($t.new_pids) -join ','), $t.new_window)
+    Write-Host ("[dual-open] first={0} spawned={1} new_pids={2} new_window={3}" -f $t.first_instance_functional, $t.second_process_spawned, (($t.new_pids) -join ','), $t.new_window)
     return $t
 }
 
@@ -540,13 +553,31 @@ function Invoke-OpenNTest([string]$appPath) {
     $wa = Wait-ForWindow -TimeoutSec $InitTimeout
     $t.first_functional = $wa.ready
     $t.first_latency_s = $wa.latency_s
+    $first = @(Get-Pids 'Contents/MacOS/Viber')
+    $t.pids_before_open_n = $first
     $r2 = Run-Native 'open' @('-n', $appPath)
     $t.open2 = [ordered]@{ code = $r2.code; output = @($r2.output) }
     Start-Sleep -Seconds 2
     $t.pids_after_open2 = @(Get-Pids 'Contents/MacOS/Viber')
-    $wb = Wait-ForWindow -TimeoutSec $ShortWindow -MinPidCount 2
-    $t.samples = $wb.samples
-    $t.second_instance_observed = $wb.ready
+    $spawn = Wait-ForWindow -TimeoutSec 30 -MinPidCount ($first.Count + 1)
+    $t.spawn_samples = $spawn.samples
+    $afterSpawn = @(Get-Pids 'Contents/MacOS/Viber')
+    $t.new_pids = @($afterSpawn | Where-Object { $first -notcontains $_ })
+    $t.second_instance_observed = $t.new_pids.Count -gt 0
+    $t.new_window = 0
+    $t.new_window_ready = $false
+    if ($t.new_pids.Count -gt 0) {
+        $target = [int]$t.new_pids[0]
+        $wo = Wait-ForWindow -TimeoutSec $ShortWindow -WaitPid $target
+        $t.b_samples = $wo.samples
+        $t.new_window_ready = $wo.ready
+        $t.new_window_latency_s = $wo.latency_s
+        $t.new_window = Get-PidWindowsMax $wo.samples $target
+        $t.new_pid_alive_end = (@(Get-Pids 'Contents/MacOS/Viber') -contains $target)
+    } else {
+        $t.b_samples = @()
+    }
+    $t.samples = @($t.spawn_samples + $t.b_samples)
     $pidsEnd = @(Get-Pids 'Contents/MacOS/Viber')
     $t.viber_process_count_end = $pidsEnd.Count
     if ($pidsEnd.Count -gt 0) {
@@ -631,8 +662,8 @@ try {
     if ($directTest) { $reasons += ("single direct-exec (real HOME): window={0} after {1}s, windows_max={2}, stderr={3}" -f $directTest.app_functional, $directTest.latency_s, $directTest.windows_max, (($directTest.stderr_tail -join ' | '))) }
     if ($fakeTest) { $reasons += ("single direct-exec (redirected HOME): window={0} after {1}s, windows_max={2}, fake-home writes={3}, alive_at_end={4}, stderr={5}" -f $fakeTest.app_functional, $fakeTest.latency_s, $fakeTest.windows_max, $fakeTest.fake_home_written, $fakeTest.alive_at_end, (($fakeTest.stderr_tail -join ' | '))) }
     if ($dual1) { $reasons += ("dual direct-exec: A functional={0} ({1}s), B pid {2} window={3} after {4}s, B fake-home writes={5}, A alive at end={6}, B alive at end={7}, B exit={8}" -f $dual1.first_instance_functional, $dual1.first_latency_s, $dual1.procB_pid, $dual1.b_window, $dual1.b_latency_s, $dual1.fake_home_written, $dual1.a_alive_end, $dual1.b_alive_end, $dual1.b_exit_code) }
-    if ($dual2) { $reasons += ("dual open -a copies: A functional={0} ({1}s), second process spawned={2} (new pids {3}), new-process window={4}, isolated-profile writes={5}" -f $dual2.first_instance_functional, $dual2.first_latency_s, $dual2.second_process_spawned, (($dual2.new_pids) -join ','), $dual2.new_window, $dual2.isolated_profile_written) }
-    if ($openN) { $reasons += ("open -n twice: first functional={0} ({1}s), pids 2s after open -n={2}, processes end={3}, second_instance_observed={4}" -f $openN.first_functional, $openN.first_latency_s, (($openN.pids_after_open2) -join ','), $openN.viber_process_count_end, $openN.second_instance_observed) }
+    if ($dual2) { $reasons += ("dual open -a copies: A functional={0} ({1}s), second process spawned={2} (new pids {3}), new-process window ready={4} after {5}s (max {6}), isolated-profile writes={7}" -f $dual2.first_instance_functional, $dual2.first_latency_s, $dual2.second_process_spawned, (($dual2.new_pids) -join ','), $dual2.new_window_ready, $dual2.new_window_latency_s, $dual2.new_window, $dual2.isolated_profile_written) }
+    if ($openN) { $reasons += ("open -n twice: first functional={0} ({1}s), pids 2s after open -n={2}, extra pids={3}, new-process window ready={4}, processes end={5}" -f $openN.first_functional, $openN.first_latency_s, (($openN.pids_after_open2) -join ','), (($openN.new_pids) -join ','), $openN.new_window_ready, $openN.viber_process_count_end) }
     $conclusion = 'inconclusive'
     $summary = ''
     if (-not $inst.exe_exists) {
@@ -644,6 +675,9 @@ try {
     } elseif ($usable.Count -gt 0) {
         $conclusion = 'feasible'
         $summary = 'At least one dual mechanism produced a second instance with its own window and isolated profile writes.'
+    } elseif ($dual2 -and $dual2.new_window_ready -eq $true) {
+        $conclusion = 'infeasible'
+        $summary = 'A second LaunchServices instance can reach a window, but the LaunchServices path always uses the real HOME, so its profile is not isolated and dual accounts are not separate.'
     } elseif ($dualValid.Count -eq 0) {
         $summary = 'No dual mechanism could even bring a first instance to a functional window, so the single-instance guard could not be exercised.'
     } elseif ($fakeTest -and -not $fakeOk) {
