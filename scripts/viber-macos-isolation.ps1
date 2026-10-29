@@ -56,7 +56,7 @@ function Stop-AllViber {
 }
 
 $ev = [ordered]@{
-    schema = 'haituo-fusion/viber-macos-isolation/v3'
+    schema = 'haituo-fusion/viber-macos-isolation/v4'
     generated_at_utc = (Get-UtcStamp)
     runner = [ordered]@{}
     baseline = [ordered]@{}
@@ -316,8 +316,12 @@ function Get-DarwinTempDir {
 }
 
 function Get-ViberSocketInventory([int]$TargetPid) {
-    $res = [ordered]@{ pid = $TargetPid; unix = @(); net = @(); errors = @() }
+    $res = [ordered]@{ pid = $TargetPid; unix = @(); net = @(); sensitive_files = @(); errors = @() }
     if ($TargetPid -le 0) { return $res }
+    try {
+        $r = Run-Native 'lsof' @('-a', '-p', "$TargetPid", '-Fn')
+        $res.sensitive_files = @($r.output | Where-Object { $_ -like 'n*' } | ForEach-Object { $_.Substring(1) } | Where-Object { $_ -match '(?i)keychain|Group Containers|Containers/com\.viber|Preferences/com\.viber|Saved Application State' } | Select-Object -Unique)
+    } catch { $res.errors += "lsof -F: $($_.Exception.Message)" }
     try {
         $r = Run-Native 'lsof' @('-a', '-p', "$TargetPid", '-U', '-Fn')
         $res.unix = @($r.output | Where-Object { $_ -like 'n*' } | ForEach-Object { $_.Substring(1) } | Select-Object -Unique)
@@ -355,6 +359,53 @@ function Get-ViberLockFiles {
         } catch {}
     }
     return @($res | Select-Object -Unique)
+}
+
+function Get-RealDomainPaths {
+    $c = @(
+        'Library/Preferences/com.viber.osx.plist',
+        'Library/Keychains/login.keychain-db',
+        'Library/Containers/com.viber.osx.macvibershare',
+        'Library/Group Containers',
+        'Library/Saved Application State/com.viber.osx.savedState',
+        'Library/HTTPStorages/com.viber.osx',
+        'Library/Caches/com.viber.osx',
+        'Library/Application Support/com.viber.osx',
+        'Library/Application Support/ViberPC'
+    )
+    return @($c | ForEach-Object { Join-Path $HOME $_ } | Where-Object { Test-Path $_ })
+}
+
+function Get-IsolationAudit {
+    $res = [ordered]@{ at_utc = (Get-UtcStamp); paths = @() }
+    foreach ($p in (Get-RealDomainPaths)) {
+        $res.paths += [ordered]@{ path = $p; stat = (Get-PathStat $p) }
+    }
+    return $res
+}
+
+function Compare-IsolationAudit($Before, $After) {
+    $changed = @()
+    if (-not $Before -or -not $After) { return $changed }
+    foreach ($b in $Before.paths) {
+        $a = @($After.paths | Where-Object { $_.path -eq $b.path })
+        if ($a.Count -eq 0) { continue }
+        if (Test-StatWrote $b.stat $a[0].stat) { $changed += $b.path }
+    }
+    return @($changed)
+}
+
+function Get-ProfileManifest([string]$homeRoot) {
+    $root = Join-Path $homeRoot 'Library/Application Support/ViberPC'
+    if (-not (Test-Path $root)) { return [ordered]@{ root = $root; exists = $false; files = 0; digest = $null; top = @() } }
+    $files = @(Get-ChildItem $root -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($root.Length + 1) + '|' + $_.Length } | Sort-Object)
+    $digest = $null
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($files -join "`n"))
+        $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLower()
+    } catch {}
+    return [ordered]@{ root = $root; exists = $true; files = $files.Count; digest = $digest; top = @($files | Select-Object -First 15) }
 }
 
 function Read-LogTail([string]$path, [int]$lines) {
@@ -693,6 +744,7 @@ function Invoke-DualEnvTest {
     $t.temp_before = Get-TempViberItems
     $t.real_viber_before = [ordered]@{}
     foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_before[$p] = Get-PathStat $p }
+    $t.isolation_before = Get-IsolationAudit
     $pA = $null; $pB = $null
     try {
         $wdA = if ($homeA) { $homeA } else { $tdir }
@@ -742,6 +794,11 @@ function Invoke-DualEnvTest {
         $t.real_viber_after = [ordered]@{}
         foreach ($p in (Get-ViberDataPaths)) { $t.real_viber_after[$p] = Get-PathStat $p }
         $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
+        $t.isolation_after = Get-IsolationAudit
+        $t.real_domain_changed = @(Compare-IsolationAudit $t.isolation_before $t.isolation_after)
+        if ($homeA) { $t.manifest_a = Get-ProfileManifest $homeA }
+        if ($homeB) { $t.manifest_b = Get-ProfileManifest $homeB }
+        $t.profiles_distinct = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.digest -and $t.manifest_b.digest -and ($t.manifest_a.digest -ne $t.manifest_b.digest))
         Stop-ProcQuiet $pA
         Stop-ProcQuiet $pB
         Stop-AllViber
@@ -752,6 +809,97 @@ function Invoke-DualEnvTest {
     $t.b_own_profile_written = $ownB
     $t.second_instance_usable = ($t.a_window -eq $true) -and ($t.b_window -eq $true) -and $ownB -and ($t.a_alive_end -eq $true)
     Write-Host ("[{0}] a_window={1} b_window={2} b_primary={3} own_profile_b={4} usable={5}" -f $name, $t.a_window, $t.b_window, $t.b_primary, $ownB, $t.second_instance_usable)
+    return $t
+}
+
+function Get-SystemMemoryInfo {
+    $res = [ordered]@{}
+    try { $res.total_bytes = [int64]((@(& sysctl -n hw.memsize 2>$null) -join '').Trim()) } catch {}
+    try { $res.ncpu = [int](@(& sysctl -n hw.ncpu 2>$null) | Select-Object -First 1) } catch {}
+    try { $res.swap = (@(& sysctl -n vm.swapusage 2>$null) -join '') } catch {}
+    try { $res.vm_stat = @(& vm_stat 2>$null | Select-Object -First 8) } catch {}
+    return $res
+}
+
+function Get-RssMap([int[]]$Pids) {
+    $map = @{}
+    if (-not $Pids -or $Pids.Count -eq 0) { return $map }
+    $r = Run-Native 'ps' @('-o', 'pid=,rss=,%cpu=,etime=', '-p', ($Pids -join ','))
+    foreach ($line in @($r.output)) {
+        $parts = @([string]$line -split '\s+' | Where-Object { $_ -ne '' })
+        if ($parts.Count -ge 2) {
+            $tp = [int]$parts[0]
+            $map[$tp] = [ordered]@{
+                rss_kb = [int]$parts[1]
+                cpu    = $(if ($parts.Count -ge 3) { $parts[2] } else { $null })
+                etime  = $(if ($parts.Count -ge 4) { $parts[3] } else { $null })
+            }
+        }
+    }
+    return $map
+}
+
+function Invoke-CapacityTest([string]$exe, [int]$MaxInstances = 8) {
+    Stop-AllViber
+    $t = [ordered]@{
+        name = 'capacity-sweep'
+        mechanism = 'N instances added one at a time, each direct exec with its own HOME + CFFIXED_USER_HOME + TMPDIR'
+        started_at_utc = (Get-UtcStamp)
+        system = (Get-SystemMemoryInfo)
+        steps = @()
+        errors = @()
+    }
+    $procs = @()
+    for ($n = 1; $n -le $MaxInstances; $n++) {
+        $step = [ordered]@{ n = $n; started_at_utc = (Get-UtcStamp); errors = @() }
+        $home = Join-Path $work ("cap_home_{0}" -f $n)
+        $tmp = Join-Path $work ("cap_tmp_{0}" -f $n)
+        New-FakeHome $home
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        try {
+            $p = Start-AppWithEnv $exe @{ HOME = $home; CFFIXED_USER_HOME = $home; TMPDIR = $tmp } $home (Join-Path $work ("cap_{0}" -f $n))
+            $procs += $p
+            $step.pid = $p.Id
+            $w = Wait-ForWindow -TimeoutSec 120 -WaitPid $p.Id
+            $step.window = $w.ready
+            $step.window_latency_s = $w.latency_s
+            $step.window_max = Get-PidWindowsMax $w.samples $p.Id
+            Start-Sleep -Seconds 5
+            $allPids = @(Get-Pids 'Contents/MacOS/Viber')
+            $win = Get-WindowCounts $allPids
+            $rss = Get-RssMap $allPids
+            $step.processes = @($allPids | ForEach-Object {
+                $x = $rss[[int]$_]
+                [ordered]@{
+                    pid = [int]$_
+                    windows = $win[[int]$_]
+                    rss_kb = $(if ($x) { $x.rss_kb } else { $null })
+                    cpu = $(if ($x) { $x.cpu } else { $null })
+                    etime = $(if ($x) { $x.etime } else { $null })
+                }
+            })
+            $sum = 0
+            foreach ($pr in $step.processes) { if ($pr.rss_kb) { $sum += [int]$pr.rss_kb } }
+            $step.total_rss_kb = $sum
+            $step.process_count = $step.processes.Count
+            $step.system = Get-SystemMemoryInfo
+        } catch { $step.errors += $_.Exception.Message }
+        $t.steps += $step
+        Save-Evidence
+        Write-Host ("[capacity n={0}] window={1} procs={2} total_rss_mb={3}" -f $n, $step.window, $step.process_count, [math]::Round($step.total_rss_kb / 1024, 1))
+        if ($step.window -ne $true) { break }
+        if ($step.total_rss_kb -gt 5 * 1024 * 1024) { break }
+    }
+    $t.max_instances_with_window = @($t.steps | Where-Object { $_.window -eq $true }).Count
+    if ($t.steps.Count -gt 0) {
+        $last = $t.steps[-1]
+        if ($last.total_rss_kb -gt 0 -and $last.process_count -gt 0) {
+            $t.rss_per_instance_mb = [math]::Round(($last.total_rss_kb / 1024) / $last.process_count, 1)
+        }
+    }
+    foreach ($p in $procs) { Stop-ProcQuiet $p }
+    Stop-AllViber
+    Write-Host ("[capacity] max_with_window={0} rss_per_instance_mb={1}" -f $t.max_instances_with_window, $t.rss_per_instance_mb)
     return $t
 }
 
@@ -790,6 +938,8 @@ if ($inst.exe_exists) {
         $r = Invoke-DualEnvTest -exeA $inst.exeA -exeB $inst.exeB -name 'dual-full-isolation' -mechanism 'both instances direct exec with separate HOME + CFFIXED_USER_HOME + TMPDIR' -envA @{ HOME = $fullHomeA; CFFIXED_USER_HOME = $fullHomeA; TMPDIR = $fullTmpA } -envB @{ HOME = $fullHomeB; CFFIXED_USER_HOME = $fullHomeB; TMPDIR = $fullTmpB } -homeA $fullHomeA -homeB $fullHomeB -tmpA $fullTmpA -tmpB $fullTmpB
         if ($r) { $ev.launch_tests += $r }
     } catch { $ev.errors += "dual-full-isolation: $($_.Exception.Message)" }
+    Save-Evidence
+    try { $r = Invoke-CapacityTest $inst.exeA 8; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "capacity: $($_.Exception.Message)" }
     Save-Evidence
 } else {
     $ev.install.errors += 'skipping launch tests: staged executable missing'
@@ -915,6 +1065,19 @@ try {
     if ($ev.guard_object -and $ev.guard_object.sockets) {
         $reasons += ("guard inventory: unix sockets={0} | tcp endpoints={1} | candidate guard files present={2}" -f ((@($ev.guard_object.sockets.unix)) -join ', '), ((@($ev.guard_object.sockets.net)) -join ', '), ((@($ev.guard_object.present | ForEach-Object { $_.path })) -join ', '))
     }
+    if ($fullSep -and $fullSep.isolation_before) {
+        $da = 'n/a'; $db = 'n/a'
+        if ($fullSep.manifest_a -and $fullSep.manifest_a.digest) { $da = $fullSep.manifest_a.digest.ToString().Substring(0, 12) }
+        if ($fullSep.manifest_b -and $fullSep.manifest_b.digest) { $db = $fullSep.manifest_b.digest.ToString().Substring(0, 12) }
+        $sfA = 0; $sfB = 0
+        if ($fullSep.sockets_a -and $fullSep.sockets_a.sensitive_files) { $sfA = @($fullSep.sockets_a.sensitive_files).Count }
+        if ($fullSep.sockets_b -and $fullSep.sockets_b.sensitive_files) { $sfB = @($fullSep.sockets_b.sensitive_files).Count }
+        $reasons += ("isolation audit (full separation): real-domain paths changed={0} | A files={1} B files={2} | profile digests distinct={3} (A={4}, B={5}) | sensitive files opened A={6} B={7}" -f ((@($fullSep.real_domain_changed)) -join ', '), $fullSep.manifest_a.files, $fullSep.manifest_b.files, $fullSep.profiles_distinct, $da, $db, $sfA, $sfB)
+    }
+    $cap = & $get 'capacity-sweep'
+    if ($cap) {
+        $reasons += ("capacity sweep: max instances with window={0} of {1} attempted; rss per instance≈{2} MB; runner RAM={3} bytes, cpus={4}; steps={5}" -f $cap.max_instances_with_window, $cap.steps.Count, $cap.rss_per_instance_mb, $cap.system.total_bytes, $cap.system.ncpu, ((@($cap.steps | ForEach-Object { "n=$($_.n):win=$($_.window),procs=$($_.process_count),rss_mb=$([math]::Round($_.total_rss_kb/1024,1))" })) -join '; '))
+    }
     $conclusion = 'inconclusive'
     $summary = ''
     if (-not $inst.exe_exists) {
@@ -953,6 +1116,10 @@ try {
         usable_second_instances = $usable.Count
         primary_second_instances = $prim.Count
         guard_inventory_collected = [bool]($ev.guard_object -and $ev.guard_object.Contains('sockets'))
+        isolation_profiles_distinct = $(if ($fullSep) { $fullSep.profiles_distinct } else { $null })
+        isolation_real_domain_changed = $(if ($fullSep) { @($fullSep.real_domain_changed) } else { @() })
+        capacity_max_instances_with_window = $(if ($cap) { $cap.max_instances_with_window } else { $null })
+        capacity_rss_per_instance_mb = $(if ($cap) { $cap.rss_per_instance_mb } else { $null })
     }
 } catch {
     $ev.errors += "verdict: $($_.Exception.Message)"
