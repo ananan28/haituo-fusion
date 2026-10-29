@@ -246,6 +246,7 @@ function Get-LockAnalysis([int[]]$pids) {
     $lock = [ordered]@{ collected_at_utc = (Get-UtcStamp); methodology_self_check = $null; mutant_type_index = $null; viber_named_mutexes = @(); viber_named_pipes = @(); errors = @() }
     $filterPids = @($pids | Where-Object { $_ } | Select-Object -Unique)
     $filterPids += $PID
+    $lock.filter_pids = $filterPids
     try {
         # named pipes
         try {
@@ -254,39 +255,44 @@ function Get-LockAnalysis([int[]]$pids) {
 
         # self-check marker: create BEFORE enumeration so it must appear in results
         $marker = New-Object System.Threading.Mutex($true, 'HaituoProbeTypeMarkerMutex')
-        $markerHandle = $marker.SafeWaitHandle.DangerousGetHandle()
-
         $names = [System.Collections.Generic.List[string]]::new()
         $mutantIndex = $null
-        $self = [HaituoProbe.Nt]::GetCurrentProcess()
-        $len = [uint32]0
-        $buf = [IntPtr]::Zero
-        $st = -1
-        for ($retry = 0; $retry -lt 4; $retry++) {
-            [void][HaituoProbe.Nt]::NtQuerySystemInformation(64, [IntPtr]::Zero, 0, [ref]$len)
-            if ($len -le 0) { break }
-            $buf = [Runtime.InteropServices.Marshal]::AllocHGlobal([int]$len)
-            $st = [HaituoProbe.Nt]::NtQuerySystemInformation(64, $buf, $len, [ref]$len)
-            if ($st -eq 0) { break }
-            [Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
-            $buf = [IntPtr]::Zero
-            $len = $len + 0x10000
-        }
-        if ($buf -eq [IntPtr]::Zero) { throw "SystemExtendedHandleInformation failed status 0x{0:X8}" -f $st }
+        $enum = [ordered]@{ attempts = 0; entries = 0; buffer_bytes = 0 }
+        $lock.enumeration = $enum
         try {
-            $st = [HaituoProbe.Nt]::NtQuerySystemInformation(64, $buf, $len, [ref]$len)
-            if ($st -ne 0) { throw "SystemExtendedHandleInformation status 0x{0:X8}" -f $st }
-            $n = [Runtime.InteropServices.Marshal]::ReadInt32($buf)
-            $cur = [IntPtr]::Add($buf, [IntPtr]::Size)
+            $markerHandle = $marker.SafeWaitHandle.DangerousGetHandle()
+            $self = [HaituoProbe.Nt]::GetCurrentProcess()
+            $len = [uint32]0
+            $size = [int64]1048576
+            $buf = [IntPtr]::Zero
+            $st = -1
+            # zero-length size query reports a bogus tiny value (observed 56), so start with a real buffer;
+            # each STATUS_INFO_LENGTH_MISMATCH (0xC0000004) returns the required size -> retry with that + 1MB slack
+            for ($retry = 0; $retry -lt 8; $retry++) {
+                $enum.attempts = $retry + 1
+                $buf = [Runtime.InteropServices.Marshal]::AllocHGlobal([int]$size)
+                $st = [HaituoProbe.Nt]::NtQuerySystemInformation(64, $buf, [uint32]$size, [ref]$len)
+                if ($st -eq 0) { break }
+                [Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
+                $buf = [IntPtr]::Zero
+                $size = if ($len -gt 0) { [int64]$len + 1048576 } else { [int64]$size * 2 }
+            }
+            if ($buf -eq [IntPtr]::Zero) { throw ("SystemExtendedHandleInformation failed status 0x{0:X8}" -f $st) }
+            $enum.buffer_bytes = [int64]$size
+            try {
+                $n = [Runtime.InteropServices.Marshal]::ReadInt64($buf)
+                $enum.entries = [int64]$n
+                # SYSTEM_HANDLE_INFORMATION_EX header = NumberOfHandles + Reserved (2 x ULONG_PTR = 16 bytes on x64)
+                $cur = [IntPtr]::Add($buf, 16)
             $entrySize = [Runtime.InteropServices.Marshal]::SizeOf([type][HaituoProbe.Nt+SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX])
-            for ($k = 0; $k -lt $n -and $names.Count -lt 300; $k++) {
+            for ($k = 0; $k -lt $n; $k++) {
                 $e = [Runtime.InteropServices.Marshal]::PtrToStructure($cur, [type][HaituoProbe.Nt+SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX])
-                $ePid = [uint32]$e.UniqueProcessId
+                $ePid = [uint32]($e.UniqueProcessId.ToInt64() -band 0xFFFFFFFF)
                 # discover Mutant type index by matching our own marker handle value
-                if ($mutantIndex -eq $null -and $ePid -eq [uint32]$PID -and ([int64]$e.HandleValue) -eq ([int64]$markerHandle)) {
+                if ($mutantIndex -eq $null -and $ePid -eq $PID -and $e.HandleValue.ToInt64() -eq $markerHandle.ToInt64()) {
                     $mutantIndex = [uint16]$e.ObjectTypeIndex
                 }
-                if ($filterPids -contains $ePid -and $mutantIndex -ne $null -and $e.ObjectTypeIndex -eq $mutantIndex) {
+                if ($filterPids -contains $ePid -and $mutantIndex -ne $null -and $e.ObjectTypeIndex -eq $mutantIndex -and $names.Count -lt 5000) {
                     $src = [HaituoProbe.Nt]::OpenProcess(0x0040, $false, $ePid)
                     if ($src -ne [IntPtr]::Zero) {
                         $dup = [IntPtr]::Zero
@@ -311,14 +317,16 @@ function Get-LockAnalysis([int[]]$pids) {
                 }
                 $cur = [IntPtr]::Add($cur, $entrySize)
             }
+            } finally {
+                [Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
+            }
         } finally {
-            [Runtime.InteropServices.Marshal]::FreeHGlobal($buf)
+            $marker.Close()
         }
         $lock.mutant_type_index = $mutantIndex
         $lock.methodology_self_check = (@($names | Where-Object { $_ -match 'HaituoProbeTypeMarkerMutex' }).Count -gt 0)
-        $marker.Close()
 
-        $viberNames = @($names | Where-Object { $_ -match 'viber' })
+        $viberNames = @($names | Where-Object { $_ -match 'viber' } | Select-Object -Unique)
         $lock.viber_named_mutexes = $viberNames
         $byPid = @{}
         foreach ($nm in $viberNames) {
