@@ -120,6 +120,8 @@ function Get-ExeCandidates {
 $pre = @(Get-Process -Name Viber -ErrorAction SilentlyContinue)
 $ev.baseline.viber_processes_before = $pre.Count
 $ev.baseline.viber_exe_preinstalled = (Get-ExeCandidates)
+try { $ev.baseline.viber_named_pipes_before = @([System.IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -match 'viber' }) }
+catch { $ev.baseline.viber_named_pipes_before = @() }
 Save-Evidence
 
 # ---------- download ----------
@@ -243,7 +245,7 @@ Save-Evidence
 
 # ---------- lock analysis (named pipes + named mutexes, live PIDs) ----------
 function Get-LockAnalysis([int[]]$pids) {
-    $lock = [ordered]@{ collected_at_utc = (Get-UtcStamp); methodology_self_check = $null; mutant_type_index = $null; viber_named_mutexes = @(); viber_named_pipes = @(); errors = @() }
+    $lock = [ordered]@{ collected_at_utc = (Get-UtcStamp); methodology_self_check = $null; mutant_type_index = $null; viber_named_mutexes = @(); named_mutex_count = 0; named_mutexes_by_probe_pids = @(); viber_named_pipes = @(); errors = @() }
     $filterPids = @($pids | Where-Object { $_ } | Select-Object -Unique)
     $filterPids += $PID
     $lock.filter_pids = $filterPids
@@ -328,6 +330,10 @@ function Get-LockAnalysis([int[]]$pids) {
 
         $viberNames = @($names | Where-Object { $_ -match 'viber' } | Select-Object -Unique)
         $lock.viber_named_mutexes = $viberNames
+        $probePid = [string]$PID
+        $allProbeNames = @($names | Where-Object { $_ -notmatch ("^{0}:" -f $probePid) } | Select-Object -Unique)
+        $lock.named_mutex_count = $allProbeNames.Count
+        $lock.named_mutexes_by_probe_pids = @($allProbeNames | Select-Object -First 100)
         $byPid = @{}
         foreach ($nm in $viberNames) {
             $parts = $nm -split ':', 2
@@ -345,7 +351,7 @@ function Get-LockAnalysis([int[]]$pids) {
                 if ($allHave) { $shared = $nm2; break }
             }
         }
-        $lock.interpretation = if ($viberNames.Count -eq 0) { 'no Viber-named mutexes found in probe process handle tables' }
+        $lock.interpretation = if ($viberNames.Count -eq 0) { "no Viber-named mutexes among {0} named mutexes held by probe PIDs; Viber-named pipes: {1}" -f $lock.named_mutex_count, $lock.viber_named_pipes.Count }
             elseif ($shared) { "at least one shared mutex name across instances: '$shared' (shared locks do not prevent concurrent survival)" }
             else { 'only per-instance or unrelated Viber-named mutexes found' }
     } catch {
