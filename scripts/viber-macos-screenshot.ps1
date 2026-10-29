@@ -50,8 +50,11 @@ $ev = [ordered]@{
     runner = [ordered]@{}
     download = [ordered]@{}
     install = [ordered]@{}
+    launch = [ordered]@{ a = $null; b = $null }
     windows = @()
+    picked_windows = @()
     captures = @()
+    files = @()
     errors = @()
 }
 
@@ -164,17 +167,29 @@ $hB = Join-Path $work 'shot_home_b'; $tB = Join-Path $work 'shot_tmp_b'
 foreach ($h in @($hA, $hB)) { New-FakeHome $h }
 foreach ($d in @($tA, $tB)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
-$pA = Start-AppWithEnv $exeA @{ HOME = $hA; CFFIXED_USER_HOME = $hA; TMPDIR = $tA } $hA (Join-Path $work 'A')
-$wa = Wait-ForPidWindow $pA.Id 180
-$ev.launch.a = [ordered]@{ pid = $pA.Id; ready = $wa.ready; latency_s = $wa.latency_s; windows = $wa.windows }
+$pA = $null
+try {
+    $pA = Start-AppWithEnv $exeA @{ HOME = $hA; CFFIXED_USER_HOME = $hA; TMPDIR = $tA } $hA (Join-Path $work 'A')
+    $wa = Wait-ForPidWindow $pA.Id 180
+    Write-Host ("[A] pid={0} ready={1} windows={2} latency={3}s" -f $pA.Id, $wa.ready, @($wa.windows).Count, $wa.latency_s)
+    $ev.launch['a'] = [ordered]@{ pid = $pA.Id; ready = $wa.ready; latency_s = $wa.latency_s; windows = $wa.windows }
+} catch {
+    $ev.errors += "launch A: $($_.Exception.Message)"
+    Write-Host ("[A] launch failed: {0}" -f $_.Exception.Message)
+}
 Save-Evidence
-Write-Host ("[A] pid={0} ready={1} windows={2}" -f $pA.Id, $wa.ready, @($wa.windows).Count)
 
-$pB = Start-AppWithEnv $exeB @{ HOME = $hB; CFFIXED_USER_HOME = $hB; TMPDIR = $tB } $hB (Join-Path $work 'B')
-$wb = Wait-ForPidWindow $pB.Id 180
-$ev.launch.b = [ordered]@{ pid = $pB.Id; ready = $wb.ready; latency_s = $wb.latency_s; windows = $wb.windows }
+$pB = $null
+try {
+    $pB = Start-AppWithEnv $exeB @{ HOME = $hB; CFFIXED_USER_HOME = $hB; TMPDIR = $tB } $hB (Join-Path $work 'B')
+    $wb = Wait-ForPidWindow $pB.Id 180
+    Write-Host ("[B] pid={0} ready={1} windows={2} latency={3}s" -f $pB.Id, $wb.ready, @($wb.windows).Count, $wb.latency_s)
+    $ev.launch['b'] = [ordered]@{ pid = $pB.Id; ready = $wb.ready; latency_s = $wb.latency_s; windows = $wb.windows }
+} catch {
+    $ev.errors += "launch B: $($_.Exception.Message)"
+    Write-Host ("[B] launch failed: {0}" -f $_.Exception.Message)
+}
 Save-Evidence
-Write-Host ("[B] pid={0} ready={1} windows={2}" -f $pB.Id, $wb.ready, @($wb.windows).Count)
 
 Start-Sleep -Seconds 12
 $all = @(Get-Pids 'Contents/MacOS/Viber')
@@ -196,7 +211,10 @@ function Save-Capture([string]$label, [string[]]$args, [string]$file) {
 Save-Capture 'full-screen' @('-x', '-t', 'png') (Join-Path $outDir 'viber-two-instances-full.png')
 
 $picks = @()
-foreach ($pair in @(@{ tag = 'A'; pid = $pA.Id }, @{ tag = 'B'; pid = $pB.Id })) {
+$pairs = @()
+if ($pA) { $pairs += @{ tag = 'A'; pid = $pA.Id } }
+if ($pB) { $pairs += @{ tag = 'B'; pid = $pB.Id } }
+foreach ($pair in $pairs) {
     $w = @($ev.windows | Where-Object { $_.pid -eq $pair.pid -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending)
     if ($w.Count -gt 0) { $picks += [ordered]@{ tag = $pair.tag; pid = $pair.pid; window = $w[0] } }
 }
@@ -210,8 +228,8 @@ $ev.pid_alive_at_end = @($all | ForEach-Object { $_ })
 $ev.files = @(Get-ChildItem $outDir -Filter '*.png' -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ name = $_.Name; bytes = $_.Length } })
 Save-Evidence
 
-Stop-Process -Id $pA.Id -Force -ErrorAction SilentlyContinue
-Stop-Process -Id $pB.Id -Force -ErrorAction SilentlyContinue
+if ($pA) { Stop-Process -Id $pA.Id -Force -ErrorAction SilentlyContinue }
+if ($pB) { Stop-Process -Id $pB.Id -Force -ErrorAction SilentlyContinue }
 Stop-AllViber
 try { Run-Native 'hdiutil' @('detach', $mnt, '-force') | Out-Null } catch {}
 Write-Host ("captures: {0}" -f (($ev.captures | ForEach-Object { "$($_.label)=$($_.exit_code)/$($_.bytes)" }) -join ', '))
