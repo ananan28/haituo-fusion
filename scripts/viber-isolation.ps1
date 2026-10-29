@@ -475,6 +475,13 @@ function Invoke-SeparateUserTest {
     $p2 = $null
 
     try {
+        # copy install dir to a location the second user can read/execute
+        $publicCopy = Join-Path "$env:SystemDrive\Users\Public" 'viber-probe-copy'
+        Copy-Item -Path (Split-Path $exe) -Destination $publicCopy -Recurse -Force
+        $exeB = Join-Path $publicCopy 'Viber.exe'
+        $t.exe_copy_for_userB = $exeB
+        $t.exe_copy_exists = (Test-Path $exeB)
+
         Get-Process -Name Viber -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         & net.exe user $uname $upass /add 2>&1 | Out-Null
@@ -497,7 +504,7 @@ function Invoke-SeparateUserTest {
         $sec = ConvertTo-SecureString $upass -AsPlainText -Force
         $cred = New-Object System.Management.Automation.PSCredential($uname, $sec)
         try {
-            $p2 = Start-Process -FilePath $exe -Credential $cred -WorkingDirectory (Split-Path $exe) -PassThru
+            $p2 = Start-Process -FilePath $exeB -Credential $cred -WorkingDirectory (Split-Path $exeB) -PassThru
             $t.procB_pid = $p2.Id
             $t.procB_launch = 'ok'
         } catch {
