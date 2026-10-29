@@ -1,0 +1,23 @@
+name: Viber macOS screenshot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launch two isolated instances and capture the screen
+        shell: pwsh
+        run: ./scripts/viber-macos-screenshot.ps1
+      - name: Print evidence JSON
+        if: always()
+        shell: pwsh
+        run: Get-Content audit-results/viber-macos-screenshot.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-macos-screenshot
+          path: audit-results/
