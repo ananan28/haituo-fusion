@@ -187,10 +187,14 @@ if (-not $exe -and $dl.installer_path -and $dl.official_signature) {
     $inst.installer_kind = $ext
     if ($ext -eq '.exe') {
         Write-Host 'installing bootstrapper with /S ...'
-        $p = Start-Process -FilePath $dl.installer_path -ArgumentList '/S' -PassThru
-        $waited = $p.WaitForExit(300000)
-        if (-not $waited) { $p.Kill() }
-        $inst.attempts += [ordered]@{ kind = 'exe-silent-/S'; exit_code = $p.ExitCode; timed_out = (-not $waited) }
+        try {
+            $p = Start-Process -FilePath $dl.installer_path -ArgumentList '/S' -PassThru
+            $waited = $p.WaitForExit(120000)
+            if (-not $waited) { $p.Kill() }
+            $inst.attempts += [ordered]@{ kind = 'exe-silent-/S'; exit_code = $p.ExitCode; timed_out = (-not $waited) }
+        } catch {
+            $inst.attempts += [ordered]@{ kind = 'exe-silent-/S'; error = $_.Exception.Message }
+        }
         $exe = Get-ExeCandidates
         if (-not $exe) {
             $deadline = (Get-Date).AddSeconds(120)
@@ -199,8 +203,12 @@ if (-not $exe -and $dl.installer_path -and $dl.official_signature) {
     }
     if (-not $exe -and $ext -eq '.msi') {
         Write-Host 'installing MSI with msiexec /qn ...'
-        $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"{0}"' -f $dl.installer_path), '/qn', '/norestart') -Wait -PassThru
-        $inst.attempts += [ordered]@{ kind = 'msi-/qn'; exit_code = $p.ExitCode }
+        try {
+            $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"{0}"' -f $dl.installer_path), '/qn', '/norestart') -Wait -PassThru
+            $inst.attempts += [ordered]@{ kind = 'msi-/qn'; exit_code = $p.ExitCode }
+        } catch {
+            $inst.attempts += [ordered]@{ kind = 'msi-/qn'; error = $_.Exception.Message }
+        }
         $exe = Get-ExeCandidates
     }
 }
@@ -214,8 +222,12 @@ if (-not $exe -and $dl.installer_path -and $dl.official_signature) {
         $msig = Get-AuthenticodeSignature $msi
         $inst.msi_fallback_signature = [ordered]@{ status = [string]$msig.Status; subject = if ($msig.SignerCertificate) { $msig.SignerCertificate.Subject } else { $null } }
         if ($msig.Status -eq 'Valid' -and $msig.SignerCertificate.Subject -match 'Viber') {
-            $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"{0}"' -f $msi), '/qn', '/norestart') -Wait -PassThru
-            $inst.msi_fallback_exit_code = $p.ExitCode
+            try {
+                $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"{0}"' -f $msi), '/qn', '/norestart') -Wait -PassThru
+                $inst.msi_fallback_exit_code = $p.ExitCode
+            } catch {
+                $inst.msi_fallback_error = $_.Exception.Message
+            }
             $exe = Get-ExeCandidates
         }
     }
