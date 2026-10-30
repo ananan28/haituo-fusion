@@ -14,7 +14,7 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
    const partition='persist:caisheng-whatsapp-startup-fixture-'+Date.now()+'-'+slot,url='https://web.whatsapp.com/haituo-startup-fixture?slot='+slot,guestSession=session.fromPartition(partition);
    guestSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
    guestSession.protocol.handle('https',request=>{
-    if(new URL(request.url).pathname==='/slow.png')return new Promise(resolve=>{const timer=setTimeout(()=>{slowTimers.delete(timer);resolve(new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'),{headers:{'content-type':'image/png'}}))},16000);slowTimers.add(timer)});
+    if(new URL(request.url).pathname==='/slow.png')return new Promise(resolve=>{const timer=setTimeout(()=>{slowTimers.delete(timer);resolve(new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'),{headers:{'content-type':'image/png'}}))},60000);slowTimers.add(timer)});
     return new Response('<!doctype html><html><body><div id="main">Guest startup fixture '+slot+'</div><script>window.firstScript={hooksReady:window.__haituoWACreationHooks===true,nodeIntegration:typeof require};</script>'+(slot===0?'<img src="/slow.png">':'')+'</body></html>',{headers:{'content-type':'text/html'}});
    });
    bootstrap.installSession(guestSession,url);fixtures.set(partition,{slot,url});
