@@ -8,13 +8,14 @@ struct Account: Identifiable, Codable, Equatable {
     var id: String
     var name: String
     var note: String
+    var proxy: String
     var selected: Bool
     var desired: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, note, selected, desired, enabled }
+    enum CodingKeys: String, CodingKey { case id, name, note, proxy, selected, desired, enabled }
 
-    init(id: String, name: String, note: String, selected: Bool = false, desired: Bool = false) {
-        self.id = id; self.name = name; self.note = note; self.selected = selected; self.desired = desired
+    init(id: String, name: String, note: String, proxy: String = "", selected: Bool = false, desired: Bool = false) {
+        self.id = id; self.name = name; self.note = note; self.proxy = proxy; self.selected = selected; self.desired = desired
     }
 
     init(from decoder: Decoder) throws {
@@ -22,6 +23,7 @@ struct Account: Identifiable, Codable, Equatable {
         id = try c.decode(String.self, forKey: .id)
         name = (try? c.decode(String.self, forKey: .name)) ?? "账号"
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        proxy = (try? c.decode(String.self, forKey: .proxy)) ?? ""
         selected = (try? c.decode(Bool.self, forKey: .selected)) ?? (try? c.decode(Bool.self, forKey: .enabled)) ?? false
         desired = (try? c.decode(Bool.self, forKey: .desired)) ?? false
     }
@@ -31,6 +33,7 @@ struct Account: Identifiable, Codable, Equatable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(note, forKey: .note)
+        try c.encode(proxy, forKey: .proxy)
         try c.encode(selected, forKey: .selected)
         try c.encode(desired, forKey: .desired)
     }
@@ -239,6 +242,14 @@ final class Store: ObservableObject {
         env["HOME"] = home.path
         env["CFFIXED_USER_HOME"] = home.path
         env["TMPDIR"] = tmp.path + "/"
+        if !a.proxy.isEmpty {
+            env["HTTP_PROXY"] = a.proxy
+            env["HTTPS_PROXY"] = a.proxy
+            env["ALL_PROXY"] = a.proxy
+            env["http_proxy"] = a.proxy
+            env["https_proxy"] = a.proxy
+            env["all_proxy"] = a.proxy
+        }
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: viberPath)
@@ -476,6 +487,7 @@ struct ContentView: View {
                 Text("选").frame(width: 22)
                 Text("账号").frame(width: 120, alignment: .leading)
                 Text("备注").frame(maxWidth: .infinity, alignment: .leading)
+                Text("代理").frame(width: 130, alignment: .leading)
                 Text("状态").frame(width: 44)
                 Text("操作").frame(width: 56)
             }
@@ -488,6 +500,8 @@ struct ContentView: View {
                         Toggle("", isOn: $a.selected).labelsHidden().frame(width: 22)
                         TextField("账号名", text: $a.name).textFieldStyle(.plain).frame(width: 120)
                         TextField("备注（手机号 / 用途）", text: $a.note).textFieldStyle(.plain).foregroundColor(.secondary)
+                        TextField("代理(可选)", text: $a.proxy).textFieldStyle(.plain).foregroundColor(.secondary).frame(width: 130)
+                            .help("填代理地址（如 http://127.0.0.1:7890 或 socks5://…）；留空则走系统网络/VPN")
                         Circle()
                             .fill(store.status[a.id] == true ? Color.green : Color.gray.opacity(0.45))
                             .frame(width: 8, height: 8)
