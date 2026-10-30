@@ -1,0 +1,36 @@
+name: Viber launcher end-to-end
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'launcher/**'
+      - 'scripts/viber-launcher-e2e.sh'
+      - 'scripts/windowcount.swift'
+      - '.github/workflows/viber-launcher-e2e.yml'
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run launcher end-to-end
+        shell: bash
+        run: |
+          chmod +x scripts/viber-launcher-e2e.sh
+          ./scripts/viber-launcher-e2e.sh
+      - name: Print evidence
+        if: always()
+        shell: bash
+        run: cat audit-results/launcher-e2e.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: launcher-e2e
+          path: |
+            audit-results/launcher-e2e.json
+            audit-results/e2e-run.log
+            launcher-e2e.png
+          if-no-files-found: warn

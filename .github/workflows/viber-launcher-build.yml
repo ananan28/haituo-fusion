@@ -1,0 +1,79 @@
+name: Viber multi-account launcher build
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/viber-launcher-build.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        shell: bash
+        run: swiftc --version && sw_vers
+      - name: Build app bundle + dmg
+        shell: bash
+        run: |
+          chmod +x launcher/build.sh
+          ./launcher/build.sh
+      - name: Verify bundle and dmg
+        shell: bash
+        run: |
+          set -e
+          APP=launcher/build/ViberLauncher.app
+          test -x "$APP/Contents/MacOS/ViberLauncher"
+          file "$APP/Contents/MacOS/ViberLauncher"
+          codesign -dv "$APP" 2>&1 | head -5
+          plutil -lint "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist"
+          ls -lh launcher/ViberLauncher.dmg launcher/ViberLauncher.zip
+          hdiutil verify launcher/ViberLauncher.dmg
+          hdiutil imageinfo launcher/ViberLauncher.dmg | head -12
+      - name: Mount dmg and check layout
+        shell: bash
+        run: |
+          set -e
+          MP=$(mktemp -d)
+          hdiutil attach launcher/ViberLauncher.dmg -nobrowse -readonly -mountpoint "$MP" >/dev/null
+          ls -la "$MP"
+          test -x "$MP/ViberLauncher.app/Contents/MacOS/ViberLauncher"
+          test -L "$MP/Applications"
+          plutil -lint "$MP/ViberLauncher.app/Contents/Info.plist"
+          hdiutil detach "$MP" >/dev/null
+      - name: Smoke test GUI on desktop
+        shell: bash
+        run: |
+          set -e
+          APP=launcher/build/ViberLauncher.app
+          "$APP/Contents/MacOS/ViberLauncher" >/tmp/launcher.stdout 2>/tmp/launcher.stderr &
+          sleep 10
+          pgrep -lf ViberLauncher || { echo "launcher process died"; cat /tmp/launcher.stderr; exit 1; }
+          echo "--- state file ---"
+          cat "$HOME/ViberMulti/accounts.json" || true
+          echo "--- windows ---"
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' || true
+          sleep 2
+          screencapture -x launcher-gui.png
+          ls -lh launcher-gui.png
+          pkill -f 'ViberLauncher.app/Contents/MacOS/ViberLauncher' || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-gui-screenshot
+          path: launcher-gui.png
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ViberLauncher-dmg
+          path: launcher/ViberLauncher.dmg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ViberLauncher-app-zip
+          path: launcher/ViberLauncher.zip
+          if-no-files-found: error
