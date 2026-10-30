@@ -70,7 +70,7 @@ jobs:
         if: matrix.target == 'macos'
         shell: bash
         run: |
-          swiftc -parse-as-library -O src/app/native/haituo-screen-capture.swift -o "$RUNNER_TEMP/haituo-screen-capture"
+          swiftc -parse-as-library -O -target arm64-apple-macos13.0 src/app/native/haituo-screen-capture.swift -o "$RUNNER_TEMP/haituo-screen-capture"
           "$RUNNER_TEMP/haituo-screen-capture" --probe
       - name: Build diagnostic candidate
         run: python scripts/build.py --target ${{ matrix.target }}

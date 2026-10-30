@@ -4,7 +4,7 @@
 
 ## 取屏
 
-Mac 截图和截图翻译共用原生取屏：macOS 14+ 使用 ScreenCaptureKit 的 SCScreenshotManager；较旧系统使用受 TCC 约束的 CoreGraphics。按 Electron 屏幕 id 精确选择显示器，拒绝不匹配，不猜测其他屏幕。用户发起截图后才检查/请求屏幕录制授权；拒绝、撤销、取屏失败、超时、空图均正常返回操作失败，不进入全局未处理拒绝处理。截图临时文件放在私有临时目录，读取后删除；不会上传或持久化整屏图片。框选后翻译仍按用户设置使用本地 OCR / 翻译 API。
+Mac 截图和截图翻译共用原生取屏：macOS 14+ 使用 ScreenCaptureKit 的 SCScreenshotManager；较旧系统使用受 TCC 约束的 ScreenCaptureKit 单帧流。按 Electron 屏幕 id 精确选择显示器，拒绝不匹配，不猜测其他屏幕。用户发起截图后才检查/请求屏幕录制授权；拒绝、撤销、取屏失败、超时、空图均正常返回操作失败，不进入全局未处理拒绝处理。截图临时文件放在私有临时目录，读取后删除；不会上传或持久化整屏图片。框选后翻译仍按用户设置使用本地 OCR / 翻译 API。
 
 Mac 不再在该功能中调用 Electron desktopCapturer.getSources，避免用户堆栈中的失败路径。Windows 保留原取屏路径，并验证字符串拒绝与配置/错误提示自身失败也不会向外抛出。权限不足时由用户选择是否打开系统设置，不绕过系统权限。
 

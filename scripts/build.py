@@ -95,7 +95,7 @@ def prepare(target):
                 shutil.copytree(path, nested/path.name, dirs_exist_ok=True)
     if target == 'macos':
         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
-        run(['swiftc','-parse-as-library','-O',app/'native/haituo-screen-capture.swift','-o',app/'native/haituo-screen-capture'])
+        run(['swiftc','-parse-as-library','-O','-target','arm64-apple-macos13.0',app/'native/haituo-screen-capture.swift','-o',app/'native/haituo-screen-capture'])
     if target == 'windows':
         # Always stage a clean bundle; the runtime test hook is injected later
         # into a separate test build, never into the release package.
