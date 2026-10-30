@@ -149,15 +149,23 @@ function Get-WindowRecords {
     return $res
 }
 
-function Wait-ForPidWindow([int]$TargetPid, [int]$TimeoutSec) {
+function Wait-BothWindows([int]$PidA, [int]$PidB, [int]$TimeoutSec) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $last = @()
+    $lat = @{ $PidA = $null; $PidB = $null }
+    $last = @{}
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
         Start-Sleep -Seconds 3
-        $last = @(Get-WindowRecords | Where-Object { $_.pid -eq $TargetPid -and $_.layer -eq 0 })
-        if ($last.Count -gt 0) { return [ordered]@{ ready = $true; latency_s = [math]::Round($sw.Elapsed.TotalSeconds, 1); windows = $last } }
+        $all = @(Get-WindowRecords | Where-Object { $_.layer -eq 0 })
+        foreach ($tp in @($PidA, $PidB)) {
+            if ($tp -le 0) { continue }
+            if ($null -eq $lat[$tp]) {
+                $mine = @($all | Where-Object { $_.pid -eq $tp })
+                if ($mine.Count -gt 0) { $lat[$tp] = [math]::Round($sw.Elapsed.TotalSeconds, 1); $last[$tp] = $mine }
+            }
+        }
+        if (($null -ne $lat[$PidA] -or $PidA -le 0) -and ($null -ne $lat[$PidB] -or $PidB -le 0)) { break }
     }
-    return [ordered]@{ ready = $false; latency_s = $null; windows = $last }
+    return $lat
 }
 
 # ---------- launch two isolated instances ----------
@@ -168,26 +176,28 @@ foreach ($h in @($hA, $hB)) { New-FakeHome $h }
 foreach ($d in @($tA, $tB)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
 $pA = $null
-try {
-    $pA = Start-AppWithEnv $exeA @{ HOME = $hA; CFFIXED_USER_HOME = $hA; TMPDIR = $tA } $hA (Join-Path $work 'A')
-    $wa = Wait-ForPidWindow $pA.Id 180
-    Write-Host ("[A] pid={0} ready={1} windows={2} latency={3}s" -f $pA.Id, $wa.ready, @($wa.windows).Count, $wa.latency_s)
-    $ev.launch['a'] = [ordered]@{ pid = $pA.Id; ready = $wa.ready; latency_s = $wa.latency_s; windows = $wa.windows }
-} catch {
-    $ev.errors += "launch A: $($_.Exception.Message)"
-    Write-Host ("[A] launch failed: {0}" -f $_.Exception.Message)
-}
-Save-Evidence
-
 $pB = $null
 try {
+    $pA = Start-AppWithEnv $exeA @{ HOME = $hA; CFFIXED_USER_HOME = $hA; TMPDIR = $tA } $hA (Join-Path $work 'A')
+    Write-Host ("[A] pid={0}" -f $pA.Id)
+    Start-Sleep -Seconds 3
     $pB = Start-AppWithEnv $exeB @{ HOME = $hB; CFFIXED_USER_HOME = $hB; TMPDIR = $tB } $hB (Join-Path $work 'B')
-    $wb = Wait-ForPidWindow $pB.Id 180
-    Write-Host ("[B] pid={0} ready={1} windows={2} latency={3}s" -f $pB.Id, $wb.ready, @($wb.windows).Count, $wb.latency_s)
-    $ev.launch['b'] = [ordered]@{ pid = $pB.Id; ready = $wb.ready; latency_s = $wb.latency_s; windows = $wb.windows }
+    Write-Host ("[B] pid={0}" -f $pB.Id)
 } catch {
-    $ev.errors += "launch B: $($_.Exception.Message)"
-    Write-Host ("[B] launch failed: {0}" -f $_.Exception.Message)
+    $ev.errors += "launch: $($_.Exception.Message)"
+    Write-Host ("[launch] failed: {0}" -f $_.Exception.Message)
+}
+$idA = if ($pA) { $pA.Id } else { 0 }
+$idB = if ($pB) { $pB.Id } else { 0 }
+$lat = @{}
+try { $lat = Wait-BothWindows $idA $idB 420 } catch { $ev.errors += "wait: $($_.Exception.Message)" }
+foreach ($pair in @(@{ tag = 'a'; pid = $idA }, @{ tag = 'b'; pid = $idB })) {
+    $w = @()
+    if ($pair.pid -gt 0) { $w = @(Get-WindowRecords | Where-Object { $_.pid -eq $pair.pid -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending) }
+    $l = $null
+    if ($pair.pid -gt 0 -and $lat.ContainsKey($pair.pid)) { $l = $lat[$pair.pid] }
+    $ev.launch[$pair.tag] = [ordered]@{ pid = $pair.pid; ready = [bool]($w.Count -gt 0); latency_s = $l; windows = $w }
+    Write-Host ("[{0}] pid={1} ready={2} windows={3} latency={4}s" -f $pair.tag.ToUpper(), $pair.pid, ($w.Count -gt 0), $w.Count, $l)
 }
 Save-Evidence
 
@@ -197,11 +207,11 @@ $ev.windows = @(Get-WindowRecords | Where-Object { $all -contains $_.pid } | Sor
 Save-Evidence
 
 # ---------- capture ----------
-function Save-Capture([string]$label, [string[]]$args, [string]$file) {
-    $r = Run-Native 'screencapture' @($args + $file)
+function Save-Capture([string]$label, [string[]]$scArgs, [string]$file) {
+    $r = Run-Native 'screencapture' @($scArgs + $file)
     $bytes = $null
     if (Test-Path $file) { $bytes = (Get-Item $file).Length }
-    $rec = [ordered]@{ label = $label; args = @($args + $file); exit_code = $r.code; bytes = $bytes; output = @($r.output | Select-Object -First 10) }
+    $rec = [ordered]@{ label = $label; args = @($scArgs + $file); exit_code = $r.code; bytes = $bytes; output = @($r.output | Select-Object -First 10) }
     $ev.captures += $rec
     Save-Evidence
     Write-Host ("[capture {0}] exit={1} bytes={2}" -f $label, $r.code, $bytes)
@@ -224,8 +234,11 @@ foreach ($p in $picks) {
     Save-Capture ("window-" + $p.tag) @('-x', '-o', '-l', "$($p.window.id)", '-t', 'png') (Join-Path $outDir ("viber-window-{0}.png" -f $p.tag)) | Out-Null
 }
 
-$ev.pid_alive_at_end = @($all | ForEach-Object { $_ })
-$ev.files = @(Get-ChildItem $outDir -Filter '*.png' -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ name = $_.Name; bytes = $_.Length } })
+$ev.pid_alive_at_end = @(Get-Pids 'Contents/MacOS/Viber')
+$ev.files = @(Get-ChildItem $outDir -Filter '*.png' -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ name = $_.Name; bytes = $_.Length; sha256_16 = $null } })
+foreach ($f in $ev.files) {
+    try { $f.sha256_16 = ([BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $outDir $f.name)))) -replace '-', '').ToLower().Substring(0, 16) } catch {}
+}
 Save-Evidence
 
 if ($pA) { Stop-Process -Id $pA.Id -Force -ErrorAction SilentlyContinue }
