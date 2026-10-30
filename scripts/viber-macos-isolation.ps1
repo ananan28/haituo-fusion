@@ -366,14 +366,19 @@ function Get-RealDomainPaths {
         'Library/Preferences/com.viber.osx.plist',
         'Library/Keychains/login.keychain-db',
         'Library/Containers/com.viber.osx.macvibershare',
-        'Library/Group Containers',
+        'Library/Containers/com.viber.osx',
         'Library/Saved Application State/com.viber.osx.savedState',
         'Library/HTTPStorages/com.viber.osx',
         'Library/Caches/com.viber.osx',
         'Library/Application Support/com.viber.osx',
         'Library/Application Support/ViberPC'
     )
-    return @($c | ForEach-Object { Join-Path $HOME $_ } | Where-Object { Test-Path $_ })
+    $paths = @($c | ForEach-Object { Join-Path $HOME $_ } | Where-Object { Test-Path $_ })
+    $gc = Join-Path $HOME 'Library/Group Containers'
+    if (Test-Path $gc) {
+        $paths += @(Get-ChildItem $gc -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(?i)viber' } | ForEach-Object { $_.FullName })
+    }
+    return @($paths)
 }
 
 function Get-IsolationAudit {
@@ -393,6 +398,19 @@ function Compare-IsolationAudit($Before, $After) {
         if (Test-StatWrote $b.stat $a[0].stat) { $changed += $b.path }
     }
     return @($changed)
+}
+
+function Get-PrefsPlistKeys {
+    $p = Join-Path $HOME 'Library/Preferences/com.viber.osx.plist'
+    if (-not (Test-Path $p)) { return $null }
+    $keys = @()
+    try {
+        $r = Run-Native 'plutil' @('-convert', 'xml1', '-o', '-', $p)
+        $keys = @($r.output | Where-Object { $_ -match '<key>' } | ForEach-Object { ($_ -replace '.*<key>', '' -replace '</key>.*', '') } | Select-Object -Unique)
+    } catch {}
+    $bytes = $null
+    try { $bytes = (Get-Item $p).Length } catch {}
+    return [ordered]@{ path = $p; key_count = $keys.Count; keys = @($keys | Select-Object -First 80); bytes = $bytes }
 }
 
 function Get-ProfileManifest([string]$homeRoot) {
@@ -814,6 +832,7 @@ function Invoke-DualEnvTest {
         $t.real_viber_written = Test-RealWrites $t.real_viber_before $t.real_viber_after
         $t.isolation_after = Get-IsolationAudit
         $t.real_domain_changed = @(Compare-IsolationAudit $t.isolation_before $t.isolation_after)
+        $t.prefs_plist = Get-PrefsPlistKeys
         if ($homeA) { $t.manifest_a = Get-ProfileManifest $homeA }
         if ($homeB) { $t.manifest_b = Get-ProfileManifest $homeB }
         $sharedInode = [bool]($t.manifest_a -and $t.manifest_b -and $t.manifest_a.config_db_inode -and $t.manifest_b.config_db_inode -and ($t.manifest_a.config_db_inode -eq $t.manifest_b.config_db_inode))
@@ -967,7 +986,7 @@ if ($inst.exe_exists) {
         if ($r) { $ev.launch_tests += $r }
     } catch { $ev.errors += "dual-full-isolation-noprefs-daemon: $($_.Exception.Message)" }
     Save-Evidence
-    try { $r = Invoke-CapacityTest $inst.exeA 8; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "capacity: $($_.Exception.Message)" }
+    try { $r = Invoke-CapacityTest $inst.exeA 16; if ($r) { $ev.launch_tests += $r } } catch { $ev.errors += "capacity: $($_.Exception.Message)" }
     Save-Evidence
 } else {
     $ev.install.errors += 'skipping launch tests: staged executable missing'
@@ -1105,6 +1124,9 @@ try {
     }
     if ($fullSepNoPrefs) {
         $reasons += ("isolation audit (full separation + CFPREFERENCES_AVOID_DAEMON=1): A window={0} B window={1} | real-domain paths changed={2} | separate roots={3} | sensitive files opened A={4} B={5}" -f $fullSepNoPrefs.a_window, $fullSepNoPrefs.b_window, ((@($fullSepNoPrefs.real_domain_changed)) -join ', '), $fullSepNoPrefs.profiles_separate_roots, (@($fullSepNoPrefs.sockets_a.sensitive_files)).Count, (@($fullSepNoPrefs.sockets_b.sensitive_files)).Count)
+    }
+    if ($fullSep -and $fullSep.prefs_plist) {
+        $reasons += ("shared prefs plist: {0} bytes, {1} keys: {2}" -f $fullSep.prefs_plist.bytes, $fullSep.prefs_plist.key_count, ((@($fullSep.prefs_plist.keys)) -join ', '))
     }
     $cap = & $get 'capacity-sweep'
     if ($cap) {
