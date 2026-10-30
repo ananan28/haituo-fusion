@@ -1,7 +1,7 @@
-name: Haituo 1.6.7 WhatsApp startup and Signal media regression - NOT A RELEASE
+name: Haituo 1.6.8 Mac screen capture, UI and WhatsApp stability regression - NOT A RELEASE
 on:
   push:
-    branches: ['fix/1.6.7-whatsapp-startup']
+    branches: ['fix/1.6.8-macos-capture']
   workflow_dispatch:
 permissions:
   contents: write
@@ -66,8 +66,17 @@ jobs:
           python-version: '3.12.10'
       - name: Target OS regression
         run: node --test scripts/*.test.cjs
+      - name: Compile native macOS capture helper before packaging
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          swiftc -parse-as-library -O src/app/native/haituo-screen-capture.swift -o "$RUNNER_TEMP/haituo-screen-capture"
+          "$RUNNER_TEMP/haituo-screen-capture" --probe
       - name: Build diagnostic candidate
         run: python scripts/build.py --target ${{ matrix.target }}
+      - name: Native screenshot UI, clipboard and Mac capture regression
+        timeout-minutes: 6
+        run: python scripts/run-capture-ui.py
       - name: Native SQLCipher reopen and content-cache account isolation
         run: node scripts/local-chat-native-check.cjs
       - name: Frozen Signal profile/startup regression
@@ -92,7 +101,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'windows'
         with:
-          name: Haituo-1.6.7-diagnostic-windows
+          name: Haituo-1.6.8-diagnostic-windows
           path: |
             windows/out/*Setup.exe
             source-packages/*.zip
@@ -104,7 +113,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.7-diagnostic-verification-${{ matrix.target }}
+          name: Haituo-1.6.8-diagnostic-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
@@ -112,7 +121,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'macos'
         with:
-          name: Haituo-1.6.7-diagnostic-${{ matrix.target }}
+          name: Haituo-1.6.8-diagnostic-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg

@@ -38,9 +38,9 @@ test('Google free needs no key, joins segments and chunks without breaking surro
  const output=await translateGoogle(async(url,init)=>{calls.push(new URL(url));assert.deepEqual(init,{});return [[['译',null],['文',null]]]},{text:'😀'.repeat(1001),provider:'google-free'});
  assert.equal(output,'译文译文');assert.equal(calls.length,2);assert.equal([...calls[0].searchParams.get('q')].length,1000);assert.equal(calls[1].searchParams.get('q'),'😀');assert.ok(!calls[0].searchParams.has('key'));
 });
-test('screenshot default overlays translations in place and keeps the original visible',()=>{
+test('screenshot defaults to bilingual and retains in-place translation mode',()=>{
  const html=fs.readFileSync(__dirname+'/../src/app/js/haituo-screenshot.html','utf8');const script=html.match(/<script>([\s\S]*)<\/script>/)[1];new vm.Script(script);
- assert.match(script,/function render\(mode='translated'\)/);assert.match(script,/source.textContent=block.original;target.textContent=block.translation/);
+ assert.match(script,/function render\(mode='compare'\)/);assert.match(script,/source.textContent=block.original;target.textContent=block.translation/);
  assert.match(script,/layer\.style\.background='transparent'/);assert.match(script,/background:result\.background\|\|'#fff'/);assert.doesNotMatch(html,/grid-template-columns:1fr 1fr/);
  assert.match(html,/\.compare\{[^}]*background:transparent/);assert.match(html,/\.pair\{[^}]*background:rgba\(17,24,32,\.92\)/);assert.match(html,/\.pair\.fallback\{[^}]*bottom:16px/);
  assert.match(html,/#translation\.flow\{[^}]*bottom:16px/);assert.doesNotMatch(html,/#translation\.flow\{[^}]*background:#ffffff/i);
@@ -74,14 +74,14 @@ test('ordinary capture uses full cursor monitor without activating or cropping H
  const {EventEmitter}=require('node:events'),{createController}=require('../src/app/js/haituo-screenshot');let windowOptions,sent,shown=0;
  class Window extends EventEmitter{constructor(o){super();windowOptions=o;this.webContents={setWindowOpenHandler(){},on(){},send(...v){sent=v}}}setVisibleOnAllWorkspaces(){}async loadFile(){}isDestroyed(){return false}showInactive(){shown++}}
  const electron={BrowserWindow:Window,app:new EventEmitter(),ipcMain:{handle(){},on(){}},screen:{getCursorScreenPoint:()=>({x:2000,y:50}),getDisplayNearestPoint(p){assert.equal(p.x,2000);return{id:2,bounds:{x:1920,y:0,width:2560,height:1440},scaleFactor:2}}},desktopCapturer:{async getSources(){return[{display_id:'2',thumbnail:{isEmpty:()=>false,toDataURL:()=> 'data:image/png;base64,full-screen',crop(){throw Error('must not crop')}}}]}},globalShortcut:{}};
- const controller=createController({electron,getConfig:()=>({}),getAppWindow(){throw Error('must not focus Haituo')},requestJSON(){throw Error('capture must not translate')}});
+ const controller=createController({electron,platform:'win32',getConfig:()=>({}),getAppWindow(){throw Error('must not focus Haituo')},requestJSON(){throw Error('capture must not translate')}});
  await controller.start({mode:'capture'});assert.equal(windowOptions.x,1920);assert.equal(windowOptions.width,2560);assert.equal(windowOptions.height,1440);assert.equal(windowOptions.focusable,true);assert.equal(shown,1);assert.equal(sent[1].mode,'capture');assert.equal(sent[1].image,'data:image/png;base64,full-screen');
 });
 test('translate overlay never activates Haituo and escapes globally instead',async()=>{
  const {EventEmitter}=require('node:events'),{createController}=require('../src/app/js/haituo-screenshot');let windowOptions,shown=0,focused=0,shortcuts=[];
  class Window extends EventEmitter{constructor(o){super();windowOptions=o;this.webContents={setWindowOpenHandler(){},on(){},send(){}}}setVisibleOnAllWorkspaces(){}async loadFile(){}isDestroyed(){return false}showInactive(){shown++}show(){throw Error('must not show actively')}focus(){focused++}}
  const electron={BrowserWindow:Window,app:new EventEmitter(),ipcMain:{handle(){},on(){}},screen:{getCursorScreenPoint:()=>({x:10,y:10}),getDisplayNearestPoint:()=>({id:1,bounds:{x:0,y:0,width:1280,height:800},scaleFactor:2})},desktopCapturer:{async getSources(){return[{display_id:'1',thumbnail:{isEmpty:()=>false,toDataURL:()=> 'data:image/png;base64,full'}}]}},globalShortcut:{register(k){shortcuts.push(k);return true},unregister(k){shortcuts=shortcuts.filter(v=>v!==k)}}};
- const controller=createController({electron,getConfig:()=>({screenshotApiPool:[{provider:'google-free'}]}),getAppWindow(){throw Error('must not focus Haituo')},requestJSON(){throw Error('translate overlay must not capture itself')}});
+ const controller=createController({electron,platform:'win32',getConfig:()=>({screenshotApiPool:[{provider:'google-free'}]}),getAppWindow(){throw Error('must not focus Haituo')},requestJSON(){throw Error('translate overlay must not capture itself')}});
  await controller.start();assert.equal(windowOptions.focusable,false);assert.equal(shown,1);assert.equal(focused,0);assert.deepEqual(shortcuts,['Escape']);
 });
 test('four input/back-translation options collapse together and Save is last',()=>{

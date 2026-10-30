@@ -95,6 +95,7 @@ def prepare(target):
                 shutil.copytree(path, nested/path.name, dirs_exist_ok=True)
     if target == 'macos':
         run(['swiftc','-O',app/'native/haituo-ocr.swift','-o',app/'native/haituo-ocr'])
+        run(['swiftc','-parse-as-library','-O',app/'native/haituo-screen-capture.swift','-o',app/'native/haituo-screen-capture'])
     if target == 'windows':
         # Always stage a clean bundle; the runtime test hook is injected later
         # into a separate test build, never into the release package.
@@ -102,8 +103,11 @@ def prepare(target):
     run(['node','scripts/test-native-ocr.cjs',app])
     pkgpath=app/'package.json'
     pkg=json.loads(pkgpath.read_text(encoding='utf-8'))
-    if target=='windows': pkg['version']=CFG['versions'][target]
+    pkg['signalProtocolVersion']=CFG['signalProtocolVersion']
+    pkg['version']=CFG['versions'][target]
     pkgpath.write_text(json.dumps(pkg,ensure_ascii=False,indent=2),encoding='utf-8')
+    if target=='macos':
+        run([sys.executable,'scripts/patch-network.py'])
     import re
     for rel in ['bundles/preload/main.js','js/caisheng-webview-preload.js']:
         target_file=app/rel
@@ -209,12 +213,15 @@ def macos(app, tools):
          '--platform=darwin','--arch=arm64','--electron-version='+CFG['tools']['electron'],
          '--app-version='+version,'--build-version='+version,'--icon='+str(icon),
          '--app-bundle-id=com.haituo.desktop','--out=macos/out','--overwrite',
-         '--asar.unpack={**/*.node,native/haituo-ocr}','--extend-info=macos/Info.plist'])
+         '--asar.unpack={**/*.node,native/haituo-ocr,native/haituo-screen-capture}','--extend-info=macos/Info.plist'])
     bundle = ROOT/'macos/out/海拓-darwin-arm64/海拓.app'
     ocr_dest = bundle/'Contents/Resources/app.asar.unpacked/native/haituo-ocr'
     ocr_dest.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(app/'native/haituo-ocr',ocr_dest)
     ocr_dest.chmod(0o755)
+    capture_dest = bundle/'Contents/Resources/app.asar.unpacked/native/haituo-screen-capture'
+    shutil.copy2(app/'native/haituo-screen-capture',capture_dest)
+    capture_dest.chmod(0o755)
     p = bundle/'Contents/Info.plist'
     info = plistlib.loads(p.read_bytes());info['LSUIElement']=False;info.pop('LSBackgroundOnly',None)
     info['CFBundleURLTypes']=[{'CFBundleURLName':'Haituo Signal verification','CFBundleURLSchemes':['sgnl','signalcaptcha']}]

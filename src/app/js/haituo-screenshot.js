@@ -22,7 +22,7 @@ function pickScreenSource(sources,displayId){
  if(byDisplayId)return byDisplayId;
  return sources.length===1?sources[0]:null;
 }
-function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},getAppWindow=()=>null}){
+function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},getAppWindow=()=>null,platform=process.platform,captureMac=require('./haituo-screen-capture').captureMac}){
  let overlay,translationEpoch=0,capturing=false,shortcut='',copyShortcut='',shortcutPaused=false,image,display,generation=0,escapeArmed=false;
  const preload=path.join(__dirname,'haituo-screenshot-preload.js');
 
@@ -56,13 +56,38 @@ function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},
    throw lastError||Error('没有可用截图接口');
   }catch(error){send({status:'截图翻译失败：'+String(error.message||error).replace(/Bearer\s+\S+/gi,'[已隐藏密钥]').slice(0,350),failed:true})}
  }
- async function start(options={}){if(capturing)return;const captureOnly=options.mode==='capture';if(!captureOnly&&!screenshotRoutes(getConfig()).length){await openSettings();return;}capturing=true;const token=++generation;try{display=e.screen.getDisplayNearestPoint(e.screen.getCursorScreenPoint());const sources=await e.desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.bounds.width*display.scaleFactor),height:Math.round(display.bounds.height*display.scaleFactor)},fetchWindowIcons:false});if(token!==generation)return;const byDisplayId=sources.find(s=>s.display_id===String(display.id));const source=pickScreenSource(sources,display.id);if(!source||source.thumbnail.isEmpty())throw Error('无法获取屏幕画面。Mac：请到 系统设置 → 隐私与安全性 → 屏幕录制 勾选海拓，然后完全退出海拓（Cmd+Q）再重新打开；多显示器下如仍失败，请重启后再试；多显示器且无法可靠匹配到当前屏幕时，海拓不会猜测其他屏幕，请重新插拔显示器或改为单屏后重试');if(source!==byDisplayId){const fallbackDisplay=(e.screen.getAllDisplays?.()||[]).find(d=>d.id===Number(source.display_id));if(fallbackDisplay)display=fallbackDisplay;}image=source.thumbnail;const data=image.toDataURL();overlay=windowFor({x:display.bounds.x,y:display.bounds.y,width:display.bounds.width,height:display.bounds.height,frame:false,resizable:false,movable:false,alwaysOnTop:true,skipTaskbar:true,show:false,focusable:!!captureOnly,acceptFirstMouse:true});const w=overlay;w.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});w.on('closed',()=>{if(overlay===w){overlay=null;image=null;capturing=false;generation++;disarmEscape()}});await w.loadFile(path.join(__dirname,'haituo-screenshot.html'));w.webContents.send('haituo:screenshot-result',{type:'capture',image:data,mode:captureOnly?'capture':'translate'});if(token!==generation||w.isDestroyed())return;
-  // Show without activating: pressing the shortcut inside another app must
-  // not pull Haituo to the foreground. Translate mode is non-focusable so
-  // even the drag-select never steals focus (Escape is armed globally while
-  // it is open); capture mode stays focusable for the annotation fields.
-  if(!captureOnly)armEscape();
-  w.showInactive();}catch(error){cancel();e.dialog.showErrorBox('截图翻译',String(error.message||error))}}
+ async function start(options={}){
+  if(capturing)return{ok:false,busy:true};
+  const captureOnly=options.mode==='capture',token=++generation;
+  capturing=true;
+  try{
+   if(!captureOnly&&!screenshotRoutes(getConfig()).length){await openSettings();capturing=false;return{ok:false,settings:true}}
+   display=e.screen.getDisplayNearestPoint(e.screen.getCursorScreenPoint());
+   let captured;
+   if(platform==='darwin')captured=await captureMac(e,display);
+   else{
+    const sources=await e.desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.bounds.width*display.scaleFactor),height:Math.round(display.bounds.height*display.scaleFactor)},fetchWindowIcons:false});
+    if(token!==generation)return{ok:false,cancelled:true};
+    const source=pickScreenSource(sources,display.id);
+    if(!source||source.thumbnail.isEmpty())throw Error('无法获取当前屏幕，请检查系统屏幕录制权限与显示器连接后重试。');
+    captured=source.thumbnail;
+   }
+   if(token!==generation)return{ok:false,cancelled:true};
+   image=captured;const data=image.toDataURL();
+   overlay=windowFor({x:display.bounds.x,y:display.bounds.y,width:display.bounds.width,height:display.bounds.height,frame:false,resizable:false,movable:false,alwaysOnTop:true,skipTaskbar:true,show:false,focusable:!!captureOnly,acceptFirstMouse:true});
+   const w=overlay;w.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+   w.on('closed',()=>{if(overlay===w){overlay=null;image=null;capturing=false;generation++;disarmEscape()}});
+   await w.loadFile(path.join(__dirname,'haituo-screenshot.html'));
+   if(token!==generation||w.isDestroyed())return{ok:false,cancelled:true};
+   w.webContents.send('haituo:screenshot-result',{type:'capture',image:data,mode:captureOnly?'capture':'translate'});
+   if(!captureOnly)armEscape();w.showInactive();return{ok:true};
+  }catch(error){
+   if(token!==generation)return{ok:false,cancelled:true};
+   try{cancel()}catch{capturing=false;image=null;overlay=null}
+   return await require('./haituo-screen-capture').reportCaptureError(e,error,captureOnly?'capture':'translate');
+  }
+ }
+
  function configure(config){
   const next=config.screenshotEnabled!==true?'':String(config.screenshotShortcut||'CommandOrControl+Alt+O').trim(),copy=config.screenshotCopyEnabled===true?String(config.screenshotCopyShortcut||'CommandOrControl+Alt+S').trim():'';
   if(next&&next.toLowerCase()===copy.toLowerCase())throw Error('截图与截图翻译不能使用同一快捷键');
@@ -82,19 +107,21 @@ function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},
  e.app.on('will-quit',()=>{cancel();if(shortcut)e.globalShortcut.unregister(shortcut);if(copyShortcut)e.globalShortcut.unregister(copyShortcut)});
  function pauseShortcut(){shortcutPaused=true;if(shortcut)e.globalShortcut.unregister(shortcut);if(copyShortcut)e.globalShortcut.unregister(copyShortcut)}
  function resumeShortcut(){if(!shortcutPaused)return;const previous=shortcut,copy=copyShortcut;try{shortcutPaused=false;shortcut='';copyShortcut='';configure({screenshotShortcut:previous,screenshotEnabled:!!previous,screenshotCopyEnabled:!!copy,screenshotCopyShortcut:copy})}catch(error){shortcutPaused=true;shortcut=previous;copyShortcut=copy;throw error}}
- async function verifyUI(){const w=windowFor({show:false,width:900,height:700});try{
+ async function verifyUI(auditDir){const w=windowFor({show:false,width:900,height:700});try{
   const ocr=await recognize(require('node:fs').readFileSync(path.join(__dirname,'../native/ocr-fixture.png')));if(!/HELLO\s*1234/i.test(ocr.original))throw Error('安装包内系统 OCR 自检失败');const narrow=await recognize(require('node:fs').readFileSync(path.join(__dirname,'../native/ocr-dark-line.png')));if(!/curious.*number.*phone/i.test(narrow.original))throw Error('安装包内深色单行识字失败');
   await w.loadFile(path.join(__dirname,'haituo-screenshot.html'));
   await w.webContents.executeJavaScript(`rect={x:50,y:60,width:600,height:400};position();`);
   w.webContents.send('haituo:screenshot-result',{requestId:0,original:'HELLO 1234\nSECOND',translation:'你好 1234\n第二条',blocks:[{original:'HELLO 1234',translation:'你好 1234',x:20,y:10,width:600,height:80},{original:'SECOND',translation:'第二条',x:20,y:150,width:600,height:80}],status:'测试完成'});
   await new Promise(resolve=>setTimeout(resolve,100));
-  const state=await w.webContents.executeJavaScript(`(()=>{const selection=document.getElementById('selection'),translation=document.getElementById('translation'),r=selection.getBoundingClientRect(),t=translation.getBoundingClientRect(),blocks=[...translation.querySelectorAll('.block')];const inPlace=!translation.hidden&&r.left===t.left-1&&t.right<=r.right&&blocks.length===2&&getComputedStyle(translation).backgroundColor==='rgba(0, 0, 0, 0)'&&blocks.every(block=>getComputedStyle(block).backgroundColor==='rgb(255, 255, 255)');render('compare');const pairs=[...translation.querySelectorAll('.pair')];return {inPlace,toolbar:!!document.getElementById('toolbar'),bridge:typeof window.haituoScreenshot?.select==='function',nativeOCR:true,compareTransparent:getComputedStyle(translation).backgroundColor==='rgba(0, 0, 0, 0)',stacked:pairs.map(pair=>{const source=pair.querySelector('.source'),target=pair.querySelector('.target');return {source:source.textContent,target:target.textContent,below:target.getBoundingClientRect().top>=source.getBoundingClientRect().bottom,left:Math.abs(target.getBoundingClientRect().left-source.getBoundingClientRect().left)<1}}),sameWindow:window.location.pathname.endsWith('haituo-screenshot.html')}})()`);
+  const state=await w.webContents.executeJavaScript(`(()=>{render('translated');const selection=document.getElementById('selection'),translation=document.getElementById('translation'),r=selection.getBoundingClientRect(),t=translation.getBoundingClientRect(),blocks=[...translation.querySelectorAll('.block')];const inPlace=!translation.hidden&&r.left===t.left-1&&t.right<=r.right&&blocks.length===2&&getComputedStyle(translation).backgroundColor==='rgba(0, 0, 0, 0)'&&blocks.every(block=>getComputedStyle(block).backgroundColor==='rgb(255, 255, 255)');render('compare');const pairs=[...translation.querySelectorAll('.pair')];return {inPlace,toolbar:!!document.getElementById('toolbar'),bridge:typeof window.haituoScreenshot?.select==='function',nativeOCR:true,compareTransparent:getComputedStyle(translation).backgroundColor==='rgba(0, 0, 0, 0)',stacked:pairs.map(pair=>{const source=pair.querySelector('.source'),target=pair.querySelector('.target');return {source:source.textContent,target:target.textContent,below:target.getBoundingClientRect().top>=source.getBoundingClientRect().bottom,left:Math.abs(target.getBoundingClientRect().left-source.getBoundingClientRect().left)<1}}),sameWindow:window.location.pathname.endsWith('haituo-screenshot.html')}})()`);
   if(!state.inPlace||!state.toolbar||!state.bridge||!state.sameWindow||!state.compareTransparent||state.stacked.length!==2||!state.stacked.every(p=>p.below&&p.left)||state.stacked[0].source!=='HELLO 1234'||state.stacked[0].target!=='你好 1234')throw Error('截图内译文覆盖或双语对照未正常显示（不得整屏变白）');
+  if(auditDir){require('node:fs').mkdirSync(auditDir,{recursive:true});w.showInactive();await new Promise(r=>setTimeout(r,120));require('node:fs').writeFileSync(path.join(auditDir,'capture-translation-ui.png'),(await w.webContents.capturePage()).toPNG())}
   const capture=windowFor({show:false,width:500,height:350}),previous=overlay;try{
    overlay=capture;await capture.loadFile(path.join(__dirname,'haituo-screenshot.html'));
    const sample=e.nativeImage.createFromBuffer(require('node:fs').readFileSync(path.join(__dirname,'../native/ocr-fixture.png')));
    capture.webContents.send('haituo:screenshot-result',{type:'capture',mode:'capture',image:sample.toDataURL()});await new Promise(r=>setTimeout(r,80));
-   const expected=await capture.webContents.executeJavaScript(`(async()=>{await document.getElementById('screen').decode();rect={x:20,y:20,width:200,height:120};position();for(const id of ['fontSize','strokeSize','mosaicSize'])if(!document.getElementById(id))throw Error('缺少大小调节');commands.push({type:'text',x:5,y:5,text:'test',color:'#ff0000',fontSize:32});paint();if(!drawing.font.includes('32px'))throw Error('字号没有生效');commands=[];setTool('rectangle');commands.push({type:'rectangle',x:10,y:10,endX:70,endY:40,color:'#ff0000',strokeSize:9});paint();if(drawing.lineWidth!==9)throw Error('方框线宽没有生效');document.getElementById('undo').click();if(commands.length)throw Error('撤销无效');commands.push({type:'text',x:10,y:10,text:'test',color:'#ff0000'},{type:'mosaic',x:40,y:30,endX:100,endY:65,color:'#ff0000'},{type:'cover',x:120,y:30,endX:170,endY:65,color:'#202020'});paint();const pixel=drawing.getImageData(130,40,1,1).data;if(pixel[0]!==32||pixel[3]!==255)throw Error('实色遮挡未写入画布');const img=document.getElementById('screen'),expected={width:Math.round(rect.width*img.naturalWidth/innerWidth),height:Math.round(rect.height*img.naturalHeight/innerHeight)};copyScreenshot();return expected})()`);
+   if(auditDir){await capture.webContents.executeJavaScript(`rect={x:20,y:20,width:200,height:120};position();document.querySelector('.tool-options').open=true;position()`);capture.showInactive();await new Promise(r=>setTimeout(r,120));require('node:fs').writeFileSync(path.join(auditDir,'capture-editor-ui.png'),(await capture.webContents.capturePage()).toPNG())}
+   const expected=await capture.webContents.executeJavaScript(`(async()=>{await document.getElementById('screen').decode();rect={x:20,y:20,width:200,height:120};position();const bar=document.getElementById('toolbar').getBoundingClientRect();if(bar.left<0||bar.right>innerWidth+1||bar.top<0||bar.bottom>innerHeight+1)throw Error('工具栏超出屏幕');for(const id of ['fontSize','strokeSize','mosaicSize'])if(!document.getElementById(id))throw Error('缺少大小调节');commands.push({type:'text',x:5,y:5,text:'test',color:'#ff0000',fontSize:32});paint();if(!drawing.font.includes('32px'))throw Error('字号没有生效');commands=[];setTool('rectangle');commands.push({type:'rectangle',x:10,y:10,endX:70,endY:40,color:'#ff0000',strokeSize:9});paint();if(drawing.lineWidth!==9)throw Error('方框线宽没有生效');document.getElementById('undo').click();if(commands.length)throw Error('撤销无效');commands.push({type:'text',x:10,y:10,text:'test',color:'#ff0000'},{type:'mosaic',x:40,y:30,endX:100,endY:65,color:'#ff0000'},{type:'cover',x:120,y:30,endX:170,endY:65,color:'#202020'});paint();const pixel=drawing.getImageData(130,40,1,1).data;if(pixel[0]!==32||pixel[3]!==255)throw Error('实色遮挡未写入画布');const img=document.getElementById('screen'),expected={width:Math.round(rect.width*img.naturalWidth/innerWidth),height:Math.round(rect.height*img.naturalHeight/innerHeight)};copyScreenshot();return expected})()`);
    const deadline=Date.now()+5000;while(!capture.isDestroyed()&&Date.now()<deadline)await new Promise(r=>setTimeout(r,50));
    const copied=await require('./haituo-clipboard').readImage(e),size=copied?.getSize()||{};if(!capture.isDestroyed()||size.width!==expected.width||size.height!==expected.height)throw Error('软件内截图编辑或剪贴板输出失败：'+JSON.stringify(size));state.captureClipboard=true;
   }finally{if(!capture.isDestroyed())capture.close();overlay=previous}
