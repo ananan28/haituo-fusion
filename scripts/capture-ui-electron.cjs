@@ -1,6 +1,7 @@
 'use strict';
 const e=require('electron'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
 const resources=process.argv[2],out=process.argv[3],report={checks:[],errors:[],installedAppTCC:'UNTESTED: CI helper/harness permission does not prove installed application permission'};
+e.app.on('window-all-closed',()=>{}); // Keep the harness alive until the report is written.
 const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},90000);
 (async()=>{await e.app.whenReady();fs.mkdirSync(out,{recursive:true});
  const cfg=JSON.parse(fs.readFileSync(path.join(resources,'package.json'),'utf8'));
@@ -9,6 +10,7 @@ const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},9
  const {createController}=require(path.join(resources,'js/haituo-screenshot.js'));
  const controller=createController({electron:e,getConfig:()=>({}),requestJSON:async()=>{throw Error('UI test must not call an API')}});
  report.ui=await controller.verifyUI(out);report.checks.push({id:'NATIVE-CAPTURE-EDITOR-AND-BILINGUAL-UI',ok:true,result:report.ui});
+ report.primaryDisplay=e.screen.getPrimaryDisplay();
  if(process.platform==='darwin'){
   const binary=path.join(resources.replace(/app\.asar$/,'app.asar.unpacked'),'native/haituo-screen-capture'),run=promisify(execFile);
   const probe=JSON.parse((await run(binary,['--probe'],{timeout:10000,encoding:'utf8'})).stdout);
