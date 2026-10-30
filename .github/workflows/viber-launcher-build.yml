@@ -5,6 +5,7 @@ on:
     branches: ['fusion/viber-windows']
     paths:
       - 'launcher/**'
+      - '.github/workflows/viber-launcher-build.yml'
 permissions:
   contents: read
 jobs:
@@ -45,6 +46,27 @@ jobs:
           test -L "$MP/Applications"
           plutil -lint "$MP/ViberLauncher.app/Contents/Info.plist"
           hdiutil detach "$MP" >/dev/null
+      - name: Smoke test GUI on desktop
+        shell: bash
+        run: |
+          set -e
+          APP=launcher/build/ViberLauncher.app
+          "$APP/Contents/MacOS/ViberLauncher" >/tmp/launcher.stdout 2>/tmp/launcher.stderr &
+          sleep 10
+          pgrep -lf ViberLauncher || { echo "launcher process died"; cat /tmp/launcher.stderr; exit 1; }
+          echo "--- state file ---"
+          cat "$HOME/ViberMulti/accounts.json" || true
+          echo "--- windows ---"
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' || true
+          sleep 2
+          screencapture -x launcher-gui.png
+          ls -lh launcher-gui.png
+          pkill -f 'ViberLauncher.app/Contents/MacOS/ViberLauncher' || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-gui-screenshot
+          path: launcher-gui.png
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: ViberLauncher-dmg
