@@ -5,7 +5,8 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
  const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
  const {app,BrowserWindow,session}=electron,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const report={scope:'REAL_ELECTRON_SIX_WEBVIEWS_SYNTHETIC_PAGES',realAccount:'UNTESTED',versions:process.versions,checks:[],errors:[],events:[]};let host;
- const guests=new Map,fixtures=new Map,slowTimers=new Set;
+ const guests=new Map,fixtures=new Map,slowTimers=new Set,pendingSlow=new Set;
+ const releaseSlow=()=>{for(const release of pendingSlow)release()};
  const check=(id,ok,result)=>{report.checks.push({id,ok,result});if(!ok)throw Error(id+' failed: '+JSON.stringify(result))};
  async function until(work,label,timeout=25000){const end=Date.now()+timeout;while(Date.now()<end){if(await work())return;await wait(50)}throw Error(label+' timeout')}
  try{
@@ -14,7 +15,7 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
    const partition='persist:caisheng-whatsapp-startup-fixture-'+Date.now()+'-'+slot,url='https://web.whatsapp.com/haituo-startup-fixture?slot='+slot,guestSession=session.fromPartition(partition);
    guestSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
    guestSession.protocol.handle('https',request=>{
-    if(new URL(request.url).pathname==='/slow.png')return new Promise(resolve=>{const timer=setTimeout(()=>{slowTimers.delete(timer);resolve(new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'),{headers:{'content-type':'image/png'}}))},60000);slowTimers.add(timer)});
+    if(new URL(request.url).pathname==='/slow.png')return new Promise(resolve=>{const release=()=>{clearTimeout(timer);slowTimers.delete(timer);pendingSlow.delete(release);resolve(new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'),{headers:{'content-type':'image/png'}}))};const timer=setTimeout(release,60000);slowTimers.add(timer);pendingSlow.add(release)});
     return new Response('<!doctype html><html><body><div id="main">Guest startup fixture '+slot+'</div><script>window.firstScript={hooksReady:window.__haituoWACreationHooks===true,nodeIntegration:typeof require};</script>'+(slot===0?'<img src="/slow.png">':'')+'</body></html>',{headers:{'content-type':'text/html'}});
    });
    bootstrap.installSession(guestSession,url);fixtures.set(partition,{slot,url});
@@ -36,28 +37,29 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
   const html='<!doctype html><html><body>'+[...fixtures].map(([partition,{slot,url}])=>'<webview data-caisheng-workspace="fixture-'+slot+'" data-haituo-active="'+(slot===0)+'" style="position:absolute;inset:0;width:880px;height:650px;visibility:'+(slot===0?'visible':'hidden')+'" partition="'+partition+'" preload="'+pathToFileURL(preloadPath).href+'" src="'+url+'"></webview>').join('')+'</body></html>';
   await host.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
   await until(()=>guests.size===6&&[...guests.values()].every(x=>x.dom&&x.handshakes),'six guest initialization');
-  for(const state of guests.values()){
-   const page=await state.guest.executeJavaScript('({url:location.href,body:document.body.innerText,firstScript:window.firstScript})'),prefs=state.guest.getLastWebPreferences();
-   check('GUEST-'+state.slot+'-SANDBOX-PRELOAD',prefs.sandbox===true&&prefs.contextIsolation===true&&prefs.nodeIntegration===false&&page.url===state.url&&page.body.includes('Guest startup fixture')&&page.firstScript?.nodeIntegration==='undefined'&&page.firstScript?.hooksReady===false,{page,sandbox:prefs.sandbox});
-  }
   // At 13s a pending image still prevents did-finish-load. It must not block a
   // document whose isolated preload and DOM already work (the old 12s gate did).
   await wait(13000);
   const slow=guests.get(0),panels=await host.webContents.executeJavaScript("document.querySelectorAll('[data-haituo-wa-startup]').length");
   check('SLOW-RESOURCE-NO-STARTUP-OVERLAY',slow.dom>0&&slow.handshakes>0&&slow.loads===0&&panels===0,{dom:slow.dom,handshakes:slow.handshakes,loads:slow.loads,panels});
+  releaseSlow();await until(()=>slow.loads>0,'released slow resource');
+  for(const state of guests.values()){
+   const page=await state.guest.executeJavaScript('({url:location.href,body:document.body.innerText,firstScript:window.firstScript})'),prefs=state.guest.getLastWebPreferences();
+   check('GUEST-'+state.slot+'-SANDBOX-PRELOAD',prefs.sandbox===true&&prefs.contextIsolation===true&&prefs.nodeIntegration===false&&page.url===state.url&&page.body.includes('Guest startup fixture')&&page.firstScript?.nodeIntegration==='undefined'&&page.firstScript?.hooksReady===false,{page,sandbox:prefs.sandbox});
+  }
   for(let round=0;round<3;round++){
-   const before=[...guests.values()].map(x=>[x,x.dom]);
+   const before=[...guests.values()].map(x=>[x,x.dom]),priorLoads=slow.loads;
    await host.webContents.executeJavaScript(`(()=>{for(const [index,node] of [...document.querySelectorAll('webview')].entries()){node.dataset.haituoActive=String(index===${round%6});node.style.visibility=index===${round%6}?'visible':'hidden';node.reload()}})()`);
    await until(()=>before.every(([state,count])=>state.dom>count),'six guest reload '+round);
-   const count=await host.webContents.executeJavaScript("document.querySelectorAll('[data-haituo-wa-startup]').length");check('SIX-GUEST-RELOAD-'+round,count===0,{panels:count,guests:guests.size});
+   const count=await host.webContents.executeJavaScript("document.querySelectorAll('[data-haituo-wa-startup]').length");check('SIX-GUEST-RELOAD-'+round,count===0,{panels:count,guests:guests.size});releaseSlow();await until(()=>slow.loads>priorLoads,'reloaded slow resource');
   }
   const crashed=guests.get(5),before=crashed.dom,others=[...guests.values()].filter(x=>x!==crashed).map(x=>[x,x.dom]);
   crashed.guest.forcefullyCrashRenderer();await until(()=>crashed.crashes===1&&crashed.dom>before,'crashed guest automatic recovery');
-  check('CRASH-RECOVERY-ACCOUNT-ISOLATION',others.every(([state,count])=>state.dom===count),{crashes:crashed.crashes,recoveredDOM:crashed.dom,otherDOM:others.map(([state])=>state.dom)});
+  check('CRASH-RECOVERY-ACCOUNT-ISOLATION',others.every(([state,count])=>state.dom===count&&state.crashes===0),{crashes:crashed.crashes,recoveredDOM:crashed.dom,otherDOM:others.map(([state])=>state.dom)});
   const finalPanels=await host.webContents.executeJavaScript("document.querySelectorAll('[data-haituo-wa-startup]').length");check('RECOVERY-CLEARS-ERROR-OVERLAY',finalPanels===0,{panels:finalPanels});
   report.ok=!report.errors.length&&report.checks.every(x=>x.ok);
  }catch(error){report.ok=false;report.fatal=String(error.stack||error)}finally{
-  host?.destroy();for(const timer of slowTimers)clearTimeout(timer);
+  host?.destroy();releaseSlow();for(const timer of slowTimers)clearTimeout(timer);
   try{await shutdown()}catch(error){report.ok=false;report.teardownError=String(error.stack||error)}
   fs.mkdirSync(path.dirname(reportPath),{recursive:true});fs.writeFileSync(reportPath,JSON.stringify(report,null,2));console.log('WA_GUEST_STARTUP_REPORT',JSON.stringify(report));app.exit(report.ok?0:1);
  }
