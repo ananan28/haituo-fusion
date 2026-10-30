@@ -45,12 +45,13 @@ function Start-AppWithEnv([string]$exe, [hashtable]$Env, [string]$wd, [string]$l
 }
 
 $ev = [ordered]@{
-    schema = 'haituo-fusion/viber-macos-screenshot/v1'
+    schema = 'haituo-fusion/viber-macos-screenshot/v2'
     generated_at_utc = (Get-UtcStamp)
     runner = [ordered]@{}
     download = [ordered]@{}
     install = [ordered]@{}
-    launch = [ordered]@{ a = $null; b = $null }
+    instance_count = 0
+    launch = [ordered]@{}
     windows = @()
     picked_windows = @()
     captures = @()
@@ -149,55 +150,58 @@ function Get-WindowRecords {
     return $res
 }
 
-function Wait-BothWindows([int]$PidA, [int]$PidB, [int]$TimeoutSec) {
+function Wait-AllWindows([int[]]$Targets, [int]$TimeoutSec) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $lat = @{ $PidA = $null; $PidB = $null }
-    $last = @{}
+    $lat = @{}
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
         Start-Sleep -Seconds 3
         $all = @(Get-WindowRecords | Where-Object { $_.layer -eq 0 })
-        foreach ($tp in @($PidA, $PidB)) {
+        $pending = 0
+        foreach ($tp in $Targets) {
             if ($tp -le 0) { continue }
-            if ($null -eq $lat[$tp]) {
-                $mine = @($all | Where-Object { $_.pid -eq $tp })
-                if ($mine.Count -gt 0) { $lat[$tp] = [math]::Round($sw.Elapsed.TotalSeconds, 1); $last[$tp] = $mine }
+            if (-not $lat.ContainsKey($tp)) {
+                if (@($all | Where-Object { $_.pid -eq $tp }).Count -gt 0) { $lat[$tp] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+                else { $pending++ }
             }
         }
-        if (($null -ne $lat[$PidA] -or $PidA -le 0) -and ($null -ne $lat[$PidB] -or $PidB -le 0)) { break }
+        if ($pending -eq 0) { break }
     }
     return $lat
 }
 
-# ---------- launch two isolated instances ----------
+# ---------- launch N isolated instances ----------
+$InstanceCount = 4
+$ev.instance_count = $InstanceCount
 Stop-AllViber
-$hA = Join-Path $work 'shot_home_a'; $tA = Join-Path $work 'shot_tmp_a'
-$hB = Join-Path $work 'shot_home_b'; $tB = Join-Path $work 'shot_tmp_b'
-foreach ($h in @($hA, $hB)) { New-FakeHome $h }
-foreach ($d in @($tA, $tB)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
-
-$pA = $null
-$pB = $null
-try {
-    $pA = Start-AppWithEnv $exeA @{ HOME = $hA; CFFIXED_USER_HOME = $hA; TMPDIR = $tA } $hA (Join-Path $work 'A')
-    Write-Host ("[A] pid={0}" -f $pA.Id)
-    Start-Sleep -Seconds 3
-    $pB = Start-AppWithEnv $exeB @{ HOME = $hB; CFFIXED_USER_HOME = $hB; TMPDIR = $tB } $hB (Join-Path $work 'B')
-    Write-Host ("[B] pid={0}" -f $pB.Id)
-} catch {
-    $ev.errors += "launch: $($_.Exception.Message)"
-    Write-Host ("[launch] failed: {0}" -f $_.Exception.Message)
+$procs = @()
+for ($i = 1; $i -le $InstanceCount; $i++) {
+    $h = Join-Path $work ("shot_home_{0}" -f $i)
+    $t = Join-Path $work ("shot_tmp_{0}" -f $i)
+    New-FakeHome $h
+    New-Item -ItemType Directory -Force -Path $t | Out-Null
+    try {
+        $p = Start-AppWithEnv $exeA @{ HOME = $h; CFFIXED_USER_HOME = $h; TMPDIR = $t } $h (Join-Path $work ("inst_{0}" -f $i))
+        $procs += [ordered]@{ index = $i; home = $h; tmp = $t; proc = $p }
+        Write-Host ("[instance {0}] pid={1}" -f $i, $p.Id)
+    } catch {
+        $ev.errors += ("launch {0}: {1}" -f $i, $_.Exception.Message)
+        Write-Host ("[instance {0}] launch failed: {1}" -f $i, $_.Exception.Message)
+    }
+    Start-Sleep -Seconds 2
 }
-$idA = if ($pA) { $pA.Id } else { 0 }
-$idB = if ($pB) { $pB.Id } else { 0 }
+Save-Evidence
+
+$targets = @($procs | ForEach-Object { $_.proc.Id })
 $lat = @{}
-try { $lat = Wait-BothWindows $idA $idB 420 } catch { $ev.errors += "wait: $($_.Exception.Message)" }
-foreach ($pair in @(@{ tag = 'a'; pid = $idA }, @{ tag = 'b'; pid = $idB })) {
-    $w = @()
-    if ($pair.pid -gt 0) { $w = @(Get-WindowRecords | Where-Object { $_.pid -eq $pair.pid -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending) }
+try { $lat = Wait-AllWindows $targets 600 } catch { $ev.errors += "wait: $($_.Exception.Message)" }
+
+foreach ($it in $procs) {
+    $tp = $it.proc.Id
+    $w = @(Get-WindowRecords | Where-Object { $_.pid -eq $tp -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending)
     $l = $null
-    if ($pair.pid -gt 0 -and $lat.ContainsKey($pair.pid)) { $l = $lat[$pair.pid] }
-    $ev.launch[$pair.tag] = [ordered]@{ pid = $pair.pid; ready = [bool]($w.Count -gt 0); latency_s = $l; windows = $w }
-    Write-Host ("[{0}] pid={1} ready={2} windows={3} latency={4}s" -f $pair.tag.ToUpper(), $pair.pid, ($w.Count -gt 0), $w.Count, $l)
+    if ($lat.ContainsKey($tp)) { $l = $lat[$tp] }
+    $ev.launch["i$($it.index)"] = [ordered]@{ index = $it.index; pid = $tp; ready = [bool]($w.Count -gt 0); latency_s = $l; home = $it.home; tmp = $it.tmp; windows = $w }
+    Write-Host ("[instance {0}] pid={1} ready={2} windows={3} latency={4}s" -f $it.index, $tp, ($w.Count -gt 0), $w.Count, $l)
 }
 Save-Evidence
 
@@ -218,15 +222,12 @@ function Save-Capture([string]$label, [string[]]$scArgs, [string]$file) {
     return $rec
 }
 
-Save-Capture 'full-screen' @('-x', '-t', 'png') (Join-Path $outDir 'viber-two-instances-full.png')
+Save-Capture 'full-screen' @('-x', '-t', 'png') (Join-Path $outDir 'viber-four-instances-full.png')
 
 $picks = @()
-$pairs = @()
-if ($pA) { $pairs += @{ tag = 'A'; pid = $pA.Id } }
-if ($pB) { $pairs += @{ tag = 'B'; pid = $pB.Id } }
-foreach ($pair in $pairs) {
-    $w = @($ev.windows | Where-Object { $_.pid -eq $pair.pid -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending)
-    if ($w.Count -gt 0) { $picks += [ordered]@{ tag = $pair.tag; pid = $pair.pid; window = $w[0] } }
+foreach ($it in $procs) {
+    $w = @($ev.windows | Where-Object { $_.pid -eq $it.proc.Id -and $_.layer -eq 0 } | Sort-Object { [int](($_.size -split 'x')[0]) } -Descending)
+    if ($w.Count -gt 0) { $picks += [ordered]@{ tag = "$($it.index)"; pid = $it.proc.Id; window = $w[0] } }
 }
 $ev.picked_windows = $picks
 Save-Evidence
@@ -241,8 +242,7 @@ foreach ($f in $ev.files) {
 }
 Save-Evidence
 
-if ($pA) { Stop-Process -Id $pA.Id -Force -ErrorAction SilentlyContinue }
-if ($pB) { Stop-Process -Id $pB.Id -Force -ErrorAction SilentlyContinue }
+foreach ($it in $procs) { try { Stop-Process -Id $it.proc.Id -Force -ErrorAction SilentlyContinue } catch {} }
 Stop-AllViber
 try { Run-Native 'hdiutil' @('detach', $mnt, '-force') | Out-Null } catch {}
 Write-Host ("captures: {0}" -f (($ev.captures | ForEach-Object { "$($_.label)=$($_.exit_code)/$($_.bytes)" }) -join ', '))
