@@ -1,7 +1,7 @@
-name: Haituo 1.6.7 Windows and macOS Signal diagnostic - NOT A RELEASE
+name: Haituo 1.6.7 WhatsApp startup and Signal media regression - NOT A RELEASE
 on:
   push:
-    branches: ['fix/1.6.7-signal-media']
+    branches: ['fix/1.6.7-whatsapp-startup']
   workflow_dispatch:
 permissions:
   contents: write
