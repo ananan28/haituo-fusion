@@ -24,6 +24,10 @@ DMGROOT="build/dmgroot"
 mkdir -p "$DMGROOT"
 cp -R "$APP" "$DMGROOT/"
 ln -s /Applications "$DMGROOT/Applications"
+if [ -n "${VIBER_APP_SRC:-}" ] && [ -d "$VIBER_APP_SRC" ]; then
+  cp -R "$VIBER_APP_SRC" "$DMGROOT/"
+  echo "bundled viber: $VIBER_APP_SRC"
+fi
 hdiutil create -volname "ViberMulti" -srcfolder "$DMGROOT" -ov -format UDZO "$DMG"
 
 echo "app: $APP"

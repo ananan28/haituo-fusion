@@ -70,6 +70,8 @@ final class Store: ObservableObject {
     @Published var keepAlive: Bool = true
     @Published var status: [String: Bool] = [:]
     @Published var errorText: String = ""
+    @Published var installing = false
+    @Published var installLog = ""
 
     let base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("ViberMulti", isDirectory: true)
     private var watchdog: Timer?
@@ -77,12 +79,14 @@ final class Store: ObservableObject {
     private var lastSaved: String = ""
     private var bootstrapped = false
     private var autoCount = 0
+    private var skipInstall = false
 
     init() {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--auto"), i + 1 < args.count, let n = Int(args[i + 1]) {
             autoCount = n
         }
+        if args.contains("--no-install") { skipInstall = true }
     }
 
     var viberPath: String {
@@ -117,6 +121,7 @@ final class Store: ObservableObject {
         }
         refreshStatus()
         startWatchdog()
+        if !skipInstall { installViberIfNeeded() }
         if autoCount > 0 {
             target = autoCount
             applyCountAndLaunch()
@@ -333,6 +338,84 @@ final class Store: ObservableObject {
         errorText = copied.isEmpty ? "没找到日志（也许 Viber 还没崩过，或日志被清了）" : "已导出 \(copied.count) 项到桌面"
         NSWorkspace.shared.activateFileViewerSelecting([zipURL])
     }
+
+    func installViberIfNeeded() {
+        if FileManager.default.isExecutableFile(atPath: viberPath) { return }
+        guard !installing else { return }
+        installing = true
+        installLog = "正在下载并安装 Viber（约 190MB）…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let ok = self.downloadAndInstallViber()
+            DispatchQueue.main.async {
+                self.installing = false
+                self.installLog = ok ? "Viber 已装好" : "Viber 安装失败，请从 viber.com 手动安装"
+                if ok { self.errorText = "" }
+            }
+        }
+    }
+
+    private func downloadAndInstallViber() -> Bool {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("ViberInst-\(UUID().uuidString)", isDirectory: true)
+        try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let dmg = tmp.appendingPathComponent("Viber.dmg")
+
+        var downloaded = false
+        for url in [
+            "https://download.cdn.viber.com/desktop/mac_10_14/Viber.dmg",
+            "https://download.viber.com/desktop/mac/online/Viber.dmg"
+        ] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+            p.arguments = ["-sS", "-L", "--retry", "3", "--retry-delay", "2", "--connect-timeout", "30", "--max-time", "900", "-o", dmg.path, url]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+            let size = (try? fm.attributesOfItem(atPath: dmg.path)[.size] as? Int) ?? 0
+            if size > 1024 { downloaded = true; break }
+        }
+        guard downloaded else { return false }
+
+        let mnt = tmp.appendingPathComponent("mnt")
+        try? fm.createDirectory(at: mnt, withIntermediateDirectories: true)
+        let h = Process()
+        h.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        h.arguments = ["attach", "-nobrowse", "-readonly", "-mountpoint", mnt.path, dmg.path]
+        h.standardOutput = FileHandle.nullDevice
+        h.standardError = FileHandle.nullDevice
+        try? h.run()
+        h.waitUntilExit()
+
+        let apps = (try? fm.contentsOfDirectory(at: mnt, includingPropertiesForKeys: nil)) ?? []
+        let viber = apps.first { $0.lastPathComponent.hasSuffix(".app") }
+        if viber == nil {
+            let det = Process()
+            det.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            det.arguments = ["detach", mnt.path, "-force"]
+            try? det.run(); det.waitUntilExit()
+            return false
+        }
+
+        let dest = URL(fileURLWithPath: "/Applications/Viber.app")
+        _ = try? fm.removeItem(at: dest)
+        var copied = false
+        do { try fm.copyItem(at: viber!, to: dest); copied = true } catch { copied = false }
+
+        let x = Process()
+        x.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        x.arguments = ["-dr", "com.apple.quarantine", dest.path]
+        try? x.run(); x.waitUntilExit()
+
+        let det = Process()
+        det.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        det.arguments = ["detach", mnt.path, "-force"]
+        try? det.run(); det.waitUntilExit()
+
+        let exe = dest.appendingPathComponent("Contents/MacOS/Viber")
+        return copied && fm.isExecutableFile(atPath: exe.path)
+    }
 }
 
 struct ContentView: View {
@@ -357,6 +440,21 @@ struct ContentView: View {
             .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
 
             Divider()
+
+            if !FileManager.default.isExecutableFile(atPath: store.viberPath) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                    Text("未检测到 Viber").font(.caption).foregroundColor(.orange)
+                    Button("自动安装 Viber") { store.installViberIfNeeded() }.disabled(store.installing)
+                    if !store.installLog.isEmpty {
+                        Text(store.installLog).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                .background(Color.orange.opacity(0.08))
+                Divider()
+            }
 
             HStack(spacing: 8) {
                 Text("数量").font(.caption).foregroundColor(.secondary)

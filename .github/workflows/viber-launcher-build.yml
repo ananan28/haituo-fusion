@@ -11,12 +11,37 @@ permissions:
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Show toolchain
         shell: bash
         run: swiftc --version && sw_vers
+      - name: Fetch Viber for bundling (best-effort)
+        shell: bash
+        run: |
+          set -u
+          VIBER_DMG=/tmp/Viber.dmg
+          VIBER_SRC=launcher/viber-src/Viber.app
+          rm -rf launcher/viber-src
+          ok=""
+          for url in https://download.cdn.viber.com/desktop/mac_10_14/Viber.dmg https://download.cdn.viber.com/desktop/mac_10_13/Viber.dmg https://download.viber.com/desktop/mac/online/Viber.dmg; do
+            curl -sS -L --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 -o "$VIBER_DMG" "$url" || continue
+            [ "$(stat -f%z "$VIBER_DMG" 2>/dev/null || echo 0)" -gt 1024 ] || continue
+            MNT=$(mktemp -d)
+            if hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$VIBER_DMG" >/dev/null 2>&1; then
+              APP=$(find "$MNT" -maxdepth 1 -name '*.app' | head -1)
+              if [ -n "$APP" ]; then mkdir -p launcher/viber-src && cp -R "$APP" "$VIBER_SRC"; ok=1; fi
+              hdiutil detach "$MNT" -force >/dev/null 2>&1 || true
+            fi
+            [ -n "$ok" ] && break
+          done
+          if [ -n "$ok" ] && [ -d "$VIBER_SRC" ]; then
+            echo "VIBER_APP_SRC=$VIBER_SRC" >> "$GITHUB_ENV"
+            echo "bundling Viber into DMG"
+          else
+            echo "Viber fetch failed; building launcher-only DMG (auto-install fallback covers it)"
+          fi
       - name: Build app bundle + dmg
         shell: bash
         run: |
@@ -51,7 +76,7 @@ jobs:
         run: |
           set -e
           APP=launcher/build/ViberLauncher.app
-          "$APP/Contents/MacOS/ViberLauncher" >/tmp/launcher.stdout 2>/tmp/launcher.stderr &
+          "$APP/Contents/MacOS/ViberLauncher" --no-install >/tmp/launcher.stdout 2>/tmp/launcher.stderr &
           sleep 10
           pgrep -lf ViberLauncher || { echo "launcher process died"; cat /tmp/launcher.stderr; exit 1; }
           echo "--- state file ---"
