@@ -22,8 +22,8 @@ jobs:
         run: |
           set -u
           VIBER_DMG=/tmp/Viber.dmg
-          VIBER_SRC=launcher/viber-src/Viber.app
-          rm -rf launcher/viber-src
+          VIBER_SRC="$GITHUB_WORKSPACE/viber-src/Viber.app"
+          rm -rf "$GITHUB_WORKSPACE/viber-src"
           ok=""
           for url in https://download.cdn.viber.com/desktop/mac_10_14/Viber.dmg https://download.cdn.viber.com/desktop/mac_10_13/Viber.dmg https://download.viber.com/desktop/mac/online/Viber.dmg; do
             curl -sS -L --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 900 -o "$VIBER_DMG" "$url" || continue
@@ -31,7 +31,7 @@ jobs:
             MNT=$(mktemp -d)
             if hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$VIBER_DMG" >/dev/null 2>&1; then
               APP=$(find "$MNT" -maxdepth 1 -name '*.app' | head -1)
-              if [ -n "$APP" ]; then mkdir -p launcher/viber-src && cp -R "$APP" "$VIBER_SRC"; ok=1; fi
+              if [ -n "$APP" ]; then mkdir -p "$GITHUB_WORKSPACE/viber-src" && cp -R "$APP" "$VIBER_SRC"; ok=1; fi
               hdiutil detach "$MNT" -force >/dev/null 2>&1 || true
             fi
             [ -n "$ok" ] && break
