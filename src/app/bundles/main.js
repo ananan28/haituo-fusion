@@ -29028,8 +29028,8 @@ async function nv() {
         Z.webContents.on(`before-mouse-event`,(_event,mouse)=>{if(mouse.type===`mouseDown`)process.send?.({type:`haituo-account-user-activation`})});
     }})(), Z.setMenuBarVisibility(!1), Z.webContents.on(`before-input-event`, rmRefresh), Z.webContents.on(`did-attach-webview`, (e, t) => {
         t.setBackgroundThrottling(!1);
-        HaituoWABootstrap.attach(t, Z.webContents);
-        HaituoNetwork.installWebRecovery(t, void 0, message => X.info(`haituo: ${message}`));
+        const haituoWARecoveryOwned = HaituoWABootstrap.attach(t, Z.webContents);
+        if(!haituoWARecoveryOwned)HaituoNetwork.installWebRecovery(t, void 0, message => X.info(`haituo: ${message}`));
         const workspaceId = HaituoWorkspaceBySession.get(t.session);
         workspaceId && (HaituoWebContentsByWorkspace.set(workspaceId, t), t.once(`destroyed`, () => HaituoWebContentsByWorkspace.get(workspaceId) === t && HaituoWebContentsByWorkspace.delete(workspaceId)));
         t.on(`before-input-event`, rmRefresh), t.on(`context-menu`, (e, n) => {

@@ -1605,7 +1605,13 @@ function haituoCurrentWebMessage(item) {
 }
 // 1.6.4 observer reattach mode. Resident/SQLCipher view deliberately disabled.
 let haituoLocalBilingualView = null;
-if(isWhatsApp())ipcRenderer.send('haituo-wa-preload-ready',{hooksReady:true,mode:'observer-1.6.4'});
+if(isWhatsApp()){
+    const haituoReportPreloadReady=()=>ipcRenderer.send('haituo-wa-preload-ready',{hooksReady:true,mode:'observer-1.6.4',url:location.href});
+    ipcRenderer.on('haituo-wa-preload-probe',haituoReportPreloadReady);
+    document.addEventListener('DOMContentLoaded',haituoReportPreloadReady,{once:true});
+    window.addEventListener('pageshow',haituoReportPreloadReady);
+    haituoReportPreloadReady();
+}
 function haituoMessageTarget(text) {
     const value=String(text).replace(/https?:\/\/\S+|www\.\S+/giu,` `);
     return (value.match(/\p{Script=Han}/gu)||[]).length > (value.match(/[a-z]+(?:['’][a-z]+)?/giu)||[]).length ? settings.targetLanguage || `en` : `zh-CN`;
