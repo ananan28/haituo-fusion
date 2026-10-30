@@ -68,8 +68,9 @@ function createController({electron:e,getConfig,requestJSON,openSettings=()=>{},
    else{
     const sources=await e.desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.bounds.width*display.scaleFactor),height:Math.round(display.bounds.height*display.scaleFactor)},fetchWindowIcons:false});
     if(token!==generation)return{ok:false,cancelled:true};
-    const source=pickScreenSource(sources,display.id);
+    const byDisplayId=sources.find(s=>s.display_id===String(display.id)),source=pickScreenSource(sources,display.id);
     if(!source||source.thumbnail.isEmpty())throw Error('无法获取当前屏幕，请检查系统屏幕录制权限与显示器连接后重试。');
+    if(source!==byDisplayId){const fallbackDisplay=(e.screen.getAllDisplays?.()||[]).find(d=>d.id===Number(source.display_id));if(fallbackDisplay)display=fallbackDisplay}
     captured=source.thumbnail;
    }
    if(token!==generation)return{ok:false,cancelled:true};
