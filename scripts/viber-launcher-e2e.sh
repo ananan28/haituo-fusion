@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 AUTO="${AUTO:-4}"
 OUT_DIR=audit-results
 mkdir -p "$OUT_DIR"
-LOG=/tmp/e2e.log
+LOG="$OUT_DIR/e2e-run.log"
 : > "$LOG"
 say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
@@ -47,13 +47,14 @@ VIBER_OK=no; [ -x "$VIBER" ] && VIBER_OK=yes
 say "viber executable: $VIBER_OK (source: ${INSTALL_SRC:-none})"
 
 say "== build launcher =="
-./launcher/build.sh >>"$LOG" 2>&1
+bash ./launcher/build.sh >>"$LOG" 2>&1
 LAUNCHER=launcher/build/ViberLauncher.app/Contents/MacOS/ViberLauncher
 LAUNCHER_OK=no; [ -x "$LAUNCHER" ] && LAUNCHER_OK=yes
 say "launcher built: $LAUNCHER_OK"
 
 if [ "$VIBER_OK" != "yes" ] || [ "$LAUNCHER_OK" != "yes" ]; then
   say "abort: prerequisites missing"
+  tail -40 "$LOG"
   python3 - "$OUT_DIR/launcher-e2e.json" "$VIBER_OK" "$LAUNCHER_OK" "${INSTALL_SRC:-none}" <<'PY'
 import json, sys
 path, viber_ok, launcher_ok, src = sys.argv[1:5]

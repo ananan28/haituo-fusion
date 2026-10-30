@@ -31,5 +31,6 @@ jobs:
           name: launcher-e2e
           path: |
             audit-results/launcher-e2e.json
+            audit-results/e2e-run.log
             launcher-e2e.png
           if-no-files-found: warn
