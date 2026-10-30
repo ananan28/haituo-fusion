@@ -1,0 +1,7 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{EventEmitter}=require('node:events');
+const source=fs.readFileSync(path.join(__dirname,'../src/app/bundles/main.js'),'utf8'),a=source.indexOf('const le = () => {'),b=source.indexOf('\nvar ue =',a);assert(a>0&&b>a);
+function setup(){const app=new EventEmitter,fatal=[],warnings=[],context={p:{app},process:new EventEmitter,V:{warn:(...args)=>warnings.push(args)},oe:(...args)=>fatal.push(args),ce:value=>value,require:()=>({owns:contents=>contents?.managed===true})};vm.runInNewContext(source.slice(a,b)+';le();',context);return{app,fatal,warnings}}
+test('managed WhatsApp guest crash does not exit the whole app',()=>{const x=setup();x.app.emit('render-process-gone',{}, {managed:true},{reason:'crashed',exitCode:1});assert.equal(x.fatal.length,0);assert.equal(x.warnings.length,1)});
+test('Signal, main renderer and unmanaged guests retain fatal-error reporting',()=>{for(const contents of [{},{managed:false}]){const x=setup();x.app.emit('render-process-gone',{},contents,{reason:'crashed',exitCode:1});assert.equal(x.fatal.length,1);assert.equal(x.warnings.length,0)}});
+test('clean exit does not create fatal error or recovery warning',()=>{const x=setup();x.app.emit('render-process-gone',{}, {managed:true},{reason:'clean-exit',exitCode:0});assert.equal(x.fatal.length,0);assert.equal(x.warnings.length,0)});

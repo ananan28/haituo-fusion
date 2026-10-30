@@ -1,5 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
+const managedGuests=new WeakSet();
 // Never attach CDP to a just-created guest. Electron 44 can initialize its
 // sandbox before startupData exists. Main-world hooks now run synchronously
 // from the sandboxed preload, before page scripts, without a debugger or gate.
@@ -13,6 +14,7 @@ function createBootstrap({app,webContents,log=()=>{},preloadPath,timers={setTime
  }
  function installSession(session,url){if(url){if(!allowed(url))throw Error('Invalid WhatsApp recovery URL');sessions.set(session,url)}else if(!sessions.has(session))sessions.set(session,'https://web.whatsapp.com/?lang=zh_CN')}
  function attach(contents,host){if(!sessions.has(contents.session))return false;if(watchers.has(contents))return true;
+  managedGuests.add(contents);
   const target=sessions.get(contents.session);let timer,recoveryTimer,retries=0,ready=false,loaded=false,domReady=false,dead=false,failed=false,announcedReady=false,generation=0;
   const alive=()=>!dead&&!contents.isDestroyed();
   const cancel=()=>{if(timer!==undefined)timers.clearTimeout(timer);timer=undefined};
@@ -49,7 +51,7 @@ function createBootstrap({app,webContents,log=()=>{},preloadPath,timers={setTime
    if([-2,-7,-21,-100,-101,-102,-105,-106,-109,-118,-130].includes(code))recover('network '+code);
   });
   contents.on('render-process-gone',(_event,details)=>{generation++;ready=false;loaded=false;domReady=false;failed=true;cancel();show('WhatsApp 渲染进程退出：'+details.reason);recover('renderer '+details.reason)});
-  contents.once('destroyed',()=>{dead=true;generation++;cancel();cancelRecovery();clear()});watchers.set(contents,{check});schedule();
+  contents.once('destroyed',()=>{managedGuests.delete(contents);dead=true;generation++;cancel();cancelRecovery();clear()});watchers.set(contents,{check});schedule();
   if(host&&!host.isDestroyed())execute('('+mirrorGuestPreload.toString()+')('+JSON.stringify({id:contents.id,preload:validate()})+')');
   return true;
  }
@@ -59,4 +61,4 @@ function mirrorGuestPreload({id,preload}){for(const node of document.querySelect
 function clearGuestStatus(id){document.querySelector('[data-haituo-wa-startup="'+id+'"]')?.remove()}
 function showGuestStatus({id,preload,reason,target}){for(const node of document.querySelectorAll('webview')){try{if(node.getWebContentsId()!==id)continue}catch{continue}
  let panel=document.querySelector('[data-haituo-wa-startup="'+id+'"]');if(!panel){panel=document.createElement('section');panel.dataset.haituoWaStartup=String(id);Object.assign(panel.style,{position:'absolute',inset:'0',zIndex:'5',background:'Canvas',color:'CanvasText',padding:'32px',boxSizing:'border-box'});const text=document.createElement('p'),button=document.createElement('button');button.textContent='重试 WhatsApp';button.addEventListener('click',()=>{text.textContent='正在重新打开 WhatsApp…';node.loadURL(target).catch(error=>{text.textContent='WhatsApp 重试失败：'+String(error.message).slice(0,200)})});panel.append(text,button);node.after(panel);const update=()=>{panel.style.display=node.dataset.haituoActive==='false'?'none':'block'};const observer=new MutationObserver(()=>{if(!panel.isConnected||!node.isConnected){panel.remove();observer.disconnect()}else update()});observer.observe(node,{attributes:true,attributeFilter:['data-haituo-active']});observer.observe(node.parentNode,{childList:true});update()}panel.querySelector('p').textContent=reason+'。正在尝试恢复；也可点击重试。不会清除登录数据。';return true}return false}
-module.exports={createBootstrap};
+module.exports={createBootstrap,owns:contents=>managedGuests.has(contents)};

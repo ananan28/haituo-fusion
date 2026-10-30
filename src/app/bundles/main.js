@@ -639,6 +639,10 @@ function ce(e) {
 const le = () => {
     p.app.on(`render-process-gone`, (e, t, n) => {
         let {reason: r, exitCode: a} = n;
+        if(r!==`clean-exit` && require('../js/haituo-wa-bootstrap.js').owns(t)){
+            V.warn(`WhatsApp guest renderer exited; isolated recovery`, {reason:r,exitCode:a});
+            return;
+        }
         r !== `clean-exit` && oe(`Render process is gone`, Error(`Reason: ${r}, Exit Code: ${a}`));
     }), process.on(`uncaughtException`, e => {
         oe(`Unhandled Error`, ce(e));
