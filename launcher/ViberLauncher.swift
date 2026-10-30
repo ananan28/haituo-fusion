@@ -8,13 +8,14 @@ struct Account: Identifiable, Codable, Equatable {
     var id: String
     var name: String
     var note: String
+    var proxy: String
     var selected: Bool
     var desired: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, note, selected, desired, enabled }
+    enum CodingKeys: String, CodingKey { case id, name, note, proxy, selected, desired, enabled }
 
-    init(id: String, name: String, note: String, selected: Bool = false, desired: Bool = false) {
-        self.id = id; self.name = name; self.note = note; self.selected = selected; self.desired = desired
+    init(id: String, name: String, note: String, proxy: String = "", selected: Bool = false, desired: Bool = false) {
+        self.id = id; self.name = name; self.note = note; self.proxy = proxy; self.selected = selected; self.desired = desired
     }
 
     init(from decoder: Decoder) throws {
@@ -22,6 +23,7 @@ struct Account: Identifiable, Codable, Equatable {
         id = try c.decode(String.self, forKey: .id)
         name = (try? c.decode(String.self, forKey: .name)) ?? "账号"
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        proxy = (try? c.decode(String.self, forKey: .proxy)) ?? ""
         selected = (try? c.decode(Bool.self, forKey: .selected)) ?? (try? c.decode(Bool.self, forKey: .enabled)) ?? false
         desired = (try? c.decode(Bool.self, forKey: .desired)) ?? false
     }
@@ -31,6 +33,7 @@ struct Account: Identifiable, Codable, Equatable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(note, forKey: .note)
+        try c.encode(proxy, forKey: .proxy)
         try c.encode(selected, forKey: .selected)
         try c.encode(desired, forKey: .desired)
     }
@@ -70,6 +73,8 @@ final class Store: ObservableObject {
     @Published var keepAlive: Bool = true
     @Published var status: [String: Bool] = [:]
     @Published var errorText: String = ""
+    @Published var installing = false
+    @Published var installLog = ""
 
     let base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("ViberMulti", isDirectory: true)
     private var watchdog: Timer?
@@ -77,12 +82,14 @@ final class Store: ObservableObject {
     private var lastSaved: String = ""
     private var bootstrapped = false
     private var autoCount = 0
+    private var skipInstall = false
 
     init() {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--auto"), i + 1 < args.count, let n = Int(args[i + 1]) {
             autoCount = n
         }
+        if args.contains("--no-install") { skipInstall = true }
     }
 
     var viberPath: String {
@@ -117,6 +124,7 @@ final class Store: ObservableObject {
         }
         refreshStatus()
         startWatchdog()
+        if !skipInstall { installViberIfNeeded() }
         if autoCount > 0 {
             target = autoCount
             applyCountAndLaunch()
@@ -234,6 +242,14 @@ final class Store: ObservableObject {
         env["HOME"] = home.path
         env["CFFIXED_USER_HOME"] = home.path
         env["TMPDIR"] = tmp.path + "/"
+        if !a.proxy.isEmpty {
+            env["HTTP_PROXY"] = a.proxy
+            env["HTTPS_PROXY"] = a.proxy
+            env["ALL_PROXY"] = a.proxy
+            env["http_proxy"] = a.proxy
+            env["https_proxy"] = a.proxy
+            env["all_proxy"] = a.proxy
+        }
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: viberPath)
@@ -279,6 +295,138 @@ final class Store: ObservableObject {
     func openDataFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([base])
     }
+
+    func exportDiagnostics() {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = fmt.string(from: Date())
+        let root = fm.temporaryDirectory.appendingPathComponent("viber-diag-\(stamp)", isDirectory: true)
+        var copied: [String] = []
+        func copyIfExists(_ src: URL, to name: String) {
+            guard fm.fileExists(atPath: src.path) else { return }
+            try? fm.copyItem(at: src, to: root.appendingPathComponent(name))
+            copied.append(name)
+        }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let diag = home.appendingPathComponent("Library/Logs/DiagnosticReports")
+        if let files = try? fm.contentsOfDirectory(at: diag, includingPropertiesForKeys: nil) {
+            let vib = files.filter { $0.lastPathComponent.lowercased().hasPrefix("viber") }
+            if !vib.isEmpty {
+                let dst = root.appendingPathComponent("crash-reports", isDirectory: true)
+                try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
+                for f in vib { try? fm.copyItem(at: f, to: dst.appendingPathComponent(f.lastPathComponent)) }
+                copied.append("crash-reports")
+            }
+        }
+        copyIfExists(home.appendingPathComponent("Library/Logs/Viber"), to: "viber-logs")
+
+        let profiles = base.appendingPathComponent("profiles", isDirectory: true)
+        if let ids = try? fm.contentsOfDirectory(at: profiles, includingPropertiesForKeys: nil), !ids.isEmpty {
+            let dstRoot = root.appendingPathComponent("profile-logs", isDirectory: true)
+            try? fm.createDirectory(at: dstRoot, withIntermediateDirectories: true)
+            for id in ids {
+                let logs = id.appendingPathComponent("Library/Logs")
+                if fm.fileExists(atPath: logs.path) {
+                    try? fm.copyItem(at: logs, to: dstRoot.appendingPathComponent("\(id.lastPathComponent)-Library-Logs"))
+                }
+            }
+            copied.append("profile-logs")
+        }
+        copyIfExists(stateFile, to: "accounts.json")
+
+        guard let desktop = fm.urls(for: .desktopDirectory, in: .userDomainMask).first else { return }
+        let zipURL = desktop.appendingPathComponent("Viber诊断-\(stamp).zip")
+        try? fm.removeItem(at: zipURL)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        p.arguments = ["-c", "-k", "--keepParent", root.path, zipURL.path]
+        try? p.run()
+        p.waitUntilExit()
+
+        errorText = copied.isEmpty ? "没找到日志（也许 Viber 还没崩过，或日志被清了）" : "已导出 \(copied.count) 项到桌面"
+        NSWorkspace.shared.activateFileViewerSelecting([zipURL])
+    }
+
+    func installViberIfNeeded() {
+        if FileManager.default.isExecutableFile(atPath: viberPath) { return }
+        guard !installing else { return }
+        installing = true
+        installLog = "正在下载并安装 Viber（约 190MB）…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let ok = self.downloadAndInstallViber()
+            DispatchQueue.main.async {
+                self.installing = false
+                self.installLog = ok ? "Viber 已装好" : "Viber 安装失败，请从 viber.com 手动安装"
+                if ok { self.errorText = "" }
+            }
+        }
+    }
+
+    private func downloadAndInstallViber() -> Bool {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("ViberInst-\(UUID().uuidString)", isDirectory: true)
+        try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let dmg = tmp.appendingPathComponent("Viber.dmg")
+
+        var downloaded = false
+        for url in [
+            "https://download.cdn.viber.com/desktop/mac_10_14/Viber.dmg",
+            "https://download.viber.com/desktop/mac/online/Viber.dmg"
+        ] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+            p.arguments = ["-sS", "-L", "--retry", "3", "--retry-delay", "2", "--connect-timeout", "30", "--max-time", "900", "-o", dmg.path, url]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+            let size = (try? fm.attributesOfItem(atPath: dmg.path)[.size] as? Int) ?? 0
+            if size > 1024 { downloaded = true; break }
+        }
+        guard downloaded else { return false }
+
+        let mnt = tmp.appendingPathComponent("mnt")
+        try? fm.createDirectory(at: mnt, withIntermediateDirectories: true)
+        let h = Process()
+        h.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        h.arguments = ["attach", "-nobrowse", "-readonly", "-mountpoint", mnt.path, dmg.path]
+        h.standardOutput = FileHandle.nullDevice
+        h.standardError = FileHandle.nullDevice
+        try? h.run()
+        h.waitUntilExit()
+
+        let apps = (try? fm.contentsOfDirectory(at: mnt, includingPropertiesForKeys: nil)) ?? []
+        let viber = apps.first { $0.lastPathComponent.hasSuffix(".app") }
+        if viber == nil {
+            let det = Process()
+            det.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            det.arguments = ["detach", mnt.path, "-force"]
+            try? det.run(); det.waitUntilExit()
+            return false
+        }
+
+        let dest = URL(fileURLWithPath: "/Applications/Viber.app")
+        _ = try? fm.removeItem(at: dest)
+        var copied = false
+        do { try fm.copyItem(at: viber!, to: dest); copied = true } catch { copied = false }
+
+        let x = Process()
+        x.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        x.arguments = ["-dr", "com.apple.quarantine", dest.path]
+        try? x.run(); x.waitUntilExit()
+
+        let det = Process()
+        det.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        det.arguments = ["detach", mnt.path, "-force"]
+        try? det.run(); det.waitUntilExit()
+
+        let exe = dest.appendingPathComponent("Contents/MacOS/Viber")
+        return copied && fm.isExecutableFile(atPath: exe.path)
+    }
 }
 
 struct ContentView: View {
@@ -304,6 +452,21 @@ struct ContentView: View {
 
             Divider()
 
+            if !FileManager.default.isExecutableFile(atPath: store.viberPath) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                    Text("未检测到 Viber").font(.caption).foregroundColor(.orange)
+                    Button("自动安装 Viber") { store.installViberIfNeeded() }.disabled(store.installing)
+                    if !store.installLog.isEmpty {
+                        Text(store.installLog).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                .background(Color.orange.opacity(0.08))
+                Divider()
+            }
+
             HStack(spacing: 8) {
                 Text("数量").font(.caption).foregroundColor(.secondary)
                 TextField("16", text: targetBinding).frame(width: 44).multilineTextAlignment(.center)
@@ -324,6 +487,7 @@ struct ContentView: View {
                 Text("选").frame(width: 22)
                 Text("账号").frame(width: 120, alignment: .leading)
                 Text("备注").frame(maxWidth: .infinity, alignment: .leading)
+                Text("代理").frame(width: 130, alignment: .leading)
                 Text("状态").frame(width: 44)
                 Text("操作").frame(width: 56)
             }
@@ -336,6 +500,8 @@ struct ContentView: View {
                         Toggle("", isOn: $a.selected).labelsHidden().frame(width: 22)
                         TextField("账号名", text: $a.name).textFieldStyle(.plain).frame(width: 120)
                         TextField("备注（手机号 / 用途）", text: $a.note).textFieldStyle(.plain).foregroundColor(.secondary)
+                        TextField("代理(可选)", text: $a.proxy).textFieldStyle(.plain).foregroundColor(.secondary).frame(width: 130)
+                            .help("填代理地址（如 http://127.0.0.1:7890 或 socks5://…）；留空则走系统网络/VPN")
                         Circle()
                             .fill(store.status[a.id] == true ? Color.green : Color.gray.opacity(0.45))
                             .frame(width: 8, height: 8)
@@ -365,6 +531,7 @@ struct ContentView: View {
                 Button("删除所选") { store.removeSelected() }.foregroundColor(.red)
                 Button("全部删除") { store.removeAll() }.foregroundColor(.red)
                 Button("数据目录") { store.openDataFolder() }
+                Button("导出诊断") { store.exportDiagnostics() }
             }
             .padding()
         }
