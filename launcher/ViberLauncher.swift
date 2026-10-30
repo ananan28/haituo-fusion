@@ -279,6 +279,60 @@ final class Store: ObservableObject {
     func openDataFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([base])
     }
+
+    func exportDiagnostics() {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = fmt.string(from: Date())
+        let root = fm.temporaryDirectory.appendingPathComponent("viber-diag-\(stamp)", isDirectory: true)
+        var copied: [String] = []
+        func copyIfExists(_ src: URL, to name: String) {
+            guard fm.fileExists(atPath: src.path) else { return }
+            try? fm.copyItem(at: src, to: root.appendingPathComponent(name))
+            copied.append(name)
+        }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let diag = home.appendingPathComponent("Library/Logs/DiagnosticReports")
+        if let files = try? fm.contentsOfDirectory(at: diag, includingPropertiesForKeys: nil) {
+            let vib = files.filter { $0.lastPathComponent.lowercased().hasPrefix("viber") }
+            if !vib.isEmpty {
+                let dst = root.appendingPathComponent("crash-reports", isDirectory: true)
+                try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
+                for f in vib { try? fm.copyItem(at: f, to: dst.appendingPathComponent(f.lastPathComponent)) }
+                copied.append("crash-reports")
+            }
+        }
+        copyIfExists(home.appendingPathComponent("Library/Logs/Viber"), to: "viber-logs")
+
+        let profiles = base.appendingPathComponent("profiles", isDirectory: true)
+        if let ids = try? fm.contentsOfDirectory(at: profiles, includingPropertiesForKeys: nil), !ids.isEmpty {
+            let dstRoot = root.appendingPathComponent("profile-logs", isDirectory: true)
+            try? fm.createDirectory(at: dstRoot, withIntermediateDirectories: true)
+            for id in ids {
+                let logs = id.appendingPathComponent("Library/Logs")
+                if fm.fileExists(atPath: logs.path) {
+                    try? fm.copyItem(at: logs, to: dstRoot.appendingPathComponent("\(id.lastPathComponent)-Library-Logs"))
+                }
+            }
+            copied.append("profile-logs")
+        }
+        copyIfExists(stateFile, to: "accounts.json")
+
+        guard let desktop = fm.urls(for: .desktopDirectory, in: .userDomainMask).first else { return }
+        let zipURL = desktop.appendingPathComponent("Viber诊断-\(stamp).zip")
+        try? fm.removeItem(at: zipURL)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        p.arguments = ["-c", "-k", "--keepParent", root.path, zipURL.path]
+        try? p.run()
+        p.waitUntilExit()
+
+        errorText = copied.isEmpty ? "没找到日志（也许 Viber 还没崩过，或日志被清了）" : "已导出 \(copied.count) 项到桌面"
+        NSWorkspace.shared.activateFileViewerSelecting([zipURL])
+    }
 }
 
 struct ContentView: View {
@@ -365,6 +419,7 @@ struct ContentView: View {
                 Button("删除所选") { store.removeSelected() }.foregroundColor(.red)
                 Button("全部删除") { store.removeAll() }.foregroundColor(.red)
                 Button("数据目录") { store.openDataFolder() }
+                Button("导出诊断") { store.exportDiagnostics() }
             }
             .padding()
         }
