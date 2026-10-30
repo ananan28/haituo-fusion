@@ -1,0 +1,38 @@
+name: Viber multi-account launcher build
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'launcher/**'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        shell: bash
+        run: swiftc --version && sw_vers
+      - name: Build app bundle
+        shell: bash
+        run: |
+          chmod +x launcher/build.sh
+          ./launcher/build.sh
+      - name: Verify bundle
+        shell: bash
+        run: |
+          set -e
+          APP=launcher/build/ViberLauncher.app
+          test -x "$APP/Contents/MacOS/ViberLauncher"
+          file "$APP/Contents/MacOS/ViberLauncher"
+          codesign -dv "$APP" 2>&1 | head -5 || true
+          plutil -lint "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ViberLauncher
+          path: launcher/ViberLauncher.zip
+          if-no-files-found: error
