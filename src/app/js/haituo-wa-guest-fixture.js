@@ -34,8 +34,11 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
    guest.on('render-process-gone',()=>state.crashes++);
    guest.on('preload-error',(_e,_file,error)=>report.errors.push('slot '+state.slot+': '+String(error.message)));
   });
-  const html='<!doctype html><html><body>'+[...fixtures].map(([partition,{slot,url}])=>'<webview data-caisheng-workspace="fixture-'+slot+'" data-haituo-active="'+(slot===0)+'" style="position:absolute;inset:0;width:880px;height:650px;visibility:'+(slot===0?'visible':'hidden')+'" partition="'+partition+'" preload="'+pathToFileURL(preloadPath).href+'" src="'+url+'"></webview>').join('')+'</body></html>';
-  await host.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
+  const html=[...fixtures].map(([partition,{slot,url}])=>'<webview data-caisheng-workspace="fixture-'+slot+'" data-haituo-active="'+(slot===0)+'" style="position:absolute;inset:0;width:880px;height:650px;visibility:'+(slot===0?'visible':'hidden')+'" partition="'+partition+'" preload="'+pathToFileURL(preloadPath).href+'" src="'+url+'"></webview>').join('');
+  // Load an empty host first: on Windows, awaiting a host that contains
+  // initial webviews also waits for their outstanding resources.
+  await host.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<!doctype html><html><body></body></html>'));
+  await host.webContents.executeJavaScript('document.body.innerHTML='+JSON.stringify(html)+';true');
   await until(()=>guests.size===6&&[...guests.values()].every(x=>x.dom&&x.handshakes),'six guest initialization');
   // At 13s a pending image still prevents did-finish-load. It must not block a
   // document whose isolated preload and DOM already work (the old 12s gate did).
