@@ -19,7 +19,7 @@ async function run({electron,bootstrap,preloadPath,reportPath,waitForAppReady,sh
    });
    bootstrap.installSession(guestSession,url);fixtures.set(partition,{slot,url});
   }
-  host=new BrowserWindow({show:true,width:900,height:700,webPreferences:{webviewTag:true,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+  host=new BrowserWindow({show:true,width:900,height:700,webPreferences:{partition:'persist:haituo-wa-fixture-host-'+Date.now(),webviewTag:true,sandbox:true,contextIsolation:true,nodeIntegration:false}});
   // Only THIS disposable offline host replaces the app's main-window guard.
   host.webContents.removeAllListeners('will-attach-webview');
   host.webContents.on('will-attach-webview',(event,prefs,params)=>{const fixture=fixtures.get(params.partition);if(!fixture||params.src!==fixture.url){event.preventDefault();report.errors.push('Fixture attach allowlist rejected');return}attachHandler(event,prefs,params);if(event.defaultPrevented)report.errors.push('Production attach rejected slot '+fixture.slot)});
