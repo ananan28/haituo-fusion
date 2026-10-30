@@ -9,7 +9,7 @@ DMG="ViberLauncher.dmg"
 rm -rf build "$DMG" "$APP_NAME.zip"
 mkdir -p "$APP/Contents/MacOS"
 
-swiftc -O -whole-module-optimization \
+swiftc -O -whole-module-optimization -parse-as-library \
     -o "$APP/Contents/MacOS/$APP_NAME" \
     ViberLauncher.swift \
     -framework SwiftUI -framework AppKit
