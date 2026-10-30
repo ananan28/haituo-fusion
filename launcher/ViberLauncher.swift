@@ -76,6 +76,14 @@ final class Store: ObservableObject {
     private var lastLaunch: [String: Date] = [:]
     private var lastSaved: String = ""
     private var bootstrapped = false
+    private var autoCount = 0
+
+    init() {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--auto"), i + 1 < args.count, let n = Int(args[i + 1]) {
+            autoCount = n
+        }
+    }
 
     var viberPath: String {
         let candidates = [
@@ -109,6 +117,10 @@ final class Store: ObservableObject {
         }
         refreshStatus()
         startWatchdog()
+        if autoCount > 0 {
+            target = autoCount
+            applyCountAndLaunch()
+        }
     }
 
     private func startWatchdog() {
