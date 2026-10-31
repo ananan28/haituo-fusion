@@ -1,6 +1,7 @@
 #!/bin/bash
-# Run one isolated Viber instance (no login), then inspect which REAL-domain and
-# profile locations hold device identity / install id, and dump config.db schema.
+# Decisive test: launch TWO isolated (logged-out) Viber instances, wait until each
+# initializes its profile, then compare device-identity sources (config.db, group
+# containers, shared plist) to see whether identity is per-instance or shared.
 set -uo pipefail
 OUT=audit-results/viber-identity2.txt
 mkdir -p audit-results
@@ -22,58 +23,59 @@ if [ ! -d "$VIBER" ]; then
   done
 fi
 
-# snapshot real-domain viber paths BEFORE launch
-say "=== BEFORE: real-domain viber paths ==="
-find "$HOME/Library/Group Containers" "$HOME/Library/Containers" "$HOME/Library/Application Support" "$HOME/Library/Preferences" -maxdepth 2 -iname '*viber*' 2>/dev/null | tee -a "$OUT"
-
 W=$(mktemp -d)
-H="$W/home"; T="$W/tmp"; mkdir -p "$H" "$T"
-say "=== launch isolated instance (no login) ==="
-HOME="$H" CFFIXED_USER_HOME="$H" TMPDIR="$T/" "$VIBER/Contents/MacOS/Viber" >/dev/null 2>&1 &
-PID=$!
-sleep 120
-say "pid=$PID alive=$(kill -0 $PID 2>/dev/null && echo yes || echo no)"
-kill "$PID" 2>/dev/null || true
+HA="$W/a/home"; TA="$W/a/tmp"
+HB="$W/b/home"; TB="$W/b/tmp"
+mkdir -p "$HA" "$TA" "$HB" "$TB"
+
+say "launch A"
+HOME="$HA" CFFIXED_USER_HOME="$HA" TMPDIR="$TA/" "$VIBER/Contents/MacOS/Viber" >/dev/null 2>&1 &
+PA=$!
+say "launch B"
+HOME="$HB" CFFIXED_USER_HOME="$HB" TMPDIR="$TB/" "$VIBER/Contents/MacOS/Viber" >/dev/null 2>&1 &
+PB=$!
+
+say "waiting for both profiles to initialize (config.db present)..."
+DBA=""; DBB=""
+deadline=$((SECONDS + 600))
+while [ $SECONDS -lt $deadline ]; do
+  [ -z "$DBA" ] && DBA=$(find "$HA" -name config.db 2>/dev/null | head -1)
+  [ -z "$DBB" ] && DBB=$(find "$HB" -name config.db 2>/dev/null | head -1)
+  if [ -n "$DBA" ] && [ -n "$DBB" ]; then break; fi
+  sleep 10
+done
+say "A alive=$(kill -0 $PA 2>/dev/null && echo yes || echo no) db=${DBA:-none}"
+say "B alive=$(kill -0 $PB 2>/dev/null && echo yes || echo no) db=${DBB:-none}"
+
+# give a little more time for plist/group-container writes, then kill
+sleep 20
+kill "$PA" "$PB" 2>/dev/null || true
 sleep 4
 
-say "=== AFTER: real-domain viber paths ==="
-find "$HOME/Library/Group Containers" "$HOME/Library/Containers" "$HOME/Library/Application Support" "$HOME/Library/Preferences" -maxdepth 3 -iname '*viber*' 2>/dev/null | tee -a "$OUT"
+say "=== A profile tree (viber-related) ==="
+find "$HA" -maxdepth 6 \( -iname '*viber*' -o -name 'config.db' \) 2>/dev/null | tee -a "$OUT"
+say "=== B profile tree (viber-related) ==="
+find "$HB" -maxdepth 6 \( -iname '*viber*' -o -name 'config.db' \) 2>/dev/null | tee -a "$OUT"
 
-say "=== full real plist ==="
-plutil -p "$HOME/Library/Preferences/com.viber.osx.plist" 2>&1 | tee -a "$OUT"
-
-say "=== group container contents ==="
-for g in "vgroup.com.viber.osx" "vgroup.com.viber.osx.macvibershare" "group.com.viber.osx"; do
-  d="$HOME/Library/Group Containers/$g"
-  if [ -d "$d" ]; then
-    say "### $g ###"
-    find "$d" -maxdepth 4 2>/dev/null | tee -a "$OUT"
-    for f in $(find "$d" -type f -maxdepth 4 2>/dev/null | head -20); do
-      say "-- file: $(basename "$f") ($(stat -f%z "$f") bytes) --"
-      if [ "$(stat -f%z "$f")" -lt 2000 ]; then cat "$f" 2>/dev/null | tee -a "$OUT"; echo; fi
-    done
-  else
-    say "### $g ### (not present)"
+dumpdb(){
+  local tag="$1" db="$2"
+  say "=== [$tag] config.db ($(stat -f%z "$db" 2>/dev/null||echo 0) bytes) ==="
+  if [ -f "$db" ]; then
+    sqlite3 "$db" ".tables" 2>&1 | tee -a "$OUT"
+    sqlite3 "$db" ".dump" 2>&1 | head -120 | tee -a "$OUT"
   fi
+}
+dumpdb A "$DBA"
+dumpdb B "$DBB"
+
+say "=== shared real-domain after two instances ==="
+find "$HOME/Library/Group Containers" "$HOME/Library/Containers" "$HOME/Library/Application Support" "$HOME/Library/Preferences" -maxdepth 3 -iname '*viber*' 2>/dev/null | tee -a "$OUT"
+say "--- real plist ---"
+plutil -p "$HOME/Library/Preferences/com.viber.osx.plist" 2>&1 | tee -a "$OUT"
+say "--- group containers ---"
+for g in "vgroup.com.viber.osx" "vgroup.com.viber.osx.macvibershare"; do
+  d="$HOME/Library/Group Containers/$g"
+  if [ -d "$d" ]; then say "### $g ###"; find "$d" -maxdepth 4 2>/dev/null | tee -a "$OUT"; else say "### $g ### (not present)"; fi
 done
-
-say "=== container com.viber.osx ==="
-find "$HOME/Library/Containers/com.viber.osx" -maxdepth 5 2>/dev/null | head -60 | tee -a "$OUT"
-
-say "=== fake profile (isolated HOME) contents ==="
-find "$H" -maxdepth 5 \( -iname '*viber*' -o -name 'config.db' -o -name '*.dat' \) 2>/dev/null | tee -a "$OUT"
-
-say "=== config.db schema ==="
-DB=$(find "$H" -name config.db 2>/dev/null | head -1)
-if [ -n "$DB" ]; then
-  say "db path: $DB"
-  sqlite3 "$DB" ".tables" 2>&1 | tee -a "$OUT"
-  sqlite3 "$DB" ".schema" 2>&1 | grep -iE "CREATE TABLE" | head -60 | tee -a "$OUT"
-else
-  say "no config.db found in isolated HOME"
-fi
-
-say "=== binary: identity-related path strings ==="
-strings "$VIBER/Contents/MacOS/Viber" 2>/dev/null | grep -iE "Group Containers|vgroup\.com\.viber|/Containers/|IOPlatformUUID|com\.viber\.osx/" | sort -u | head -40 | tee -a "$OUT"
 
 say DONE
