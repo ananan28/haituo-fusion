@@ -27,6 +27,9 @@ fi
 
 say "=== 1) build dylib + helper ==="
 clang -dynamiclib -o /tmp/spoof_uuid.dylib scripts/spoof_uuid.c -framework IOKit -framework CoreFoundation 2>&1 | tee -a "$OUT"
+codesign --force --sign - /tmp/spoof_uuid.dylib 2>&1 | tee -a "$OUT"
+say "dylib signature:"
+codesign -dv /tmp/spoof_uuid.dylib 2>&1 | grep -iE "flags|Signature" | tee -a "$OUT"
 clang -o /tmp/spoof_test scripts/spoof_test.c -framework IOKit -framework CoreFoundation 2>&1 | tee -a "$OUT"
 
 say "=== 2) helper WITHOUT injection ==="
@@ -55,13 +58,17 @@ kill "$P0" 2>/dev/null || true
 
 say "=== 5) inject into re-signed Viber ==="
 W=$(mktemp -d); H="$W/home"; T="$W/tmp"; mkdir -p "$H" "$T"
-rm -f /tmp/spoof_uuid.log
-HOME="$H" CFFIXED_USER_HOME="$H" TMPDIR="$T/" DYLD_INSERT_LIBRARIES=/tmp/spoof_uuid.dylib FAKE_IO_PLATFORM_UUID="$FAKE" "$VIBER/Contents/MacOS/Viber" >/dev/null 2>&1 &
+rm -f /tmp/spoof_uuid.log /tmp/viber.err /tmp/viber.out
+HOME="$H" CFFIXED_USER_HOME="$H" TMPDIR="$T/" DYLD_INSERT_LIBRARIES=/tmp/spoof_uuid.dylib FAKE_IO_PLATFORM_UUID="$FAKE" "$VIBER/Contents/MacOS/Viber" >/tmp/viber.out 2>/tmp/viber.err &
 P=$!
 sleep 45
 say "viber pid=$P alive=$(kill -0 $P 2>/dev/null && echo yes || echo no)"
 say "--- hook log (did dylib load into Viber?) ---"
 cat /tmp/spoof_uuid.log 2>/dev/null | tee -a "$OUT"
+say "--- viber stderr (dyld error?) ---"
+tail -40 /tmp/viber.err | tee -a "$OUT"
+say "--- viber stdout (tail) ---"
+tail -15 /tmp/viber.out | tee -a "$OUT"
 say "--- dylib mapped in Viber? ---"
 vmmap "$P" 2>/dev/null | grep -i spoof | head -3 | tee -a "$OUT"
 kill "$P" 2>/dev/null || true
