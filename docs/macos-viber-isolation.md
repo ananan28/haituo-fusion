@@ -188,3 +188,13 @@
 - 规模化路线（与 [[project-viber-multiaccount-strategy]] 一致并坐实）：**每账号一台 VM**（VM 有独立虚拟硬件 UUID）或 **Android 模拟器/容器**（每个容器是独立"设备"）。这不仅是 IP 隔离问题，设备身份同样需要 VM/容器。
 
 **How to apply：** 若继续，方向从"改 Viber 环境变量隔离"转向"VM/容器规模化"；GUI 启动器可作为容器外的统一管理入口，但不再以"单机多账号"为目标。
+
+## 12. hook 伪造硬件 UUID（2026-10-31 晚追加，机制已实证）
+
+第 11 节结论"裸机不可行"已过时——**hook 路线机制上已走通**，最终待真机账号验证。
+
+- 原理：注入 `scripts/spoof_uuid.c`（dyld interpose，hook `IORegistryEntryCreateCFProperty`/`IORegistryEntrySearchCFProperty`），按环境变量 `FAKE_IO_PLATFORM_UUID` 给每个进程返回不同的 `IOPlatformUUID`。
+- 三个关键坑（run 41159140138，commit `0bfe4031`）：① Viber 开 hardened runtime（`flags=0x10000(runtime)`）→ 直接注入被拒，需 `codesign --force --deep --sign - --entitlements <entitlements>` 重签去 runtime；② 注入库必须 x86_64（Viber 是 x86_64，Apple Silicon 上走 Rosetta），编译成 universal；③ 不能 interpose `sysctlbyname`（dlsym 递归崩溃），只 hook IOKit。
+- 实证：helper 测试 IOPlatformUUID 被替换为假值；`vmmap` 证实 dylib 映射进 Viber 进程、Viber 带注入正常存活。
+- **未验证**：Viber 服务端是否真按新 UUID 放行第二个账号登录（只有真机真账号能证）。
+- 已集成进启动器（commit `6d1575a6`）：每账号 `deviceUUID`、启动注入 dylib + 假 UUID、「准备 Viber（重签名）」按钮。

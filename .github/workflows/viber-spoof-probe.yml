@@ -1,0 +1,33 @@
+name: Viber UUID spoof probe
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'scripts/viber-spoof-probe.sh'
+      - 'scripts/spoof_uuid.c'
+      - 'scripts/spoof_test.c'
+      - '.github/workflows/viber-spoof-probe.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run spoof probe
+        shell: bash
+        run: |
+          chmod +x scripts/viber-spoof-probe.sh
+          bash scripts/viber-spoof-probe.sh
+      - name: Print evidence
+        if: always()
+        shell: bash
+        run: cat audit-results/viber-spoof.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-spoof
+          path: audit-results/viber-spoof.txt
+          if-no-files-found: error

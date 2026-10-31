@@ -9,13 +9,14 @@ struct Account: Identifiable, Codable, Equatable {
     var name: String
     var note: String
     var proxy: String
+    var deviceUUID: String
     var selected: Bool
     var desired: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, note, proxy, selected, desired, enabled }
+    enum CodingKeys: String, CodingKey { case id, name, note, proxy, deviceUUID, selected, desired, enabled }
 
-    init(id: String, name: String, note: String, proxy: String = "", selected: Bool = false, desired: Bool = false) {
-        self.id = id; self.name = name; self.note = note; self.proxy = proxy; self.selected = selected; self.desired = desired
+    init(id: String, name: String, note: String, proxy: String = "", deviceUUID: String = "", selected: Bool = false, desired: Bool = false) {
+        self.id = id; self.name = name; self.note = note; self.proxy = proxy; self.deviceUUID = deviceUUID; self.selected = selected; self.desired = desired
     }
 
     init(from decoder: Decoder) throws {
@@ -24,6 +25,7 @@ struct Account: Identifiable, Codable, Equatable {
         name = (try? c.decode(String.self, forKey: .name)) ?? "账号"
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         proxy = (try? c.decode(String.self, forKey: .proxy)) ?? ""
+        deviceUUID = (try? c.decode(String.self, forKey: .deviceUUID)) ?? ""
         selected = (try? c.decode(Bool.self, forKey: .selected)) ?? (try? c.decode(Bool.self, forKey: .enabled)) ?? false
         desired = (try? c.decode(Bool.self, forKey: .desired)) ?? false
     }
@@ -34,6 +36,7 @@ struct Account: Identifiable, Codable, Equatable {
         try c.encode(name, forKey: .name)
         try c.encode(note, forKey: .note)
         try c.encode(proxy, forKey: .proxy)
+        try c.encode(deviceUUID, forKey: .deviceUUID)
         try c.encode(selected, forKey: .selected)
         try c.encode(desired, forKey: .desired)
     }
@@ -250,6 +253,15 @@ final class Store: ObservableObject {
             env["https_proxy"] = a.proxy
             env["all_proxy"] = a.proxy
         }
+        if viberPrepared, let dylib = spoofDylibPath {
+            env["DYLD_INSERT_LIBRARIES"] = dylib
+            var u = a.deviceUUID
+            if u.isEmpty { u = UUID().uuidString }
+            env["FAKE_IO_PLATFORM_UUID"] = u
+            if a.deviceUUID.isEmpty, let i = accounts.firstIndex(where: { $0.id == a.id }) {
+                accounts[i].deviceUUID = u
+            }
+        }
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: viberPath)
@@ -427,6 +439,54 @@ final class Store: ObservableObject {
         let exe = dest.appendingPathComponent("Contents/MacOS/Viber")
         return copied && fm.isExecutableFile(atPath: exe.path)
     }
+
+    var spoofDylibPath: String? {
+        guard let r = Bundle.main.resourceURL?.appendingPathComponent("spoof_uuid.dylib").path,
+              FileManager.default.isReadableFile(atPath: r) else { return nil }
+        return r
+    }
+
+    var viberPrepared: Bool {
+        FileManager.default.fileExists(atPath: base.appendingPathComponent(".viber-prepared").path)
+    }
+
+    private func run(_ tool: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: tool)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        try? p.run()
+        p.waitUntilExit()
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    func prepareViber() {
+        let app = "/Applications/Viber.app"
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: app) else {
+            errorText = "找不到 /Applications/Viber.app（先安装 Viber）"
+            return
+        }
+        let sig = run("/usr/bin/codesign", ["-dv", app])
+        if sig.contains("adhoc") {
+            try? "1".write(to: base.appendingPathComponent(".viber-prepared"), atomically: true, encoding: .utf8)
+            errorText = "Viber 已就绪，多账号模式已开启"
+            return
+        }
+        let entRaw = run("/usr/bin/codesign", ["-d", "--entitlements", ":-", app])
+        let entFile = fm.temporaryDirectory.appendingPathComponent("viber-ent.plist")
+        try? entRaw.write(to: entFile, atomically: true, encoding: .utf8)
+        _ = run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--entitlements", entFile.path, app])
+        let sig2 = run("/usr/bin/codesign", ["-dv", app])
+        if sig2.contains("adhoc") {
+            try? "1".write(to: base.appendingPathComponent(".viber-prepared"), atomically: true, encoding: .utf8)
+            errorText = "Viber 已重签名，多账号模式已开启（登录前请挂 VPN）"
+        } else {
+            errorText = "重签名失败：确认 Viber 没在运行、且你有管理员权限"
+        }
+    }
 }
 
 struct ContentView: View {
@@ -464,6 +524,19 @@ struct ContentView: View {
                 }
                 .padding(.horizontal).padding(.vertical, 6)
                 .background(Color.orange.opacity(0.08))
+                Divider()
+            }
+
+            if store.spoofDylibPath != nil && !store.viberPrepared {
+                HStack(spacing: 8) {
+                    Image(systemName: "key.fill").foregroundColor(.blue)
+                    Text("多账号模式未开启").font(.caption).foregroundColor(.blue)
+                    Button("准备 Viber（重签名）") { store.prepareViber() }
+                    Text("需重签名 Viber 一次，之后每个账号用独立设备身份").font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                .background(Color.blue.opacity(0.06))
                 Divider()
             }
 
