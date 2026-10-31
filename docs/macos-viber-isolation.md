@@ -171,3 +171,20 @@
 | 40977446384 | 9f435288 | success | 截图修正版：`-l <窗口id>` 逐窗口抓到 A/B 两张（QR 码不同），冷启动 388.9 s |
 | 40978053013 | 8af21b7a | success | v8：16 实例全部出窗口（216 MB/实例）；plist 键清单导出，无账号字段 |
 | 40979653614 | a44cb8cd | success | 四实例截图：4/4 出窗口、4 张窗口图互不相同（QR 各异），冷启动 201.7 s |
+
+## 11. 真实账号登录与设备身份（2026-10-31 追加）
+
+**结论：多窗口/多进程成立，但"多账号登录"在同一台 Mac 上不可行——Viber 的设备身份绑定了硬件 UDID。**
+
+实测链路（用户真机 + CI 反向）：
+
+1. 挂 VPN（全局/TUN）后，**第一个账号能登录，第二个起全部失败**，且诊断包无崩溃报告 → 不是崩溃，是服务端把第二个实例当成"同一台设备"拒了。
+2. 二进制逆向（run 41156778266）：Viber 20.7.0 是 Qt6 非沙盒应用，钥匙串只被 AppCenter 分析 SDK 用来存 InstallId（会话不在钥匙串）；config.db 的 `Accounts` 表有 `DeviceKey` 字段；共享容器 `~/Library/Containers/com.viber.osx.macvibershare/` 只是空壳，无身份文件。
+3. 决定性证据（probe3，run 41157641637）：二进制内有字符串 **`Error while generating hash from UDID and deviceKey`** 与 **`IOPlatformUUID`** —— 即设备身份 = `hash(UDID + deviceKey)`，其中 UDID 来自硬件 `IOPlatformUUID`。同一台 Mac 的所有实例读到的 IOPlatformUUID 完全相同，无法 per-process 伪造。
+
+**因此：**
+- 多开（多个窗口/进程、profile 分离）——可行，已交付 GUI 启动器。
+- 多账号（每个窗口登不同账号）——裸机 macOS 不可行，因为设备身份=硬件 UDID。
+- 规模化路线（与 [[project-viber-multiaccount-strategy]] 一致并坐实）：**每账号一台 VM**（VM 有独立虚拟硬件 UUID）或 **Android 模拟器/容器**（每个容器是独立"设备"）。这不仅是 IP 隔离问题，设备身份同样需要 VM/容器。
+
+**How to apply：** 若继续，方向从"改 Viber 环境变量隔离"转向"VM/容器规模化"；GUI 启动器可作为容器外的统一管理入口，但不再以"单机多账号"为目标。

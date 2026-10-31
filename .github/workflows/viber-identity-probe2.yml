@@ -1,0 +1,31 @@
+name: Viber identity probe 2
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fusion/viber-windows']
+    paths:
+      - 'scripts/viber-identity-probe2.sh'
+      - '.github/workflows/viber-identity-probe2.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run identity probe 2
+        shell: bash
+        run: |
+          chmod +x scripts/viber-identity-probe2.sh
+          bash scripts/viber-identity-probe2.sh
+      - name: Print evidence
+        if: always()
+        shell: bash
+        run: cat audit-results/viber-identity2.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viber-identity2
+          path: audit-results/viber-identity2.txt
+          if-no-files-found: error
