@@ -1,16 +1,13 @@
-// Spoof IOPlatformUUID / IOPlatformSerialNumber / kern.uuid per-process.
+// Spoof IOPlatformUUID / IOPlatformSerialNumber per-process via dyld interpose.
 // Loaded via DYLD_INSERT_LIBRARIES; fake value from env FAKE_IO_PLATFORM_UUID.
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/sysctl.h>
 
 static CFTypeRef (*real_CreateCFProperty)(io_registry_entry_t, CFStringRef, CFAllocatorRef, IOOptionBits) = NULL;
 static CFTypeRef (*real_SearchCFProperty)(io_registry_entry_t, CFStringRef, CFStringRef, CFAllocatorRef, IOOptionBits) = NULL;
-static int (*real_sysctlbyname)(const char *, void *, size_t *, void *, size_t) = NULL;
 
 static const char *fake_uuid(void) {
     const char *f = getenv("FAKE_IO_PLATFORM_UUID");
@@ -36,22 +33,6 @@ static CFTypeRef my_SearchCFProperty(io_registry_entry_t entry, CFStringRef plan
     return real_SearchCFProperty(entry, plane, key, allocator, options);
 }
 
-static int my_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    if (!real_sysctlbyname) real_sysctlbyname = dlsym(RTLD_NEXT, "sysctlbyname");
-    const char *f = fake_uuid();
-    if (f && name && strcmp(name, "kern.uuid") == 0 && oldp && oldlenp) {
-        size_t need = strlen(f) + 1;
-        if (*oldlenp >= need) {
-            memcpy(oldp, f, need);
-            *oldlenp = need;
-            return 0;
-        }
-        *oldlenp = need;
-        return -1;
-    }
-    return real_sysctlbyname(name, oldp, oldlenp, newp, newlen);
-}
-
 __attribute__((constructor)) static void init(void) {
     const char *f = fake_uuid();
     FILE *log = fopen("/tmp/spoof_uuid.log", "a");
@@ -63,5 +44,4 @@ typedef struct { const void *replacement; const void *replacee; } interpose_t;
 static const interpose_t interposers[] __attribute__((used, section("__DATA,__interpose"))) = {
     { (const void *)my_CreateCFProperty, (const void *)IORegistryEntryCreateCFProperty },
     { (const void *)my_SearchCFProperty, (const void *)IORegistryEntrySearchCFProperty },
-    { (const void *)my_sysctlbyname, (const void *)sysctlbyname },
 };
