@@ -41,9 +41,17 @@ cat /tmp/spoof_uuid.log 2>/dev/null | tee -a "$OUT"
 say "=== 4) re-sign Viber ad-hoc (strip hardened runtime, keep entitlements) ==="
 codesign -d --entitlements :- "$VIBER" > /tmp/viber-ent.plist 2>/dev/null
 say "entitlements extracted bytes=$(stat -f%z /tmp/viber-ent.plist 2>/dev/null || echo 0)"
-codesign --force --sign - --entitlements /tmp/viber-ent.plist "$VIBER" 2>&1 | tee -a "$OUT"
+codesign --force --deep --sign - --entitlements /tmp/viber-ent.plist "$VIBER" 2>&1 | tee -a "$OUT"
 say "after re-sign flags:"
 codesign -dv --verbose=2 "$VIBER" 2>&1 | grep -iE "flags|Signature" | tee -a "$OUT"
+
+say "=== 4b) re-signed Viber WITHOUT injection (baseline: does re-sign alone break it?) ==="
+W=$(mktemp -d); H="$W/home"; T="$W/tmp"; mkdir -p "$H" "$T"
+HOME="$H" CFFIXED_USER_HOME="$H" TMPDIR="$T/" "$VIBER/Contents/MacOS/Viber" >/dev/null 2>&1 &
+P0=$!
+sleep 30
+say "baseline pid=$P0 alive=$(kill -0 $P0 2>/dev/null && echo yes || echo no)"
+kill "$P0" 2>/dev/null || true
 
 say "=== 5) inject into re-signed Viber ==="
 W=$(mktemp -d); H="$W/home"; T="$W/tmp"; mkdir -p "$H" "$T"
