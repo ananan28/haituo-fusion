@@ -34,9 +34,10 @@ function createBootstrap({app,webContents,log=()=>{},preloadPath,timers={setTime
    // readiness, never chat contents, to recover that missed lifecycle event.
    const token=generation;
    if(ready&&allowed(contents.getURL())&&typeof contents.executeJavaScript==='function'){
-    try{const state=await contents.executeJavaScript('({interactive:document.readyState!=="loading",body:!!document.body})');if(!alive()||token!==generation)return;if(state?.interactive&&state.body)domReady=true;if(complete())return}catch{}
+    let deadline;
+    try{const state=await Promise.race([contents.executeJavaScript('({interactive:document.readyState!=="loading",body:!!document.body})'),new Promise(resolve=>{deadline=timers.setTimeout(()=>resolve(null),1500)})]);if(!alive()||token!==generation)return;if(state?.interactive&&state.body)domReady=true;if(complete())return}catch{}finally{if(deadline!==undefined)timers.clearTimeout(deadline)}
    }
-   if(!alive()||token!==generation)return;
+   if(!alive()||token!==generation||complete())return;
    const url=contents.getURL();show(!url||url==='about:blank'?'WhatsApp 页面尚未启动':'WhatsApp 页面启动超时');recover('startup timeout');
   }
   contents.on('ipc-message',(_event,channel,payload)=>{if(channel!=='haituo-wa-preload-ready'||payload?.hooksReady!==true)return;if(payload.url&&payload.url!==contents.getURL())return;ready=true;log('WA sandbox preload + isolated observer ready');complete()});
