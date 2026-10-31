@@ -25,10 +25,11 @@ if [ ! -d "$VIBER" ]; then
   done
 fi
 
-say "=== 1) build dylib + helper ==="
-clang -dynamiclib -o /tmp/spoof_uuid.dylib scripts/spoof_uuid.c -framework IOKit -framework CoreFoundation 2>&1 | tee -a "$OUT"
+say "=== 1) build dylib (x86_64 to match Viber) + helper ==="
+clang -arch x86_64 -arch arm64 -dynamiclib -o /tmp/spoof_uuid.dylib scripts/spoof_uuid.c -framework IOKit -framework CoreFoundation 2>&1 | tee -a "$OUT"
 codesign --force --sign - /tmp/spoof_uuid.dylib 2>&1 | tee -a "$OUT"
-say "dylib signature:"
+say "dylib arch + signature:"
+file /tmp/spoof_uuid.dylib | tee -a "$OUT"
 codesign -dv /tmp/spoof_uuid.dylib 2>&1 | grep -iE "flags|Signature" | tee -a "$OUT"
 clang -o /tmp/spoof_test scripts/spoof_test.c -framework IOKit -framework CoreFoundation 2>&1 | tee -a "$OUT"
 
