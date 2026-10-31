@@ -1,6 +1,7 @@
 'use strict';
 const e=require('electron'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
 const resources=process.argv[2],out=process.argv[3],report={checks:[],errors:[],installedAppTCC:'UNTESTED: CI helper/harness permission does not prove installed application permission'};
+e.protocol.registerSchemesAsPrivileged([{scheme:'attachment',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 e.app.on('window-all-closed',()=>{}); // Keep the harness alive until the report is written.
 const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},90000);
 (async()=>{await e.app.whenReady();fs.mkdirSync(out,{recursive:true});
@@ -21,5 +22,6 @@ const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},9
    finally{fs.rmSync(folder,{recursive:true,force:true})}
   }else report.nativeScreenCapture='UNTESTED: CI screen recording permission not granted';
  }
+ report.signalContextMenu=await require('./context-menu-electron.cjs')(e,resources);report.checks.push({id:'SIGNAL-NATIVE-CONTEXT-MENU-VIEWS',ok:true,result:report.signalContextMenu});
  report.ok=true;
 })().catch(error=>{report.ok=false;report.errors.push(String(error.stack||error))}).finally(()=>{clearTimeout(guard);fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'capture-ui-report.json'),JSON.stringify(report,null,2));console.log('CAPTURE_UI_REPORT',JSON.stringify(report));e.app.exit(report.ok?0:1)});

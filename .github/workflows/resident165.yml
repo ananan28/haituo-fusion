@@ -32,7 +32,7 @@ jobs:
       - name: Install isolated DOM test dependencies
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Synthetic WhatsApp coverage and frozen Signal component regression
-        run: node --test scripts/wa-rollback.dom.cjs scripts/signal-attachments.dom.cjs
+        run: node --test scripts/wa-rollback.dom.cjs scripts/signal-attachments.dom.cjs scripts/context-menu.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
       - name: Verify exact diagnostic client source

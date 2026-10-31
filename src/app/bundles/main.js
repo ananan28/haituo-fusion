@@ -4869,75 +4869,10 @@ const At = (e, r, a, o, s) => {
     let l = a == null ? r : [ a, ...r ], u = c.availableSpellCheckerLanguages, d = kt(l, u, `en`);
     Ot.info(`spellcheck: user locales:`, l), Ot.info(`spellcheck: available spellchecker languages:`, u), 
     Ot.info(`spellcheck: setting languages to:`, d), c.setSpellCheckerLanguages(d), 
-    e.webContents.on(`context-menu`, (r, a) => {
-        let {editFlags: c} = a, l = !!a.misspelledWord, u = !!a.linkURL, d = a.mediaType === `image` && a.hasImageContents && a.srcURL && !a.selectionText.trim();
-        if (a.isEditable || c.canCopy || u || d) {
-            let r = [];
-            if (l && (a.dictionarySuggestions.length > 0 ? r.push(...a.dictionarySuggestions.map(t => ({
-                label: t,
-                click: () => {
-                    e.webContents.replaceMisspelling(t);
-                }
-            }))) : r.push({
-                label: o(`icu:contextMenuNoSuggestions`),
-                enabled: !1
-            }), r.push({
-                type: `separator`
-            })), a.isEditable && (c.canUndo && r.push({
-                label: o(`icu:editMenuUndo`),
-                role: `undo`
-            }), c.canRedo && r.push({
-                label: o(`icu:editMenuRedo`),
-                role: `redo`
-            }), (c.canUndo || c.canRedo) && r.push({
-                type: `separator`
-            }), c.canCut && r.push({
-                label: o(`icu:editMenuCut`),
-                role: `cut`
-            })), c.canCopy || u || d) {
-                let e, c;
-                u ? (e = () => {
-                    p.clipboard.writeText(a.linkURL);
-                }, c = o(`icu:contextMenuCopyLink`)) : d ? (e = async () => {
-                    let e = n.Nt(a.srcURL);
-                    if (!e || e.protocol !== `attachment:` || e.searchParams.get(`disposition`) === `temporary`) return;
-                    let r = new Request(e, {
-                        method: `GET`
-                    });
-                    try {
-                        let e = await Et(r);
-                        if (!e.ok) return;
-                        let n = e.headers.get(`content-type`) || t.zi;
-                        await p.clipboard.write([ new p.ClipboardItem({
-                            [n]: new Blob([ await e.arrayBuffer() ], {
-                                type: n
-                            })
-                        }) ]);
-                    } catch (e) {
-                        s.error(`Failed to load image`, e);
-                    }
-                }, c = o(`icu:contextMenuCopyImage`)) : c = o(`icu:editMenuCopy`), r.push({
-                    label: c,
-                    role: u || d ? void 0 : `copy`,
-                    click: e
-                });
-            }
-            c.canPaste && !d && r.push({
-                label: o(`icu:editMenuPaste`),
-                role: `paste`
-            });
-            let f = a.formControlType === `none`;
-            c.canPaste && (c.canEditRichly || f) && !d && r.push({
-                label: o(`icu:editMenuPasteAndMatchStyle`),
-                role: `pasteAndMatchStyle`
-            }), c.canSelectAll && a.isEditable && r.push({
-                label: o(`icu:editMenuSelectAll`),
-                role: `selectAll`
-            }), p.Menu.buildFromTemplate(r).popup({
-                window: e,
-                frame: a.frame ?? void 0
-            });
-        }
+    require('../js/haituo-context-menu.js').install({
+        electron:p, contents:e.webContents, getWindow:()=>e,
+        log:message=>s.error(message),
+        labels:{noSuggestions:o(`icu:contextMenuNoSuggestions`),undo:o(`icu:editMenuUndo`),redo:o(`icu:editMenuRedo`),cut:o(`icu:editMenuCut`),copy:o(`icu:editMenuCopy`),copyImage:o(`icu:contextMenuCopyImage`),copyLink:o(`icu:contextMenuCopyLink`),paste:o(`icu:editMenuPaste`),pastePlain:o(`icu:editMenuPasteAndMatchStyle`),selectAll:o(`icu:editMenuSelectAll`)}
     });
 };
 
@@ -29829,6 +29764,7 @@ p.ipcMain.handle(`caisheng:launch-signal-profile`, (haituoLaunchSignalProfile = 
         try {
             const view = new p.WebContentsView({ webPreferences: { ...v_, nodeIntegration: !1, nodeIntegrationInWorker: !1, sandbox: !1, contextIsolation: !0, backgroundThrottling:!1, webviewTag: !1, preload: (0, s.join)($, `bundles`, `preload`, `wrapper.js`), partition:`persist:haituo-signal-${t}`, additionalArguments: [ `--caisheng-inprocess`, `--caisheng-renderer-profile=${t}` ], spellcheck: !1 } });
             require('../js/haituo-inprocess-view-security.js').install(view.webContents,G_([ $, `background.html` ]),q_);
+            require('../js/haituo-context-menu.js').install({electron:p,contents:view.webContents,getWindow:()=>Z,log:message=>X.warn(message)});
             globalThis.caishengBridge?.register?.(t, view);
             Z?.contentView?.addChildView(view);
             const b = Z?.getContentBounds(); b && view.setBounds({ x: 0, y: 0, width: b.width, height: b.height });
