@@ -26,5 +26,5 @@ module.exports=async function(e,resources){
    win.contentView.removeChildView(view);view.webContents.close();
   }
   return{nativeRightClickEvents:records.length,sourceAccountClipboard:true,parentWindow:true,nativeMenuSelection:'UNTESTED: action invoked programmatically',realAccountMenus:'UNTESTED'};
- }finally{e.Menu.buildFromTemplate=original;for(const view of views)if(!view.webContents.isDestroyed())view.webContents.close();win.destroy()}
+ }finally{e.Menu.buildFromTemplate=original;for(const view of views)if(view.webContents&&!view.webContents.isDestroyed())view.webContents.close();win.destroy()}
 };
