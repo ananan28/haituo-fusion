@@ -349,6 +349,31 @@ final class Store: ObservableObject {
         }
         copyIfExists(stateFile, to: "accounts.json")
 
+        // multi-account mode evidence
+        copyIfExists(URL(fileURLWithPath: "/tmp/spoof_uuid.log"), to: "spoof-uuid.log")
+        let preparedTxt = "viber-prepared=\(viberPrepared ? "yes" : "no")\n"
+        try? preparedTxt.write(to: root.appendingPathComponent("viber-prepared.txt"), atomically: true, encoding: .utf8)
+        copied.append("viber-prepared.txt")
+        let cs = run("/usr/bin/codesign", ["-dv", "/Applications/Viber.app"])
+        if !cs.isEmpty {
+            try? cs.write(to: root.appendingPathComponent("viber-codesign.txt"), atomically: true, encoding: .utf8)
+            copied.append("viber-codesign.txt")
+        }
+        if let pidDirs = try? fm.contentsOfDirectory(at: base.appendingPathComponent("profiles", isDirectory: true), includingPropertiesForKeys: nil), !pidDirs.isEmpty {
+            let dumpRoot = root.appendingPathComponent("accounts-dump", isDirectory: true)
+            try? fm.createDirectory(at: dumpRoot, withIntermediateDirectories: true)
+            for pd in pidDirs {
+                let db = pd.appendingPathComponent("Library/Application Support/ViberPC/config.db")
+                if fm.fileExists(atPath: db.path) {
+                    let dump = run("/usr/bin/sqlite3", [db.path, "SELECT ID, DeviceKey, Token, Email, NickName, IsValid FROM Accounts;"])
+                    if !dump.isEmpty {
+                        try? dump.write(to: dumpRoot.appendingPathComponent("\(pd.lastPathComponent)-accounts.txt"), atomically: true, encoding: .utf8)
+                    }
+                }
+            }
+            copied.append("accounts-dump")
+        }
+
         guard let desktop = fm.urls(for: .desktopDirectory, in: .userDomainMask).first else { return }
         let zipURL = desktop.appendingPathComponent("Viber诊断-\(stamp).zip")
         try? fm.removeItem(at: zipURL)
