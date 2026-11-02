@@ -132,6 +132,7 @@ final class Store: ObservableObject {
             target = autoCount
             applyCountAndLaunch()
         }
+        log("boot: accounts=\(accounts.count) target=\(target) keepAlive=\(keepAlive) prepared=\(viberPrepared) dylib=\(spoofDylibPath != nil ? "yes" : "no")")
     }
 
     private func startWatchdog() {
@@ -272,8 +273,10 @@ final class Store: ObservableObject {
             try? "\(p.processIdentifier)".write(to: pidFile(a), atomically: true, encoding: .utf8)
             lastLaunch[a.id] = Date()
             errorText = ""
+            log("launch: name=\(a.name) uuid=\(env["FAKE_IO_PLATFORM_UUID"] ?? "-") dylib=\(env["DYLD_INSERT_LIBRARIES"] ?? "none") proxy=\(a.proxy.isEmpty ? "-" : a.proxy) pid=\(p.processIdentifier)")
         } catch {
             errorText = "启动失败: \(error.localizedDescription)"
+            log("launch FAILED: name=\(a.name) err=\(error.localizedDescription)")
         }
         refreshStatus()
         save(force: true)
@@ -283,6 +286,7 @@ final class Store: ObservableObject {
         if let i = accounts.firstIndex(where: { $0.id == a.id }) { accounts[i].desired = false }
         let pid = readPid(a)
         if pid > 0 { kill(pid, SIGTERM) }
+        log("stop: name=\(a.name) pid=\(pid)")
         try? FileManager.default.removeItem(at: pidFile(a))
         lastLaunch[a.id] = nil
         refreshStatus()
@@ -348,6 +352,32 @@ final class Store: ObservableObject {
             copied.append("profile-logs")
         }
         copyIfExists(stateFile, to: "accounts.json")
+
+        // multi-account mode evidence
+        copyIfExists(base.appendingPathComponent("launcher.log"), to: "launcher.log")
+        copyIfExists(URL(fileURLWithPath: "/tmp/spoof_uuid.log"), to: "spoof-uuid.log")
+        let preparedTxt = "viber-prepared=\(viberPrepared ? "yes" : "no")\n"
+        try? preparedTxt.write(to: root.appendingPathComponent("viber-prepared.txt"), atomically: true, encoding: .utf8)
+        copied.append("viber-prepared.txt")
+        let cs = run("/usr/bin/codesign", ["-dv", "/Applications/Viber.app"])
+        if !cs.isEmpty {
+            try? cs.write(to: root.appendingPathComponent("viber-codesign.txt"), atomically: true, encoding: .utf8)
+            copied.append("viber-codesign.txt")
+        }
+        if let pidDirs = try? fm.contentsOfDirectory(at: base.appendingPathComponent("profiles", isDirectory: true), includingPropertiesForKeys: nil), !pidDirs.isEmpty {
+            let dumpRoot = root.appendingPathComponent("accounts-dump", isDirectory: true)
+            try? fm.createDirectory(at: dumpRoot, withIntermediateDirectories: true)
+            for pd in pidDirs {
+                let db = pd.appendingPathComponent("Library/Application Support/ViberPC/config.db")
+                if fm.fileExists(atPath: db.path) {
+                    let dump = run("/usr/bin/sqlite3", [db.path, "SELECT ID, DeviceKey, Token, Email, NickName, IsValid FROM Accounts;"])
+                    if !dump.isEmpty {
+                        try? dump.write(to: dumpRoot.appendingPathComponent("\(pd.lastPathComponent)-accounts.txt"), atomically: true, encoding: .utf8)
+                    }
+                }
+            }
+            copied.append("accounts-dump")
+        }
 
         guard let desktop = fm.urls(for: .desktopDirectory, in: .userDomainMask).first else { return }
         let zipURL = desktop.appendingPathComponent("Viber诊断-\(stamp).zip")
@@ -462,6 +492,19 @@ final class Store: ObservableObject {
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
+    private func log(_ msg: String) {
+        let f = base.appendingPathComponent("launcher.log")
+        let line = "[\(Date())] \(msg)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: f) {
+            h.seekToEndOfFile()
+            h.write(data)
+            try? h.close()
+        } else {
+            try? data.write(to: f, options: .atomic)
+        }
+    }
+
     func prepareViber() {
         let app = "/Applications/Viber.app"
         let fm = FileManager.default
@@ -473,6 +516,7 @@ final class Store: ObservableObject {
         if sig.contains("adhoc") {
             try? "1".write(to: base.appendingPathComponent(".viber-prepared"), atomically: true, encoding: .utf8)
             errorText = "Viber 已就绪，多账号模式已开启"
+            log("prepareViber: already adhoc")
             return
         }
         let entRaw = run("/usr/bin/codesign", ["-d", "--entitlements", ":-", app])
@@ -483,8 +527,10 @@ final class Store: ObservableObject {
         if sig2.contains("adhoc") {
             try? "1".write(to: base.appendingPathComponent(".viber-prepared"), atomically: true, encoding: .utf8)
             errorText = "Viber 已重签名，多账号模式已开启（登录前请挂 VPN）"
+            log("prepareViber: re-signed adhoc ok")
         } else {
             errorText = "重签名失败：确认 Viber 没在运行、且你有管理员权限"
+            log("prepareViber: re-sign FAILED")
         }
     }
 }

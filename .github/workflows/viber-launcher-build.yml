@@ -5,6 +5,7 @@ on:
     branches: ['fusion/viber-windows']
     paths:
       - 'launcher/**'
+      - 'scripts/spoof_uuid.c'
       - '.github/workflows/viber-launcher-build.yml'
 permissions:
   contents: read
