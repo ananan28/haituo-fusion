@@ -209410,7 +209410,7 @@ function haituoCachedSignalTranslation(text) {
                     r(translated), haituoQuickPairRef.current = null, haituoSetQuickText(``), m(!1), y(`已翻译并发送`), setTimeout(() => y(``), 2500);
                     return;
                 }
-                haituoQuickPairRef.current = { text: haituoQuickNormalized(translated) }, n(translated), m(!0), y(a.backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`);
+                haituoQuickPairRef.current = { text: haituoQuickNormalized(translated) }, n(translated), m(!0), y(x_().backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`);
                 if (keepQuickFocus) {
                     const restoreQuickFocus = () => {
                         const input = haituoQuickInputRef.current, active = document.activeElement;
