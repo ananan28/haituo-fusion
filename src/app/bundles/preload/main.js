@@ -21779,7 +21779,7 @@ http://jedwatson.github.io/classnames
             if (!/已被其他窗口更新/u.test(String(error?.message || error))) throw error;
             const fresh = await window.SignalContext.caishengGetTranslationConfig().catch(() => null);
             if (!fresh || typeof fresh.__v != `number`) throw error;
-            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(fresh)));
+            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(fresh)));haituoNotifyTranslationPolicy(fresh);
             return send({ ...patch, __v: fresh.__v });
         });
     }
@@ -21905,11 +21905,11 @@ http://jedwatson.github.io/classnames
                 ...Pve,
                 ...t
             };
-            haituoApplySignalIncomingAppearance(Pve);
+            haituoNotifyTranslationPolicy(Pve);haituoApplySignalIncomingAppearance(Pve);
         }).catch(() => {}), window.SignalContext.caishengOnTranslationConfig?.(e => {
             if (!e || typeof e !== `object`) return;
             let t = { ...e, openAIModel: e.model ?? Pve.openAIModel, compatibleEndpoint: e.endpoint ?? Pve.compatibleEndpoint, microsoftRegion: e.microsoftRegion ?? e.region ?? Pve.microsoftRegion };
-            delete t.model, delete t.endpoint, Pve = { ...Pve, ...t }, localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoApplySignalIncomingAppearance(Pve);
+            delete t.model, delete t.endpoint, Pve = { ...Pve, ...t }, localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoNotifyTranslationPolicy(Pve), haituoApplySignalIncomingAppearance(Pve);
         });
     });
     function HaituoShowSignalTranslation(text, isError = !1) {
