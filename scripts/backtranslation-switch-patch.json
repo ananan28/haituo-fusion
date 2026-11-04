@@ -66,5 +66,17 @@
   {
     "old": "y(a.backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`)",
     "new": "y(x_().backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`)"
+  },
+  {
+    "old": "            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(fresh)));",
+    "new": "            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(fresh)));haituoNotifyTranslationPolicy(fresh);"
+  },
+  {
+    "old": "            haituoApplySignalIncomingAppearance(Pve);\n        }).catch(() => {}), window.SignalContext",
+    "new": "            haituoNotifyTranslationPolicy(Pve);haituoApplySignalIncomingAppearance(Pve);\n        }).catch(() => {}), window.SignalContext"
+  },
+  {
+    "old": "localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoApplySignalIncomingAppearance(Pve);",
+    "new": "localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...x_(), ...t }))), haituoNotifyTranslationPolicy(Pve), haituoApplySignalIncomingAppearance(Pve);"
   }
 ]
