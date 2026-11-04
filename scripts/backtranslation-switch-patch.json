@@ -62,5 +62,9 @@
   {
     "old": "        const haituoQuickNormalized = value => String(value || ``).replace(/\\s+/gu, ` `).trim();",
     "new": "        (0,l6.useEffect)(()=>{if(a.backTranslationEnabled===false){y(``);const preview=document.getElementById(`haituo-signal-backtranslation-preview`);if(preview)preview.style.display=`none`}},[a.backTranslationEnabled]);\n        const haituoQuickNormalized = value => String(value || ``).replace(/\\s+/gu, ` `).trim();"
+  },
+  {
+    "old": "y(a.backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`)",
+    "new": "y(x_().backTranslationEnabled !== !1 ? `已翻译，正在后台回译…` : `已自动填入上方输入框`)"
   }
 ]
