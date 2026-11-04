@@ -6,7 +6,7 @@ e.app.on('window-all-closed',()=>{}); // Keep the harness alive until the report
 const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},90000);
 (async()=>{await e.app.whenReady();fs.mkdirSync(out,{recursive:true});
  const cfg=JSON.parse(fs.readFileSync(path.join(resources,'package.json'),'utf8'));
- if(cfg.version!=='1.6.8'||cfg.signalProtocolVersion!=='8.29.0-alpha.1')throw Error('Release and protocol versions not separated: '+JSON.stringify(cfg));
+ if(cfg.version!=='1.6.9'||cfg.signalProtocolVersion!=='8.29.0-alpha.1')throw Error('Release and protocol versions not separated: '+JSON.stringify(cfg));
  report.checks.push({id:'PACKAGED-VERSION',ok:true,version:cfg.version,signalProtocolVersion:cfg.signalProtocolVersion});
  const {createController}=require(path.join(resources,'js/haituo-screenshot.js'));
  const controller=createController({electron:e,getConfig:()=>({}),requestJSON:async()=>{throw Error('UI test must not call an API')}});

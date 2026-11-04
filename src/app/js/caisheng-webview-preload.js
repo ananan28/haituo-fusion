@@ -210,7 +210,7 @@ ipcRenderer.on("caisheng:translation-config-changed", (event, next) => {
         settings.incomingBubbleLinked !== !1 && (settings.incomingBubbleColor = settings.outgoingBubbleColor);
         localPanelPreference = null;
         if(!!localHidden !== !!settings.hideTranslationBox){panel?.remove();panel=null;if(findComposer())showPanel(findComposer());}
-        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview();
+        haituoSyncTranslationPolicy(); applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview();
         if (isTelegram() && settings.telegramTranslationEnabled !== !0) { panel?.remove(), panel = null, hidePanels(), hideBackTranslation(); }
     }
 });
@@ -236,7 +236,7 @@ async function refreshSettings() {
             ...e, ...haituoPendingValues()
         }), settings.targetLanguage || (settings.targetLanguage = "en"), 
         localPanelPreference = null,
-        applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview(), wasHidden !== !!settings.hideTranslationBox && (panel?.remove(), panel = null, findComposer() && showPanel(findComposer()));
+        haituoSyncTranslationPolicy(), applyChatColor(), applyTranslatorTheme(), haituoSyncOutgoingControls(), haituoSyncChatPreview(), wasHidden !== !!settings.hideTranslationBox && (panel?.remove(), panel = null, findComposer() && showPanel(findComposer()));
     } catch {}
 }
 
@@ -245,7 +245,7 @@ async function saveSettings(e) {
     for (const [key, value] of Object.entries(e)) haituoPendingSettings.set(key, { revision, value });
     Object.prototype.hasOwnProperty.call(e, "hideTranslationBox") && (panelPreferencePendingUntil = Date.now() + 3000);
     settings = { ...settings, ...e };
-    applyChatColor(); applyTranslatorTheme(); haituoSyncOutgoingControls();
+    haituoSyncTranslationPolicy(); applyChatColor(); applyTranslatorTheme(); haituoSyncOutgoingControls();
     const operation = haituoSaveQueue.then(() => ipcRenderer.invoke("caisheng:set-translation-config", e));
     haituoSaveQueue = operation.catch(() => {});
     try { await operation; }
@@ -311,6 +311,25 @@ function isGroupConversation() {
 }
 
 // 群组回译 governs group chats; 接收回译 governs one-to-one chats.
+function haituoMessageTranslationOn(node) {
+    if (!webTranslationActive()) return false;
+    const outgoing=!!node?.closest('.message-out,.bubble.is-out,[data-is-outgoing="true"]');
+    if (outgoing) return settings.backTranslationEnabled !== false && (!isGroupConversation() || settings.groupBackTranslationEnabled !== false);
+    return incomingTranslationOn();
+}
+let haituoTranslationPolicyEpoch=0, haituoTranslationPolicySignature;
+function haituoSyncTranslationPolicy() {
+    const signature=JSON.stringify([settings.autoTranslateIncoming!==false,settings.backTranslationEnabled!==false,settings.groupBackTranslationEnabled!==false]);
+    if(signature===haituoTranslationPolicySignature)return;
+    haituoTranslationPolicySignature=signature;haituoTranslationPolicyEpoch++;
+    if(settings.backTranslationEnabled===false)hideBackTranslation();
+    for(const row of document.querySelectorAll('#main [data-id],.bubbles [data-mid]')) {
+        if(haituoMessageTranslationOn(row))continue;
+        row.querySelectorAll('.haituo-wa-message-translation,.haituo-wa-translation-error').forEach(node=>node.remove());
+        for(const key of ['haituoTranslationDone','haituoTranslationPending','haituoTranslationRetryAt','haituoAttachmentMiss'])delete row.dataset[key];
+    }
+    window.dispatchEvent(new Event('haituo-translation-policy-change'));
+}
 function incomingTranslationOn() {
     return ((isGroupConversation() ? settings.groupBackTranslationEnabled : settings.autoTranslateIncoming) !== !1) && webTranslationActive();
 }
@@ -721,6 +740,7 @@ function watchBackTranslationComposer() {
 }
 
 async function updateBackTranslation(e, composerHint = null) {
+    if (settings.backTranslationEnabled === false) return hideBackTranslation();
     if (!e?.trim()) return;
     const expected = e.trim(), composer = composerHint?.isConnected ? composerHint : activeComposer?.isConnected ? activeComposer : findComposer();
     if (!composer?.isConnected || normalized(read(composer)) !== normalized(expected)) return hideBackTranslation();
@@ -737,17 +757,20 @@ async function updateBackTranslation(e, composerHint = null) {
                 purpose: "chat"
             }), new Promise((e, t) => setTimeout(() => t(new Error("回译线路响应超时")), 1800)) ]);
         } catch {
+            if(settings.backTranslationEnabled===false || generation!==backTranslationGeneration)return;
             t = await ipcRenderer.invoke("caisheng:translate", {
                 text: e,
                 targetLanguage: "zh-CN",
                 provider: "google-free"
             });
         }
-        if (generation !== backTranslationGeneration || !backTranslationComposer?.isConnected || normalized(read(backTranslationComposer)) !== normalized(expected)) return hideBackTranslation();
+        if(generation!==backTranslationGeneration)return;
+        if (settings.backTranslationEnabled===false || !backTranslationComposer?.isConnected || normalized(read(backTranslationComposer)) !== normalized(expected)) return hideBackTranslation();
         if (!t?.text?.trim()) throw new Error("回译服务未返回结果");
         showBackTranslationText(`回译：${t.text.trim()}`);
     } catch (e) {
-        if (generation !== backTranslationGeneration || !backTranslationComposer?.isConnected || normalized(read(backTranslationComposer)) !== normalized(expected)) return hideBackTranslation();
+        if(generation!==backTranslationGeneration)return;
+        if (settings.backTranslationEnabled===false || !backTranslationComposer?.isConnected || normalized(read(backTranslationComposer)) !== normalized(expected)) return hideBackTranslation();
         showBackTranslationText(`回译失败：${e instanceof Error ? e.message : "请稍后重试"}`, !0);
     }
 }
@@ -1702,6 +1725,11 @@ function haituoInstallMessageScanner() {
             : '.selectable-text,[data-testid="selectable-text"],[data-testid="msg-text"],[data-testid="conversation-text"],[data-pre-plain-text] span[dir="auto"]';
         const translationTargets = [], localRecords = [];
         for (const e of visibleMessages) {
+            if(!haituoMessageTranslationOn(e)){
+                e.querySelectorAll('.haituo-wa-message-translation,.haituo-wa-translation-error').forEach(node=>node.remove());
+                for(const key of ['haituoTranslationDone','haituoTranslationPending','haituoTranslationRetryAt','haituoAttachmentMiss'])delete e.dataset[key];
+                continue;
+            }
             // One chat bubble is one translation job. Nested selectable spans and
             // paragraph breaks must not produce separate translations.
             const more = [ ...e.querySelectorAll('button,[role="button"],span') ].find(node =>
@@ -1740,21 +1768,19 @@ function haituoInstallMessageScanner() {
             const memoHit=isWhatsApp()&&sessionTranslations.has(memoKey);
             // Virtual rows retain data-* flags after their child DOM is replaced.
             // A memory hit repairs missing DOM regardless of pending/retry flags.
-            if (!memoHit && !incomingTranslationOn() && e.dataset.haituoAttachmentMiss === "1") continue;
             if (!memoHit && (e.dataset.haituoTranslationPending === "1" || Number(e.dataset.haituoTranslationRetryAt || 0) > Date.now())) continue;
             e.dataset.haituoTranslationPending = "1";
             if (!mount || !e.contains(mount)) {
                 delete e.dataset.haituoTranslationPending;
                 continue;
             }
-            if (!incomingTranslationOn() && !messageId) { delete e.dataset.haituoTranslationPending; continue; }
-            translationTargets.push({ e, t: e, n, mount, messageId, target:haituoMessageTarget(n), memoKey:sessionKey(n,haituoMessageTarget(n)),conversation:conversationScope(), attachmentOnly: !incomingTranslationOn() });
+            translationTargets.push({ e, t: e, n, mount, messageId, target:haituoMessageTarget(n), memoKey:sessionKey(n,haituoMessageTarget(n)),conversation:conversationScope(), attachmentOnly: false,policyEpoch:haituoTranslationPolicyEpoch });
         }
         if(haituoLocalBilingualView && localRecords.length) await haituoLocalBilingualView.observe(localRecords,visibleMessages);
         const applyTranslation = item => {
         if(isWhatsApp() && haituoLocalBilingualView && haituoLocalChatConversation(item.messageId)){if(item.error)haituoLocalBilingualView.showError(item.error,item.messageId);else haituoLocalBilingualView.refresh(item.messageId).catch(error=>toast(error.message,!0));return;}
         haituoKeepTranslationPosition(item.e, () => {
-            if (!webTranslationActive()||item.conversation!==conversationScope()) return;
+            if (!haituoMessageTranslationOn(item.e)||item.policyEpoch!==haituoTranslationPolicyEpoch||item.conversation!==conversationScope()) return;
             const { e, t, n, r, mount } = item;
             const liveId = e.getAttribute("data-id") || e.closest("[data-id]")?.getAttribute("data-id") || (isTelegram() ? e.getAttribute("data-mid") : undefined);
             if (item.messageId !== liveId) return;
@@ -1839,10 +1865,11 @@ function haituoInstallMessageScanner() {
             while (queueIndex < queue.length) {
                 const item = queue[queueIndex++];
                 if(scrolling){delete item.t.dataset.haituoTranslationPending;continue}
+                if(!haituoMessageTranslationOn(item.e)||item.policyEpoch!==haituoTranslationPolicyEpoch){delete item.t.dataset.haituoTranslationPending;continue}
                 try {
                     item.r = await translateMessage(item.n, !1, item.messageId, item.attachmentOnly);
                     if(isWhatsApp()&&item.r)sessionTranslations.set(item.memoKey,item.r);
-                    if (haituoCurrentWebMessage(item)) {
+                    if (item.policyEpoch===haituoTranslationPolicyEpoch && haituoCurrentWebMessage(item)) {
                         item.t.dataset.haituoTranslationDone = "1";
                         if (!item.r && item.attachmentOnly) item.t.dataset.haituoAttachmentMiss = "1";
                         delete item.t.dataset.haituoTranslationRetryCount;
@@ -1851,9 +1878,9 @@ function haituoInstallMessageScanner() {
                 } catch (error) {
                     item.error = error instanceof Error ? error.message : String(error);
                     const retry = Math.min(3, Number(item.t.dataset.haituoTranslationRetryCount || 0) + 1);
-                    if (haituoCurrentWebMessage(item)) item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
+                    if (item.policyEpoch===haituoTranslationPolicyEpoch && haituoCurrentWebMessage(item)) item.t.dataset.haituoTranslationRetryCount = String(retry), item.t.dataset.haituoTranslationRetryAt = String(Date.now() + [ 0, 600, 1500, 3500 ][retry]);
                 } finally {
-                    if (haituoCurrentWebMessage(item)) delete item.t.dataset.haituoTranslationPending;
+                    if (item.policyEpoch===haituoTranslationPolicyEpoch && haituoCurrentWebMessage(item)) delete item.t.dataset.haituoTranslationPending;
                 }
                 applyTranslation(item);
             }
@@ -1865,6 +1892,7 @@ function haituoInstallMessageScanner() {
         }
     };
     const scan = (nodes=null,cacheOnly=false) => t(nodes,cacheOnly).catch(error => console.error('HaiTuo message scan failed', error));
+    window.addEventListener('haituo-translation-policy-change',()=>scan());
     // No animation-frame loop and no periodic WhatsApp full scan. Scroll only
     // schedules one trailing full pass; DOM mutations scan affected rows.
     if(isTelegram())setInterval(scan,2000);

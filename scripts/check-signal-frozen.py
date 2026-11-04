@@ -1,5 +1,5 @@
-"""Freeze Signal core; permit only the explicitly requested translation-output edits."""
-import pathlib, subprocess
+"""Freeze Signal core; permit reviewed translation-output and switch-policy edits only."""
+import pathlib, subprocess, runpy
 BASE = "42e7aac6074979f5e654880efbc993799944c8f2"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 paths = ["src/app/bundles/preload", "src/app/bundles/workers", "src/app/js/haituo-signal-message-record.js", "src/app/js/haituo-scroll.js"]
@@ -14,5 +14,7 @@ for path in files:
         assert expected.count(old) == 1, "Signal translation tooltip baseline changed"
         expected = expected.replace(old, "调用 AI 忠实原意，精准直译".encode())
         expected = expected.replace("AI 润色（Google 对照）".encode(), "AI 直译（Google 对照）".encode())
+    if path == 'src/app/bundles/preload/main.js':
+        expected=runpy.run_path(str(ROOT/'scripts/apply-backtranslation-switches.py'))['apply'](expected.decode('utf-8')).encode('utf-8')
     assert (ROOT/path).read_bytes() == expected, "Unexpected Signal core change: "+path
-print(f"Signal core freeze: {len(files)} files verified; only identity output helper and faithful AI labels allowed")
+print(f"Signal core freeze: {len(files)} files verified; only reviewed translation-output and switch-policy edits allowed")

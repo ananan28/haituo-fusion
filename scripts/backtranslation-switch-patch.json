@@ -1,0 +1,66 @@
+[
+  {
+    "old": "    function x_() {",
+    "new": "    function haituoNotifyTranslationPolicy(config) {\n        const key=JSON.stringify([config.autoTranslateIncoming!==false,config.backTranslationEnabled!==false,config.groupBackTranslationEnabled!==false]);\n        const previous=window.__haituoBackPolicyKey;window.__haituoBackPolicyKey=key;\n        if(previous!==undefined && previous!==key){window.__haituoBackPolicyEpoch=(window.__haituoBackPolicyEpoch||0)+1;window.dispatchEvent(new window.Event('haituo-translation-policy-change'));}\n    }\n    function x_() {"
+  },
+  {
+    "old": "                            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets({ ...cur, ...cfg })));",
+    "new": "                            const next=haituoRedactConfigSecrets({ ...cur, ...cfg });\n                            localStorage.setItem(Mve, JSON.stringify(next));haituoNotifyTranslationPolicy(next);"
+  },
+  {
+    "old": "            let e = haituoRedactConfigSecrets(JSON.parse(localStorage.getItem(Mve) ?? `{}`));\n            if (!e._nativeAppearanceV1111)",
+    "new": "            let e = haituoRedactConfigSecrets(JSON.parse(localStorage.getItem(Mve) ?? `{}`));\n            if(window.__haituoBackPolicyKey===undefined)haituoNotifyTranslationPolicy(e);\n            if (!e._nativeAppearanceV1111)"
+  },
+  {
+    "old": "            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(e)));\n            return result;",
+    "new": "            localStorage.setItem(Mve, JSON.stringify(haituoRedactConfigSecrets(e)));haituoNotifyTranslationPolicy(e);\n            return result;"
+  },
+  {
+    "old": "        const targetLanguage = HaituoIncomingTarget(e);\n        const saved = quote ? null : records.read(window.MessageCache,messageId,e,targetLanguage);\n        const reference = (0,w_.useRef)(null);",
+    "new": "        const reference = (0,w_.useRef)(null);\n        const [policyVersion,setPolicyVersion]=(0,w_.useState)(0);\n        const allowed=()=>{\n            const config=x_(),model=window.MessageCache?.getById(messageId);\n            const conversation=window.ConversationController?.get?.(model?.get('conversationId'));\n            const host=reference.current?.closest('.module-message,[data-testid=\"message\"]');\n            const group=conversation?.get('type')==='group'||!!host?.querySelector('.module-message__author');\n            const outgoing=model?.get('type')==='outgoing'||!!host?.matches('.module-message--outgoing')||!!host?.querySelector('.module-message__container--outgoing');\n            return outgoing ? config.backTranslationEnabled!==false&&(!group||config.groupBackTranslationEnabled!==false) : group ? config.groupBackTranslationEnabled!==false : config.autoTranslateIncoming!==false;\n        };\n        const enabled=allowed(),targetLanguage = HaituoIncomingTarget(e);\n        const saved = quote || !enabled ? null : records.read(window.MessageCache,messageId,e,targetLanguage);"
+  },
+  {
+    "old": "        const visible = state.identity === identity ? state : {translation:saved ? HaituoFormatMessageParagraphs(e,saved.text) : ``,busy:!1,error:``};",
+    "new": "        const visible = state.identity === identity ? {...state,translation:state.translation||(saved ? HaituoFormatMessageParagraphs(e,saved.text) : ``)} : {translation:saved ? HaituoFormatMessageParagraphs(e,saved.text) : ``,busy:!1,error:``};"
+  },
+  {
+    "old": "            if (current.current !== identity || generation.current !== token) return;\n            haituoQueueSignalTranslation",
+    "new": "            if (!allowed() || current.current !== identity || generation.current !== token) return;\n            haituoQueueSignalTranslation"
+  },
+  {
+    "old": "                if (current.current === identity && generation.current === token) setState",
+    "new": "                if (allowed() && current.current === identity && generation.current === token) setState"
+  },
+  {
+    "old": "            if (!force && saved) return;\n            const token = ++generation.current;",
+    "new": "            if (!allowed() || (!force && saved)) return;\n            const token = ++generation.current;"
+  },
+  {
+    "old": "                    forceRefresh:force,attachmentOnly:!force && !enabled",
+    "new": "                    forceRefresh:force,attachmentOnly:false"
+  },
+  {
+    "old": "        },[e,messageId,targetLanguage]);\n        (0,w_.useEffect)(()=>{\n            if (!quote && e.trim()) run();",
+    "new": "        },[e,messageId,targetLanguage,policyVersion]);\n        (0,w_.useEffect)(()=>{\n            const changed=()=>{generation.current++;setPolicyVersion(value=>value+1)};\n            window.addEventListener?.('haituo-translation-policy-change',changed);\n            changed();\n            return ()=>window.removeEventListener?.('haituo-translation-policy-change',changed);\n        },[]);\n        (0,w_.useEffect)(()=>{\n            if (!quote && enabled && e.trim()) run();"
+  },
+  {
+    "old": "        },[e,messageId,targetLanguage,quote,run]);",
+    "new": "        },[e,messageId,targetLanguage,quote,enabled,run]);"
+  },
+  {
+    "old": "            style:{display:`block`,clear:`both`,width:`100%`,height:`auto`,maxHeight:`none`,whiteSpace:`normal`,overflowAnchor:`none`},\n            children:[visible.translation",
+    "new": "            style:{display:enabled?`block`:`none`,clear:`both`,width:`100%`,height:`auto`,maxHeight:`none`,whiteSpace:`normal`,overflowAnchor:`none`},\n            children:enabled?[visible.translation"
+  },
+  {
+    "old": "visible.error}) : null]\n        });\n    }\n",
+    "new": "visible.error}) : null]:[]\n        });\n    }\n"
+  },
+  {
+    "old": "                if (a.backTranslationEnabled !== !1) S_(translated, {\n                        ...a,\n                        targetLanguage: `zh-CN`\n                    }, `chat`).then(back => y(`回译：${back}`)).catch(() => y(`回译暂时不可用`));",
+    "new": "                if (x_().backTranslationEnabled !== !1) {\n                    const policyEpoch=window.__haituoBackPolicyEpoch||0;\n                    S_(translated, {...a,targetLanguage:`zh-CN`}, `chat`).then(back => {\n                        if(x_().backTranslationEnabled!==false&&policyEpoch===(window.__haituoBackPolicyEpoch||0))y(`回译：${back}`);\n                    }).catch(()=>{if(x_().backTranslationEnabled!==false&&policyEpoch===(window.__haituoBackPolicyEpoch||0))y(`回译暂时不可用`)});\n                }"
+  },
+  {
+    "old": "        const haituoQuickNormalized = value => String(value || ``).replace(/\\s+/gu, ` `).trim();",
+    "new": "        (0,l6.useEffect)(()=>{if(a.backTranslationEnabled===false){y(``);const preview=document.getElementById(`haituo-signal-backtranslation-preview`);if(preview)preview.style.display=`none`}},[a.backTranslationEnabled]);\n        const haituoQuickNormalized = value => String(value || ``).replace(/\\s+/gu, ` `).trim();"
+  }
+]

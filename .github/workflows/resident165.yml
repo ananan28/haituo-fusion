@@ -1,7 +1,7 @@
-name: Haituo 1.6.8 Mac screen capture, UI and WhatsApp stability regression - NOT A RELEASE
+name: Haituo 1.6.9 Mac screen capture, UI and WhatsApp stability regression - NOT A RELEASE
 on:
   push:
-    branches: ['fix/1.6.8-macos-capture']
+    branches: ['fix/1.6.9-backtranslation-switches']
   workflow_dispatch:
 permissions:
   contents: write
@@ -25,6 +25,7 @@ jobs:
         run: |
           git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
           python scripts/sync-local-chat-view.py
+          python scripts/apply-backtranslation-switches.py
           python scripts/check-signal-frozen.py
           node --check src/app/bundles/main.js
           node --check src/app/js/caisheng-webview-preload.js
@@ -38,6 +39,13 @@ jobs:
       - name: Verify exact diagnostic client source
         id: source
         run: |
+          if ! git diff --quiet -- src/app/bundles/preload/main.js; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/app/bundles/preload/main.js
+            git commit -m "source165: materialize reviewed 1.6.9 translation switch patch"
+            git push origin HEAD:fix/1.6.9-backtranslation-switches
+          fi
           test -z "$(git status --porcelain)"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
@@ -101,7 +109,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'windows'
         with:
-          name: Haituo-1.6.8-diagnostic-windows
+          name: Haituo-1.6.9-diagnostic-windows
           path: |
             windows/out/*Setup.exe
             source-packages/*.zip
@@ -113,7 +121,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.8-diagnostic-verification-${{ matrix.target }}
+          name: Haituo-1.6.9-diagnostic-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
@@ -121,7 +129,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'macos'
         with:
-          name: Haituo-1.6.8-diagnostic-${{ matrix.target }}
+          name: Haituo-1.6.9-diagnostic-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg
