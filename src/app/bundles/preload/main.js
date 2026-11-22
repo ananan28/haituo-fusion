@@ -230134,6 +230134,7 @@ function haituoCachedSignalTranslation(text) {
                 allowedHosts: [ `web.whatsapp.com` ],
                 defaultIcon: `whatsapp`
             },
+            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://app.zoom.us/wc/home`,allowedHosts:[`app.zoom.us`],defaultIcon:`zoom`},
             telegram: {
                 id: `telegram`,
                 label: `Telegram`,
@@ -230153,7 +230154,7 @@ function haituoCachedSignalTranslation(text) {
         }
     }
     function bCr(e, t) {
-        return e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
+        return e === `zoom` ? true : e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;
     }
     function xCr() {
         try {
@@ -230167,7 +230168,7 @@ function haituoCachedSignalTranslation(text) {
                 }
                 if (!a || typeof a != `object`) continue;
                 let o = a;
-                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
+                typeof o.id == `string` && o.id !== `signal-main` && n.U(o.id) && (o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram` || o.platformId === `zoom`) && typeof o.label == `string` && !!o.label.trim() && typeof o.createdAt == `number` && (o.iconUrl === void 0 || typeof o.iconUrl == `string` && o.iconUrl.startsWith(`data:image/`)) && t.push(o);
             }
             return r || t.unshift(ECr), t;
         } catch {
@@ -230364,7 +230365,7 @@ function haituoCachedSignalTranslation(text) {
         }, []), (0, D9.useEffect)(() => {
             // Weak networks: web accounts (WhatsApp + Telegram) load one at a time,
             // on every platform, instead of hammering the connection in parallel.
-            let e = r.filter(e => (e.platformId === `whatsapp` || e.platformId === `telegram`) && bCr(e.platformId, t)), n = e.find(e => qLoaded.includes(e.id) && !qReady.includes(e.id));
+            let e = r.filter(e => (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && bCr(e.platformId, t)), n = e.find(e => qLoaded.includes(e.id) && !qReady.includes(e.id));
             if (n) {
                 const ready = setTimeout(() => qSetReady(t => t.includes(n.id) ? t : [ ...t, n.id ]), 45000);
                 return () => clearTimeout(ready);
@@ -230458,6 +230459,7 @@ function haituoCachedSignalTranslation(text) {
             if (!bCr(e, t)) return;
             haituoSetHome(false);
             let a = n.B(e, crypto.randomUUID().replaceAll(`-`, ``)), o = r.filter(t => t.platformId === e).length + 1;
+            if(e===`zoom`){haituoSetPlatformFilter(`all`);qSetLoaded(items=>items.includes(a)?items:[a,...items])}
             F(t => [ ...t, {
                 id: a,
                 platformId: e,
@@ -230539,7 +230541,7 @@ function haituoCachedSignalTranslation(text) {
                 return;
             }
             let t = document.querySelector(`webview[data-caisheng-workspace="${CSS.escape(e.id)}"]`);
-            if (!t && (e.platformId === `whatsapp` || e.platformId === `telegram`)) {
+            if (!t && (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`)) {
                 qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), setTimeout(() => ne(e), 120);
                 return;
             }
@@ -230614,7 +230616,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         onClick: () => {
                             haituoSetHome(!1), window.__haituoHideSignalTranslation?.();
-                            (e.platformId === `whatsapp` || e.platformId === `telegram`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id), 
+                            (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id),
                             s(e.id), requestAnimationFrame(() => A(e.id, 0, !0))) : (s(e.id), requestAnimationFrame(() => {
                                 A(e.id), document.querySelector(`webview[data-caisheng-workspace="${CSS.escape(e.id)}"]`)?.focus();
                             }), setTimeout(() => A(e.id), 120));
@@ -230633,7 +230635,7 @@ function haituoCachedSignalTranslation(text) {
                             alt: ``
                         }) : (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__iconFallback is-${e.platformId}`,
-                            children: `T`
+                            children: e.platformId===`zoom` ? `Z` : `T`
                         }), (0, O9.jsx)(`span`, {
                             className: `CaishengPlatformShell__tabLabel`,
                             children: e.label
@@ -230695,7 +230697,7 @@ function haituoCachedSignalTranslation(text) {
                         onClick: () => L(`telegram`),
                         type: `button`,
                         children: `新增 Telegram 账号`
-                    }) ]
+                    }), (0,O9.jsx)(`button`,{onClick:()=>L(`zoom`),type:`button`,children:`新增 Zoom 账号`}) ]
                 }) : null, u ? haituoGroupedSettings(O9, {haituoConfig:m,
                     className: `CaishengPlatformShell__settings`,
                     onClick: e => e.stopPropagation(),
@@ -231044,7 +231046,7 @@ function haituoCachedSignalTranslation(text) {
                         zIndex: !haituoHome && o === `signal-main` ? 2 : 0
                     },
                     children: e
-                }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` && e.platformId !== `telegram` || qLoaded.includes(e.id))).map(e => {
+                }), r.filter(e => e.platformId !== `signal` && bCr(e.platformId, t) && (e.platformId !== `whatsapp` && e.platformId !== `telegram` && e.platformId !== `zoom` || qLoaded.includes(e.id))).map(e => {
                     let t = gCr(e.platformId);
                     return t.startUrl ? (0, D9.createElement)(`webview`, {
                         className: `CaishengPlatformShell__webview`,
@@ -231058,7 +231060,7 @@ function haituoCachedSignalTranslation(text) {
                         "data-caisheng-workspace": e.id,
                         "data-haituo-active":!haituoHome&&o===e.id?`true`:`false`,
                         src: e.platformId === `whatsapp` ? `${t.startUrl}${t.startUrl.includes(`?`) ? `&` : `?`}haituoWorkspace=${encodeURIComponent(e.id)}` : t.startUrl,
-                        useragent: TCr,
+                        useragent: e.platformId===`zoom` ? undefined : TCr,
                         webpreferences: `backgroundThrottling=no`,
                         allowpopups: `true`,
                         ref: node => {
@@ -231083,7 +231085,7 @@ function haituoCachedSignalTranslation(text) {
                         },
                         onDomReady: t => {
                             let n = t.currentTarget;
-                            n.setAudioMuted?.(!1), (e.platformId === `whatsapp` || e.platformId === `telegram`) && qSetReady(t => t.includes(e.id) ? t : [ ...t, e.id ]), typeof n.executeJavaScript === `function` && n.executeJavaScript(`window.dispatchEvent(new Event("resize"));document.documentElement.offsetHeight`).catch(() => {});
+                            n.setAudioMuted?.(!1), (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetReady(t => t.includes(e.id) ? t : [ ...t, e.id ]), typeof n.executeJavaScript === `function` && n.executeJavaScript(`window.dispatchEvent(new Event("resize"));document.documentElement.offsetHeight`).catch(() => {});
                         }
                     }) : null;
                 }) ]

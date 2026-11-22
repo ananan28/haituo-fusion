@@ -24636,6 +24636,7 @@ var Kp = class {
     }
 };
 
+const HaituoZoomSecurity=require("../js/haituo-zoom-security.js"),HaituoZoomSessions=new WeakSet();
 const qp = new Set([ `web.whatsapp.com`, `web.telegram.org` ]);
 
 function haituoIsAppFrame(url) {
@@ -24657,7 +24658,7 @@ function Jp(e) {
         } catch {
             return ``;
         }
-    })() !== `file:` && t !== `localhost` && t !== `127.0.0.1` && !qp.has(t)) throw Error(`不允许的翻译请求来源`);
+    })() !== `file:` && t !== `localhost` && t !== `127.0.0.1` && !qp.has(t) && !HaituoZoomSecurity.isZoomURL(e)) throw Error(`不允许的翻译请求来源`);
 }
 
 
@@ -29024,6 +29025,13 @@ async function nv() {
         guest.on(`ipc-message`, (e, channel) => {
             channel === `haituo-user-gesture` && (guest.haituoLastGestureAt = Date.now());
         });
+        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{
+            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){
+                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));
+                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});
+            }
+            return{action:'deny'};
+        });
         guest.on(`will-navigate`, (event, url) => {
             let parsed;
             try {
@@ -29034,6 +29042,7 @@ async function nv() {
             }
             if (![ `http:`, `https:` ].includes(parsed.protocol)) return;
             const host = parsed.hostname;
+            if(HaituoZoomSessions.has(guest.session)&&HaituoZoomSecurity.isZoomURL(url))return;
             if (host === `web.whatsapp.com` || host === `web.telegram.org` || host.endsWith(`.whatsapp.com`) || host.endsWith(`.telegram.org`)) return;
             event.preventDefault();
             X.info(`haituo: blocked webview navigation to ${String(url).slice(0, 200)}; opening externally`);
@@ -29061,11 +29070,11 @@ async function nv() {
             e.preventDefault();
             return;
         }
-        if (![ `web.whatsapp.com`, `web.telegram.org` ].includes(a)) {
+        if (![ `web.whatsapp.com`, `web.telegram.org` ].includes(a) && !HaituoZoomSecurity.isZoomURL(r.src)) {
             e.preventDefault();
             return;
         }
-        let o = n.W(r.partition ?? ``), c = a === `web.whatsapp.com` ? `whatsapp` : `telegram`;
+        let o = n.W(r.partition ?? ``), c = a === `web.whatsapp.com` ? `whatsapp` : HaituoZoomSecurity.isZoomURL(r.src) ? `zoom` : `telegram`;
         if (o?.platformId !== c) {
             e.preventDefault();
             return;
@@ -29076,6 +29085,14 @@ async function nv() {
         t.nodeIntegration = !1, t.nodeIntegrationInWorker = !1, t.contextIsolation = !0,
         t.sandbox = !0, t.preload = (0, s.join)($, `js`, `caisheng-webview-preload.js`),
         p.session.fromPartition(r.partition ?? ``).setPermissionRequestHandler(haituoMediaPermissionHandler);
+        if(c===`zoom`){
+            const zoomSession=p.session.fromPartition(r.partition??``);
+            HaituoZoomSessions.add(zoomSession);
+            t.preload=(0,s.join)($,`js`,`haituo-zoom-preload.js`);
+            if(!m.statSync(t.preload).isFile()){e.preventDefault();return}
+            r.preload=require('node:url').pathToFileURL(t.preload).href;
+            HaituoZoomSecurity.install({electron:p,session:zoomSession,getOwner:()=>Z,log:message=>X.warn(message)});
+        }
         if (c === `whatsapp`) {
             try { HaituoWABootstrap.prepare(t,r); }
             catch(error) { X.error(`WhatsApp preload validation failed: ${error.message}`); e.preventDefault(); return; }
