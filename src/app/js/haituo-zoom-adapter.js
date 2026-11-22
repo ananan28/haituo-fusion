@@ -23,7 +23,7 @@ function installZoom(document,bridge){
  function remember(id,value){memo.delete(id);memo.set(id,value);while(memo.size>500)memo.delete(memo.keys().next().value)}
  function translate(source,lang,purpose='chat'){
   const id=key(source,lang,purpose);if(memo.has(id))return Promise.resolve(memo.get(id));if(jobs.has(id))return jobs.get(id);
-  const task=new Promise((resolve,reject)=>{queue.push({source,lang,purpose,id,resolve,reject,epoch});pump()});jobs.set(id,task);task.finally(()=>{if(jobs.get(id)===task)jobs.delete(id)}).catch(()=>{});return task;
+  const task=new Promise((resolve,reject)=>{queue.push({source,lang,purpose,id,resolve,reject,epoch});pump()});jobs.set(id,task);task.finally(()=>{if(jobs.get(id)===task)jobs.delete(id);schedule()}).catch(()=>{});return task;
  }
  function pump(){
   while(!disposed&&running<2&&queue.length){
@@ -52,7 +52,7 @@ function installZoom(document,bridge){
    const lang=target(source),id=key(source,lang),state=states.get(node);
    if(state?.source===source&&state.lang===lang&&state.slot?.isConnected)continue;
    if(memo.has(id)){append(node,source,memo.get(id),epoch);const s=states.get(node);if(s)s.lang=lang;continue}
-   if(state?.source===source&&state.pending===id)continue;
+   if(state?.source===source&&state.pending===id&&jobs.has(id))continue;
    if(jobs.size>=200)break;
    const version=epoch;states.set(node,{source,pending:id});
    translate(source,lang).then(result=>{append(node,source,result,version);const s=states.get(node);if(s)s.lang=lang}).catch(error=>{if(version===epoch){if(states.get(node)?.source===source)states.delete(node);status.textContent='翻译失败：'+String(error.message).slice(0,110)}});
@@ -80,7 +80,7 @@ function installZoom(document,bridge){
   receivedConfig={...receivedConfig,...value};value={...receivedConfig,zoomCaptionTranslationEnabled:localCaption&&receivedConfig.zoomCaptionTranslationEnabled!==false};captionToggle.checked=value.zoomCaptionTranslationEnabled;
   const signature=v=>JSON.stringify([v.autoTranslateIncoming!==false,v.backTranslationEnabled!==false,v.groupBackTranslationEnabled!==false,v.zoomCaptionTranslationEnabled!==false,v.blockChineseOutgoing!==false,v.targetLanguage||'en',v.chatTranslationProvider||v.provider||'google-free',v.inputTranslationProvider||v.provider||'google-free']);
   if(config&&signature(config)===signature(value)){config={...value};return}config={...value};epoch++;states=new WeakMap();
-  for(const item of queue)item.resolve(null);queue=[];jobs.clear();
+  for(const item of queue)item.resolve(null);queue=[];
   output.textContent='';document.querySelectorAll('[data-haituo-zoom-owned="translation"],[data-haituo-zoom-owned="caption"]').forEach(n=>n.remove());
   scan();
  }
