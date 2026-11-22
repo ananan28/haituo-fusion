@@ -132,12 +132,6 @@
     "count": 1
   },
   {
-    "path": "src/app/bundles/preload/main.js",
-    "old": "                            if (!node || node.__haituoUnreadEventsBound) return;",
-    "new": "                            if (!node || node.__haituoUnreadEventsBound) return;\n                            if(e.platformId===`zoom`)require(\"../../js/haituo-zoom-view.js\").bind(node);",
-    "count": 1
-  },
-  {
     "path": "src/app/bundles/main.js",
     "old": "if(!m.statSync(t.preload).isFile()){e.preventDefault();return}",
     "new": "try { if(!require('node:fs').statSync(t.preload).isFile())throw Error('Zoom preload is not a file'); }\n            catch(error){X.error('Zoom preload validation failed: '+String(error.message));e.preventDefault();return;}",

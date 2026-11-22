@@ -2,7 +2,7 @@
 
 1.7.0 真机黑屏由主窗口函数局部变量 m 遮蔽 node:fs 引起：m.statSync 不是函数，guest 创建中断。现改用显式 require(node:fs)，异常记录并拦截；测试故意提供非 fs 的 m，避免桩掩盖作用域问题。
 
-新增真实产品壳运行测试：Windows 走新增账号按钮，macOS 走持久账号恢复（原生菜单另做静态检查）；真实 Zoom 未登录页通过与否以 audit-results/zoom-shell.json 为准，不代表真实账号、个人聊天或会议通过。新增 Zoom 专用加载/错误/重试提示。补齐 macOS 原生新增菜单。
+新增真实产品壳运行测试：Windows 走新增账号按钮，macOS 走持久账号恢复（原生菜单另做静态检查）；真实 Zoom 未登录页通过与否以 audit-results/zoom-shell.json 为准，不代表真实账号、个人聊天或会议通过。撤回新增的主界面加载覆盖层；验收直接检查真实页面可见、无遮挡。补齐 macOS 原生新增菜单。
 
 # Zoom 接入：1.7.0 诊断开发分支
 
