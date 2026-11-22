@@ -77,7 +77,7 @@ function installZoom(document,bridge){
  observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
  async function setConfig(value){
   if(!value||typeof value!=='object')return;
-  receivedConfig={...value};value={...value,zoomCaptionTranslationEnabled:localCaption&&value.zoomCaptionTranslationEnabled!==false};captionToggle.checked=value.zoomCaptionTranslationEnabled;
+  receivedConfig={...receivedConfig,...value};value={...receivedConfig,zoomCaptionTranslationEnabled:localCaption&&receivedConfig.zoomCaptionTranslationEnabled!==false};captionToggle.checked=value.zoomCaptionTranslationEnabled;
   const signature=v=>JSON.stringify([v.autoTranslateIncoming!==false,v.backTranslationEnabled!==false,v.groupBackTranslationEnabled!==false,v.zoomCaptionTranslationEnabled!==false,v.blockChineseOutgoing!==false,v.targetLanguage||'en',v.chatTranslationProvider||v.provider||'google-free',v.inputTranslationProvider||v.provider||'google-free']);
   if(config&&signature(config)===signature(value)){config={...value};return}config={...value};epoch++;states=new WeakMap();
   for(const item of queue)item.resolve(null);queue=[];jobs.clear();
