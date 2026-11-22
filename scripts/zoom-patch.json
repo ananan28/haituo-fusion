@@ -1,0 +1,110 @@
+[
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "const qp = new Set([ `web.whatsapp.com`, `web.telegram.org` ]);",
+    "new": "const HaituoZoomSecurity=require(\"../js/haituo-zoom-security.js\"),HaituoZoomSessions=new WeakSet();\nconst qp = new Set([ `web.whatsapp.com`, `web.telegram.org` ]);",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "&& !qp.has(t)) throw Error(`不允许的翻译请求来源`);",
+    "new": "&& !qp.has(t) && !HaituoZoomSecurity.isZoomURL(e)) throw Error(`不允许的翻译请求来源`);",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "if (![ `web.whatsapp.com`, `web.telegram.org` ].includes(a)) {",
+    "new": "if (![ `web.whatsapp.com`, `web.telegram.org` ].includes(a) && !HaituoZoomSecurity.isZoomURL(r.src)) {",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "c = a === `web.whatsapp.com` ? `whatsapp` : `telegram`;",
+    "new": "c = a === `web.whatsapp.com` ? `whatsapp` : HaituoZoomSecurity.isZoomURL(r.src) ? `zoom` : `telegram`;",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "        if (c === `whatsapp`) {",
+    "new": "        if(c===`zoom`){\n            const zoomSession=p.session.fromPartition(r.partition??``);\n            HaituoZoomSessions.add(zoomSession);\n            t.preload=(0,s.join)($,`js`,`haituo-zoom-preload.js`);\n            if(!m.statSync(t.preload).isFile()){e.preventDefault();return}\n            r.preload=require('node:url').pathToFileURL(t.preload).href;\n            HaituoZoomSecurity.install({electron:p,session:zoomSession,getOwner:()=>Z,log:message=>X.warn(message)});\n        }\n        if (c === `whatsapp`) {",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "        guest.on(`will-navigate`, (event, url) => {",
+    "new": "        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{\n            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){\n                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));\n                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});\n            }\n            return{action:'deny'};\n        });\n        guest.on(`will-navigate`, (event, url) => {",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "            const host = parsed.hostname;",
+    "new": "            const host = parsed.hostname;\n            if(HaituoZoomSessions.has(guest.session)&&HaituoZoomSecurity.isZoomURL(url))return;",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/chunks/notifications.std-OkEDVWTL.js",
+    "old": "(signal|whatsapp|telegram)-",
+    "new": "(signal|whatsapp|telegram|zoom)-",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "            telegram: {",
+    "new": "            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://app.zoom.us/wc/home`,allowedHosts:[`app.zoom.us`],defaultIcon:`zoom`},\n            telegram: {",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "return e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;",
+    "new": "return e === `zoom` ? true : e === `signal` ? t.signalEnabled : e === `whatsapp` ? t.whatsappEnabled : t.telegramEnabled;",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram`",
+    "new": "o.platformId === `signal` || o.platformId === `whatsapp` || o.platformId === `telegram` || o.platformId === `zoom`",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "e.platformId === `whatsapp` || e.platformId === `telegram`",
+    "new": "e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`",
+    "count": 4
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "e.platformId !== `whatsapp` && e.platformId !== `telegram`",
+    "new": "e.platformId !== `whatsapp` && e.platformId !== `telegram` && e.platformId !== `zoom`",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "                        useragent: TCr,",
+    "new": "                        useragent: e.platformId===`zoom` ? undefined : TCr,",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "children: `新增 Telegram 账号`\n                    }) ]",
+    "new": "children: `新增 Telegram 账号`\n                    }), (0,O9.jsx)(`button`,{onClick:()=>L(`zoom`),type:`button`,children:`新增 Zoom 账号`}) ]",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "                            children: `T`\n",
+    "new": "                            children: e.platformId===`zoom` ? `Z` : `T`\n",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "            F(t => [ ...t, {\n                id: a,\n                platformId: e,",
+    "new": "            if(e===`zoom`){haituoSetPlatformFilter(`all`);qSetLoaded(items=>items.includes(a)?items:[a,...items])}\n            F(t => [ ...t, {\n                id: a,\n                platformId: e,",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "                            (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id), \n",
+    "new": "                            (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id),\n",
+    "count": 1
+  }
+]

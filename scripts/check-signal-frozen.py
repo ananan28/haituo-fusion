@@ -16,5 +16,7 @@ for path in files:
         expected = expected.replace("AI 润色（Google 对照）".encode(), "AI 直译（Google 对照）".encode())
     if path == 'src/app/bundles/preload/main.js':
         expected=runpy.run_path(str(ROOT/'scripts/apply-backtranslation-switches.py'))['apply'](expected.decode('utf-8')).encode('utf-8')
+    if path=='src/app/bundles/preload/main.js':
+        expected=runpy.run_path(str(ROOT/'scripts/apply-zoom.py'))['apply'](expected.decode('utf-8'),path).encode('utf-8')
     assert (ROOT/path).read_bytes() == expected, "Unexpected Signal core change: "+path
 print(f"Signal core freeze: {len(files)} files verified; only reviewed translation-output and switch-policy edits allowed")

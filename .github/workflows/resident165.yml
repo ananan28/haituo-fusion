@@ -1,7 +1,7 @@
-name: Haituo 1.6.9 Mac screen capture, UI and WhatsApp stability regression - NOT A RELEASE
+name: Haituo 1.7.0 Mac screen capture, UI and WhatsApp stability regression - NOT A RELEASE
 on:
   push:
-    branches: ['fix/1.6.9-backtranslation-switches']
+    branches: ['feature/zoom-1.7.0']
   workflow_dispatch:
 permissions:
   contents: write
@@ -26,6 +26,7 @@ jobs:
           git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
           python scripts/sync-local-chat-view.py
           python scripts/apply-backtranslation-switches.py
+          python scripts/apply-zoom.py
           python scripts/check-signal-frozen.py
           node --check src/app/bundles/main.js
           node --check src/app/js/caisheng-webview-preload.js
@@ -33,18 +34,18 @@ jobs:
       - name: Install isolated DOM test dependencies
         run: npm install --prefix "$RUNNER_TEMP/haituo-qa" --ignore-scripts --package-lock=false jsdom@26.1.0 react@19.1.0 react-dom@19.1.0
       - name: Synthetic WhatsApp coverage and frozen Signal component regression
-        run: node --test scripts/wa-rollback.dom.cjs scripts/signal-attachments.dom.cjs scripts/context-menu.dom.cjs
+        run: node --test scripts/wa-rollback.dom.cjs scripts/signal-attachments.dom.cjs scripts/context-menu.dom.cjs scripts/zoom.dom.cjs
         env:
           HAITUO_QA_NODE_MODULES: ${{ runner.temp }}/haituo-qa/node_modules
       - name: Verify exact diagnostic client source
         id: source
         run: |
-          if ! git diff --quiet -- src/app/bundles/preload/main.js; then
+          if ! git diff --quiet -- src/app/bundles src/app/js/haituo-zoom-preload.js; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/app/bundles/preload/main.js
-            git commit -m "source165: materialize reviewed 1.6.9 translation switch patch"
-            git push origin HEAD:fix/1.6.9-backtranslation-switches
+            git add src/app/bundles src/app/js/haituo-zoom-preload.js
+            git commit -m "source165: materialize isolated Zoom integration for 1.7.0"
+            git push origin HEAD:feature/zoom-1.7.0
           fi
           test -z "$(git status --porcelain)"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -109,7 +110,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'windows'
         with:
-          name: Haituo-1.6.9-diagnostic-windows
+          name: Haituo-1.7.0-diagnostic-windows
           path: |
             windows/out/*Setup.exe
             source-packages/*.zip
@@ -121,7 +122,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Haituo-1.6.9-diagnostic-verification-${{ matrix.target }}
+          name: Haituo-1.7.0-diagnostic-verification-${{ matrix.target }}
           path: |
             audit-results/**
             windows/verification/**
@@ -129,7 +130,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'macos'
         with:
-          name: Haituo-1.6.9-diagnostic-${{ matrix.target }}
+          name: Haituo-1.7.0-diagnostic-${{ matrix.target }}
           path: |
             windows/out/*Setup.exe
             macos/out/*.dmg

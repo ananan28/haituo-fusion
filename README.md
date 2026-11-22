@@ -1,3 +1,5 @@
+> 当前 feature/zoom-1.7.0 为 Zoom 诊断开发分支，基于 1.6.9，当前构建版本由 project.json 定义。Zoom 真实账号/会议尚未验证，详见 [ZOOM-INTEGRATION.md](ZOOM-INTEGRATION.md)。以下保留原工程说明。
+
 # 海拓独立开发工程
 
 本工程同时构建 Windows x64 1.6.4 和 macOS ARM64 1.6.4。所有应用代码、资源、随附 JavaScript 依赖和构建脚本都在本目录内。移动整个目录，或提交到你自己的新仓库即可继续开发，不需要以前的仓库、电脑、source.zip 分卷或已安装的海拓。

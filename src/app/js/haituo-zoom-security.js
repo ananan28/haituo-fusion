@@ -1,0 +1,43 @@
+'use strict';
+function isZoomURL(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='zoom.us'||u.hostname.endsWith('.zoom.us'))}catch{return false}}
+function install({electron:e,session,getOwner,log=()=>{}}){
+ const granted=new Set();
+ const trusted=(contents,origin)=>contents&&!contents.isDestroyed()&&isZoomURL(contents.getURL())&&isZoomURL(origin);
+ const validTypes=types=>Array.isArray(types)&&types.length>0&&types.every(t=>t==='audio'||t==='video');
+ session.setPermissionCheckHandler((contents,permission,origin,details)=>{
+  if(!trusted(contents,origin))return false;
+  if(permission==='persistent-storage')return true;
+  if(permission==='display-capture')return Date.now()-Number(contents.haituoLastGestureAt||0)<8000;
+  if(permission==='media'){const types=details?.mediaTypes||(['audio','video'].includes(details?.mediaType)?[details.mediaType]:[]);return validTypes(types)&&types.every(t=>granted.has(t))}
+  return permission==='notifications'&&granted.has('notifications');
+ });
+ session.setPermissionRequestHandler(async(contents,permission,callback,details)=>{
+  let done=false;const finish=value=>{if(!done){done=true;callback(value)}};
+  try{
+   if(!trusted(contents,details?.requestingUrl||details?.securityOrigin||contents?.getURL()))return finish(false);
+   if(permission==='persistent-storage')return finish(true);
+   if(permission==='display-capture')return finish(Date.now()-Number(contents.haituoLastGestureAt||0)<8000);
+   const types=permission==='media'?details?.mediaTypes:permission==='notifications'?['notifications']:[];
+   if(!validTypes(types)&&permission!=='notifications')return finish(false);
+   if(types.every(t=>granted.has(t)))return finish(true);
+   if(Date.now()-Number(contents.haituoLastGestureAt||0)>=8000)return finish(false);
+   const names={audio:'麦克风',video:'摄像头',notifications:'通知'};
+   const result=await e.dialog.showMessageBox(getOwner(),{type:'question',message:'允许此 Zoom 账号使用'+types.map(t=>names[t]).join('、')+'？',detail:'仅供当前账号使用；会议音视频由 Zoom 处理，海拓不会因此开始录音。',buttons:['取消','允许'],defaultId:0,cancelId:0});
+   if(result.response!==1||contents.isDestroyed())return finish(false);
+   types.forEach(t=>granted.add(t));finish(true);
+  }catch(error){log('Zoom permission failed: '+String(error?.message||error));finish(false)}
+ });
+ session.setDisplayMediaRequestHandler(async(request,callback)=>{
+  let done=false;const finish=value=>{if(!done){done=true;callback(value)}};
+  try{
+   if(!request.userGesture||!isZoomURL(request.frame?.url))return finish({});
+   const sources=await e.desktopCapturer.getSources({types:['screen','window'],thumbnailSize:{width:0,height:0}});
+   if(!sources.length)return finish({});
+   const result=await e.dialog.showMessageBox(getOwner(),{type:'question',message:'选择此 Zoom 会议要共享的屏幕或窗口',buttons:['取消',...sources.map((s,i)=>(i+1)+'. '+s.name.slice(0,80))],defaultId:0,cancelId:0});
+   if(result.response<1||result.response>sources.length||!isZoomURL(request.frame?.url))return finish({});
+   finish({video:sources[result.response-1]});
+  }catch(error){log('Zoom screen sharing failed: '+String(error?.message||error));finish({})}
+ },{useSystemPicker:true});
+ return{clearConsent:()=>granted.clear()};
+}
+module.exports={isZoomURL,install};
