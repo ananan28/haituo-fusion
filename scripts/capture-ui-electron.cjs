@@ -23,5 +23,6 @@ const guard=setTimeout(()=>{console.error('CAPTURE_UI_TIMEOUT');e.app.exit(1)},9
   }else report.nativeScreenCapture='UNTESTED: CI screen recording permission not granted';
  }
  report.signalContextMenu=await require('./context-menu-electron.cjs')(e,resources);report.checks.push({id:'SIGNAL-NATIVE-CONTEXT-MENU-VIEWS',ok:true,result:report.signalContextMenu});
+ report.zoom=await require('./zoom-native-ui.cjs')(e,resources);report.checks.push({id:'ZOOM-SANDBOX-AUTOMATIC-TRANSLATION',ok:true,result:report.zoom});
  report.ok=true;
 })().catch(error=>{report.ok=false;report.errors.push(String(error.stack||error))}).finally(()=>{clearTimeout(guard);fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'capture-ui-report.json'),JSON.stringify(report,null,2));console.log('CAPTURE_UI_REPORT',JSON.stringify(report));e.app.exit(report.ok?0:1)});
