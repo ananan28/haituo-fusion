@@ -29090,6 +29090,7 @@ async function nv() {
         if(c===`zoom`){
             const zoomSession=p.session.fromPartition(r.partition??``);
             HaituoZoomSessions.add(zoomSession);
+            zoomSession.setUserAgent(HaituoZoomSecurity.browserUserAgent());
             t.preload=(0,s.join)($,`js`,`haituo-zoom-preload.js`);
             try { if(!require('node:fs').statSync(t.preload).isFile())throw Error('Zoom preload is not a file'); }
             catch(error){X.error('Zoom preload validation failed: '+String(error.message));e.preventDefault();return;}
