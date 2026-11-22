@@ -231066,7 +231066,6 @@ function haituoCachedSignalTranslation(text) {
                         allowpopups: `true`,
                         ref: node => {
                             if (!node || node.__haituoUnreadEventsBound) return;
-                            if(e.platformId===`zoom`)require("../../js/haituo-zoom-view.js").bind(node);
                             node.__haituoUnreadEventsBound = !0, node.addEventListener(`ipc-message`, event => {
                                 if (event.channel !== `caisheng:unread-count`) return;
                                 const payload = event.args?.[0] ?? {}, count = Number(payload.count ?? 0);
