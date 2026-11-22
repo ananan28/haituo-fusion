@@ -86,6 +86,9 @@ jobs:
       - name: Native screenshot UI, clipboard and Mac capture regression
         timeout-minutes: 6
         run: python scripts/run-capture-ui.py
+      - name: Real Zoom login in production account shell
+        timeout-minutes: 3
+        run: node scripts/zoom-shell-native-check.cjs
       - name: Native SQLCipher reopen and content-cache account isolation
         run: node scripts/local-chat-native-check.cjs
       - name: Frozen Signal profile/startup regression
