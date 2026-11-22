@@ -106,5 +106,11 @@
     "old": "                            (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id), \n",
     "new": "                            (e.platformId === `whatsapp` || e.platformId === `telegram` || e.platformId === `zoom`) && qSetLoaded(t => t.includes(e.id) ? t : [ e.id, ...t ]), e.platformId === `signal` && e.id !== `signal-main` ? (window.SignalContext.caishengLaunchSignalProfile(e.id),\n",
     "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "        guest.on(`will-navigate`, (event, url) => {",
+    "new": "        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});\n        guest.on(`will-navigate`, (event, url) => {\n            if(HaituoZoomSessions.has(guest.session))return;",
+    "count": 1
   }
 ]

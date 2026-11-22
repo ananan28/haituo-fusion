@@ -41,3 +41,12 @@ function install({electron:e,session,getOwner,log=()=>{}}){
  return{clearConsent:()=>granted.clear()};
 }
 module.exports={isZoomURL,install};
+function installNavigation(contents,{openExternal,log=()=>{}}){
+ const guard=(event,url)=>{
+  if(isZoomURL(url))return;event.preventDefault();
+  if(/^https?:/i.test(url)&&Date.now()-Number(contents.haituoLastGestureAt||0)<8000)Promise.resolve().then(()=>openExternal(url)).catch(error=>log('Zoom external link failed: '+String(error.message)));
+ };
+ contents.on('will-navigate',guard);contents.on('will-redirect',guard);
+ contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
+}
+module.exports.installNavigation=installNavigation;

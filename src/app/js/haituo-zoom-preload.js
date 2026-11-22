@@ -2,7 +2,7 @@
 // Pure DOM adapter: deliberately no Electron/Node API or credentials on window.
 function installZoom(document,bridge){
  const win=document.defaultView,owned='[data-haituo-zoom-owned]',jobs=new Map(),memo=new Map(),statesInitial=new WeakMap();
- let config=null,receivedConfig=null,localCaption=true,epoch=0,disposed=false,running=0,scheduled,captionTimer,queue=[],states=statesInitial;
+ let config=null,receivedConfig=null,localCaption=true,captionFailure=null,epoch=0,disposed=false,running=0,scheduled,captionTimer,queue=[],states=statesInitial;
  const messageSelector='[data-message-id],[data-testid="message-item"],.chat-message__container';
  const listSelector='[role="log"],[data-testid="message-list"],.chat-message-list';
  const bodySelector='[data-testid="message-body"],.chat-message__text,.message-text';
@@ -13,7 +13,8 @@ function installZoom(document,bridge){
  const title=document.createElement('strong'),status=document.createElement('div'),output=document.createElement('div'),manual=document.createElement('button');
  title.textContent='海拓 · Zoom 自动翻译';status.textContent='正在读取翻译设置…';manual.textContent='翻译选中文字';
  const captionLabel=document.createElement('label'),captionToggle=document.createElement('input');captionToggle.type='checkbox';captionToggle.checked=localCaption;captionLabel.append(captionToggle,document.createTextNode('会议字幕翻译'));captionToggle.onchange=()=>{localCaption=captionToggle.checked;try{win.localStorage.setItem('haituo.zoom.caption-translation',String(localCaption))}catch{}if(receivedConfig)setConfig(receivedConfig)};
- output.style.whiteSpace='pre-wrap';panel.append(title,status,captionLabel,manual,output);(document.body||document.documentElement).append(panel);
+ const retry=document.createElement('button');retry.textContent='重试失败';retry.dataset.haituoZoomRetry='true';retry.onclick=()=>{captionFailure=null;for(const node of document.querySelectorAll(messageSelector))if(states.get(node)?.failed)states.delete(node);scan()};
+ output.style.whiteSpace='pre-wrap';panel.append(title,status,captionLabel,manual,retry,output);(document.body||document.documentElement).append(panel);
  const text=node=>{const copy=node.cloneNode(true);copy.querySelectorAll(owned).forEach(n=>n.remove());return String(copy.innerText||copy.textContent||'').trim()};
  const chinese=value=>/\p{Script=Han}/u.test(value),target=value=>chinese(value)?config?.targetLanguage||'en':'zh-CN';
  const direction=node=>!!node.closest('[data-direction="outgoing"],.message-out,.chat-message--outgoing,[data-is-self="true"]');
@@ -43,30 +44,31 @@ function installZoom(document,bridge){
  }
  function scan(){
   if(disposed||!config||document.hidden)return;
-  let count=0;
+  let count=0,disabledCount=0,failedCount=0;
   for(const node of document.querySelectorAll(messageSelector)){
    if(!node.closest(listSelector)||node.closest(owned)||node.closest('form'))continue;
    const rect=node.getBoundingClientRect();if(rect.width<=0||rect.height<=0||rect.bottom<0||rect.top>win.innerHeight)continue;
-   if(!enabled(node)){node.querySelectorAll('[data-haituo-zoom-owned="translation"]').forEach(n=>n.remove());continue}
+   if(!enabled(node)){disabledCount++;node.querySelectorAll('[data-haituo-zoom-owned="translation"]').forEach(n=>n.remove());continue}
    const body=node.querySelector(bodySelector);if(!body)continue;const source=text(body);if(!source||source.length>30000)continue;count++;
    const lang=target(source),id=key(source,lang),state=states.get(node);
+   if(state?.source===source&&state.failed===id){failedCount++;continue}
    if(state?.source===source&&state.lang===lang&&state.slot?.isConnected)continue;
    if(memo.has(id)){append(node,source,memo.get(id),epoch);const s=states.get(node);if(s)s.lang=lang;continue}
    if(state?.source===source&&state.pending===id&&jobs.has(id))continue;
    if(jobs.size>=200)break;
    const version=epoch;states.set(node,{source,pending:id});
-   translate(source,lang).then(result=>{append(node,source,result,version);const s=states.get(node);if(s)s.lang=lang}).catch(error=>{if(version===epoch){if(states.get(node)?.source===source)states.delete(node);status.textContent='翻译失败：'+String(error.message).slice(0,110)}});
+   translate(source,lang).then(result=>{append(node,source,result,version);const s=states.get(node);if(s)s.lang=lang}).catch(error=>{if(version===epoch){if(states.get(node)?.source===source)states.set(node,{source,failed:id,error:String(error.message).slice(0,110)});status.textContent='翻译失败：'+String(error.message).slice(0,110)}});
   }
-  status.textContent=count?'自动翻译已启用 · 已识别 '+count+' 条消息':'自动翻译已启用 · 等待可识别的聊天消息';
+  status.textContent=failedCount?'有 '+failedCount+' 条翻译失败，请检查 API 或点重试':count?'自动翻译已启用 · 已识别 '+count+' 条消息':disabledCount?'当前消息回译已关闭':'等待可识别的聊天消息';
   clearTimeout(captionTimer);captionTimer=win.setTimeout(scanCaptions,700);
  }
  async function scanCaptions(){
   if(!config||config.zoomCaptionTranslationEnabled===false)return;
   const caption=document.querySelector(captionSelector);if(!caption){document.querySelectorAll('[data-haituo-zoom-owned="caption"]').forEach(n=>n.remove());return}if(caption.closest(owned))return;
-  const source=text(caption);if(!source||source.length>2000)return;const version=epoch;
+  const source=text(caption);if(!source||source.length>2000)return;const captionKey=key(source,target(source));if(captionFailure===captionKey)return;const version=epoch;
   try{const translated=await translate(source,target(source));if(disposed||version!==epoch||config.zoomCaptionTranslationEnabled===false||!caption.isConnected||text(caption)!==source)return;
    let slot=caption.nextElementSibling;if(slot?.dataset.haituoZoomOwned!=='caption'){slot=document.createElement('div');slot.dataset.haituoZoomOwned='caption';caption.after(slot)}if(slot.textContent!==translated)slot.textContent=translated||'';
-  }catch(error){if(version===epoch)status.textContent='字幕翻译失败：'+error.message}
+  }catch(error){if(version===epoch){captionFailure=captionKey;status.textContent='字幕翻译失败：'+error.message}}
  }
  const schedule=()=>{clearTimeout(scheduled);scheduled=win.setTimeout(scan,80)};
  const observer=new win.MutationObserver(records=>{
@@ -79,7 +81,7 @@ function installZoom(document,bridge){
   if(!value||typeof value!=='object')return;
   receivedConfig={...receivedConfig,...value};value={...receivedConfig,zoomCaptionTranslationEnabled:localCaption&&receivedConfig.zoomCaptionTranslationEnabled!==false};captionToggle.checked=value.zoomCaptionTranslationEnabled;
   const signature=v=>JSON.stringify([v.autoTranslateIncoming!==false,v.backTranslationEnabled!==false,v.groupBackTranslationEnabled!==false,v.zoomCaptionTranslationEnabled!==false,v.blockChineseOutgoing!==false,v.targetLanguage||'en',v.chatTranslationProvider||v.provider||'google-free',v.inputTranslationProvider||v.provider||'google-free']);
-  if(config&&signature(config)===signature(value)){config={...value};return}config={...value};epoch++;states=new WeakMap();
+  if(config&&signature(config)===signature(value)){config={...value};return}config={...value};epoch++;states=new WeakMap();captionFailure=null;
   for(const item of queue)item.resolve(null);queue=[];
   output.textContent='';document.querySelectorAll('[data-haituo-zoom-owned="translation"],[data-haituo-zoom-owned="caption"]').forEach(n=>n.remove());
   scan();
