@@ -230291,7 +230291,7 @@ function haituoCachedSignalTranslation(text) {
             const visible = r.filter(e => e.platformId === haituoPlatformFilter && bCr(e.platformId, t));
             if (!visible.length || visible.some(e => e.id === o)) return;
             const next = visible[0];
-            (next.platformId === `whatsapp` || next.platformId === `telegram`) && qSetLoaded(e => e.includes(next.id) ? e : [ next.id, ...e ]), s(next.id), next.platformId === `signal` && next.id !== `signal-main` && window.SignalContext.caishengLaunchSignalProfile(next.id), requestAnimationFrame(() => A(next.id, 0, !0));
+            (next.platformId === `whatsapp` || next.platformId === `telegram` || next.platformId === `zoom`) && qSetLoaded(e => e.includes(next.id) ? e : [ next.id, ...e ]), s(next.id), next.platformId === `signal` && next.id !== `signal-main` && window.SignalContext.caishengLaunchSignalProfile(next.id), requestAnimationFrame(() => A(next.id, 0, !0));
         }, [ haituoPlatformFilter, r, t, o ]), (0, D9.useEffect)(() => {
             const counts = window.__haituoDirectUnreadCounts ||= new Map;
             const render = (id, rawCount) => {
@@ -230355,7 +230355,7 @@ function haituoCachedSignalTranslation(text) {
                 localStorage.setItem(`caisheng.lastWorkspace`, o);
             } catch {}
             let e = r.find(e => e.id === o);
-            (e?.platformId === `whatsapp` || e?.platformId === `telegram`) && qSetLoaded(t => t.includes(o) ? t : [ o, ...t ]);
+            (e?.platformId === `whatsapp` || e?.platformId === `telegram` || e?.platformId === `zoom`) && qSetLoaded(t => t.includes(o) ? t : [ o, ...t ]);
         }, [ o, r ]), (0, D9.useEffect)(() => {
             const esc = e => {
                 if (e.key !== `Escape`) return;
@@ -231060,11 +231060,13 @@ function haituoCachedSignalTranslation(text) {
                         "data-caisheng-workspace": e.id,
                         "data-haituo-active":!haituoHome&&o===e.id?`true`:`false`,
                         src: e.platformId === `whatsapp` ? `${t.startUrl}${t.startUrl.includes(`?`) ? `&` : `?`}haituoWorkspace=${encodeURIComponent(e.id)}` : t.startUrl,
+                        preload: e.platformId===`zoom` ? require("node:url").pathToFileURL(require("node:path").resolve(__dirname,"../../js/haituo-zoom-preload.js")).href : undefined,
                         useragent: e.platformId===`zoom` ? undefined : TCr,
                         webpreferences: `backgroundThrottling=no`,
                         allowpopups: `true`,
                         ref: node => {
                             if (!node || node.__haituoUnreadEventsBound) return;
+                            if(e.platformId===`zoom`)require("../../js/haituo-zoom-view.js").bind(node);
                             node.__haituoUnreadEventsBound = !0, node.addEventListener(`ipc-message`, event => {
                                 if (event.channel !== `caisheng:unread-count`) return;
                                 const payload = event.args?.[0] ?? {}, count = Number(payload.count ?? 0);

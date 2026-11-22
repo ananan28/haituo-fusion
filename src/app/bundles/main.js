@@ -29041,7 +29041,16 @@ async function nv() {
             return{action:'deny'};
         });
         if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});
+        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{
+            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){
+                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));
+                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});
+            }
+            return{action:'deny'};
+        });
+        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});
         guest.on(`will-navigate`, (event, url) => {
+            if(HaituoZoomSessions.has(guest.session))return;
             if(HaituoZoomSessions.has(guest.session))return;
             if(HaituoZoomSessions.has(guest.session))return;
             let parsed;
@@ -29100,7 +29109,8 @@ async function nv() {
             const zoomSession=p.session.fromPartition(r.partition??``);
             HaituoZoomSessions.add(zoomSession);
             t.preload=(0,s.join)($,`js`,`haituo-zoom-preload.js`);
-            if(!m.statSync(t.preload).isFile()){e.preventDefault();return}
+            try { if(!require('node:fs').statSync(t.preload).isFile())throw Error('Zoom preload is not a file'); }
+            catch(error){X.error('Zoom preload validation failed: '+String(error.message));e.preventDefault();return;}
             r.preload=require('node:url').pathToFileURL(t.preload).href;
             HaituoZoomSecurity.install({electron:p,session:zoomSession,getOwner:()=>Z,log:message=>X.warn(message)});
         }
@@ -29715,7 +29725,8 @@ function caishengShowTopMenu(title, items) {
 p.ipcMain.handle(`caisheng:show-add-menu`, async () => caishengShowTopMenu(`新增账号`, [
     { value: `signal`, label: `新增 Signal` },
     { value: `whatsapp`, label: `新增 WhatsApp 账号` },
-    { value: `telegram`, label: `新增 Telegram 账号` }
+    { value: `telegram`, label: `新增 Telegram 账号` },
+    { value: `zoom`, label: `新增 Zoom 账号` }
 ])), p.ipcMain.handle(`caisheng:show-account-menu`, async () => caishengShowTopMenu(`账号管理`, [
     { value: `edit`, label: `编辑备注` },
     { value: `refresh`, label: `刷新账号` },
