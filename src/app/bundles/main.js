@@ -29026,10 +29026,11 @@ async function nv() {
             channel === `haituo-user-gesture` && (guest.haituoLastGestureAt = Date.now());
         });
         if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{
-            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){
-                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));
-                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});
-            }
+            const url=details.url;
+            const haituoZoomAuth=HaituoZoomSecurity.isZoomURL(url)||HaituoZoomSecurity.isIdentityURL(url);
+            X.info(`haituo: Zoom window.open `+(haituoZoomAuth?`in-app`:`external`)+` `+url.slice(0,120));
+            if(haituoZoomAuth)return{action:'allow',overrideBrowserWindowOptions:{parent:Z,autoHideMenuBar:!0,width:1024,height:768,webPreferences:{partition:guest.session.partition,sandbox:!0,contextIsolation:!0,nodeIntegration:!1}}};
+            if(/^https?:/i.test(url)&&Date.now()-Number(guest.haituoLastGestureAt||0)<8000)q_(url).catch(()=>{});
             return{action:'deny'};
         });
         if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});

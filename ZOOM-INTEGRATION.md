@@ -1,3 +1,27 @@
+# 1.7.2 Zoom 登录内嵌与打开速度
+
+症状：Zoom 面板打开慢；点「Google/Apple/Facebook/SSO」登录后页面被甩到系统浏览器；在浏览器里登录完，海拓的 Zoom 面板仍是未登录。
+
+根因（实测，非推断）：Zoom 登录页的第三方按钮走同一框架的主文档跳转，CDP 目标 id 在跳转前后一致（zoom-login-fix/result.json 的 popupSameTargetAsGuest=true）。1.7.1 的 installNavigation 对所有非 zoom.us 主文档导航一律 preventDefault 并交给系统浏览器，因此 accounts.google.com 永远进不了面板；OAuth 的 code 也就落不到面板所在的 persist:caisheng-zoom-* 会话里，表现为「登录后海拓没反应」。
+
+改动：
+- src/app/js/haituo-zoom-security.js：新增身份源白名单 isIdentityURL（accounts.google.com、appleid.apple.com/id.apple.com、login.microsoftonline.com/login.live.com、facebook.com）与 120 秒企业 SSO「一跳」窗口——只有从身份源出发、且尚未回到 zoom.us 期间的 HTTPS 主文档导航才留在面板内，回到 zoom.us 立即失效；其余链接仍按原策略送系统浏览器。子窗口通过 did-create-window 继承同一守卫。每个决策写日志（haituo: Zoom window.open in-app/external、Zoom identity hand-off kept in Haituo、Zoom SSO hop kept in Haituo、Zoom link sent to system browser）。
+- scripts/zoom-patch.json：主窗口 setWindowOpenHandler 对 Zoom/身份源 URL 返回 action:'allow' 并沿用 guest.session.partition，其余仍 openExternal；zoom 平台 startUrl 由 https://app.zoom.us/wc/home 改为 https://zoom.us/meeting/login。
+- src/app/js/haituo-network.js：installWebRecovery 的 did-fail-load 主机白名单原本只有 web.whatsapp.com 与 web.telegram.org，Zoom 首屏加载失败从不重试；现加入 zoom.us 及其子域。
+- src/app/js/haituo-zoom-adapter.js：非 Zoom 域不再把 caisheng:get-translation-config 的拒绝原文刷在面板上（面板首帧在 about:blank 与身份源页运行，属预期拒绝），改显示「等待 Zoom 页面…」。
+
+实测数字（本机一次性副本应用，独立临时 profile，合成操作，不含真实账号）：
+- 出登录表单：旧入口 app.zoom.us/wc/home 54.2 秒，且未登录时先显示「下载Zoom应用」再自跳 zoom.us/signup?from=zwa（该页只渲染 Cookie 横幅，普通浏览器同样如此）；新入口 zoom.us/meeting/login 两次分别 7.7 秒与 28.5 秒。
+- 五个第三方按钮逐个用真实指针序列（Input.dispatchMouseEvent 的 mouseMoved→mousePressed→mouseReleased）点击，每次都先弹回登录页再点下一个，全部在面板内落地、没有调用系统浏览器（zoom-ms-sso/result.json）：Microsoft 1.45 秒 → login.microsoftonline.com/common/oauth2/v2.0/authorize?redirect_uri=https://zoom.us/mi…；SSO 0.91 秒 → zoom.us/web/sso/login?en=signin；Google 1.27 秒 → accounts.google.com/v3/signin/identifier；Facebook 1.56 秒 → www.facebook.com/login.php?app_id=113289095462482；Apple 2.48 秒 → appleid.apple.com/auth/authorize?redirect_uri=https://zoom.us/apple/oauth。主进程日志逐条对应「Zoom identity hand-off kept in Haituo」，Google/Facebook 各两条（authorize 与最终标识页）。日志里的「Zoom returned to Zoom from the identity hop」是测试脚本把面板弹回登录页时触发的，只证明回到 zoom.us 会清掉一跳窗口，不等于真实 SSO 回跳；SSO 按钮本身落在 zoom.us/web/sso/login，走的是 zoom.us 白名单而不是一跳窗口。
+- Google 页正文含「继续前往Zoom」，redirect_uri=https://zoom.us/google/oauth；同一 CDP 目标 id 证明它留在原面板内。
+- 测试口径：Zoom 登录页的按钮用脚本 `.click()` 不生效（第一轮 zoom-providers 因此把 Apple/Microsoft 误报成「still on zoom.us」），必须用受信任的指针事件；验收以 URL+日志为准，面板内容不出现在壳层 CDP 截图里（webview 目标截图会超时）。
+- 登录页静置 8 秒，guest 的 ScriptDuration 增量 149 毫秒（约 1.9% 单核），说明自动翻译面板不是打开慢的主因。
+- scripts/zoom.test.cjs 增加 4 条（身份源识别、主文档留在应用内、SSO 一跳到期即失效、子窗口继承守卫），本机 node --test 10/10 通过；旧 6 条未改动。
+
+仍未验证：没有真实 Zoom 账号，五家身份源都只走到输入凭据前的那一页，**整条登录链路（拿到 code 后回到面板并显示已登录）尚未跑通验证**；一跳窗口的真实到期、企业 SSO 的域名跳转、Apple 弹窗式授权、会议音视频、屏幕共享、真实聊天与字幕选择器仍为 UNTESTED。
+
+构建注意：apply-zoom.py 的幂等判定只认「未打补丁的基准」或「已物化成最终形态」两种输入。若为已物化的块再追加一条 refinement 补丁，早先那条补丁的 final 判定会失配并二次插入，导致锚点漂移。因此本次直接改写拥有该锚点的原条目，再从 acba10a 基准重新物化两个 bundle，二次运行为 no-op 已验证。
+
 # 1.7.1 Zoom 启动修复
 
 1.7.0 真机黑屏由主窗口函数局部变量 m 遮蔽 node:fs 引起：m.statSync 不是函数，guest 创建中断。现改用显式 require(node:fs)，异常记录并拦截；测试故意提供非 fs 的 m，避免桩掩盖作用域问题。

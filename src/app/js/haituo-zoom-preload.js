@@ -117,7 +117,8 @@ function installZoom(document,bridge){
  document.addEventListener('pointerdown',gesture,true);document.addEventListener('keydown',gesture,true);
  document.addEventListener('scrollend',schedule,true);document.addEventListener('visibilitychange',schedule);
  const unsubscribe=bridge.onConfig?.(setConfig);
- bridge.getConfig().then(setConfig).catch(error=>{status.textContent='翻译设置读取失败：'+error.message});
+ const onZoomHost=()=>{const h=(win.location&&win.location.hostname)||'';return h==='zoom.us'||h.endsWith('.zoom.us')};
+ bridge.getConfig().then(setConfig).catch(error=>{status.textContent=onZoomHost()?'翻译设置读取失败：'+error.message:'等待 Zoom 页面…'});
  return{scan,setConfig,status,dispose(){disposed=true;epoch++;observer.disconnect();clearTimeout(scheduled);clearTimeout(captionTimer);unsubscribe?.();document.removeEventListener('pointerdown',gesture,true);document.removeEventListener('keydown',gesture,true);document.removeEventListener('keydown',outgoing,true);document.removeEventListener('click',clickSend,true);document.removeEventListener('scrollend',schedule,true);document.removeEventListener('visibilitychange',schedule);queue.forEach(item=>item.resolve(null));queue=[];panel.remove()},selectors:{messageSelector,listSelector,bodySelector,captionSelector}};
 }
 if(typeof module!=='undefined')module.exports={installZoom};

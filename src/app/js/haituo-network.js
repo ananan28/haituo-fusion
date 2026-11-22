@@ -106,7 +106,7 @@ function installWebRecovery(contents, timers = { setTimeout, clearTimeout }, log
     if (!mainFrame || ![-2, -7, -21, -100, -101, -102, -105, -106, -109, -118, -130].includes(code)) return;
     let host;
     try { host = new URL(url).hostname; } catch { return; }
-    if (!['web.whatsapp.com', 'web.telegram.org'].includes(host)) return;
+    if (!['web.whatsapp.com', 'web.telegram.org'].includes(host) && !(host === 'zoom.us' || host.endsWith('.zoom.us'))) return;
     failed = true;
     // A page that already rendered is kept. Reloading it because a later
     // in-page navigation failed is what made the chat randomly go back to its

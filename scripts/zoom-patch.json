@@ -32,7 +32,7 @@
   {
     "path": "src/app/bundles/main.js",
     "old": "        guest.on(`will-navigate`, (event, url) => {",
-    "new": "        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{\n            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){\n                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));\n                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});\n            }\n            return{action:'deny'};\n        });\n        guest.on(`will-navigate`, (event, url) => {",
+    "new": "        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{\n            const url=details.url;\n            const haituoZoomAuth=HaituoZoomSecurity.isZoomURL(url)||HaituoZoomSecurity.isIdentityURL(url);\n            X.info(`haituo: Zoom window.open `+(haituoZoomAuth?`in-app`:`external`)+` `+url.slice(0,120));\n            if(haituoZoomAuth)return{action:'allow',overrideBrowserWindowOptions:{parent:Z,autoHideMenuBar:!0,width:1024,height:768,webPreferences:{partition:guest.session.partition,sandbox:!0,contextIsolation:!0,nodeIntegration:!1}}};\n            if(/^https?:/i.test(url)&&Date.now()-Number(guest.haituoLastGestureAt||0)<8000)q_(url).catch(()=>{});\n            return{action:'deny'};\n        });\n        guest.on(`will-navigate`, (event, url) => {",
     "count": 1
   },
   {
@@ -50,7 +50,7 @@
   {
     "path": "src/app/bundles/preload/main.js",
     "old": "            telegram: {",
-    "new": "            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://app.zoom.us/wc/home`,allowedHosts:[`app.zoom.us`],defaultIcon:`zoom`},\n            telegram: {",
+    "new": "            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://zoom.us/meeting/login`,allowedHosts:[`zoom.us`,`app.zoom.us`],defaultIcon:`zoom`},\n            telegram: {",
     "count": 1
   },
   {

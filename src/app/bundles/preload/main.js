@@ -230134,7 +230134,7 @@ function haituoCachedSignalTranslation(text) {
                 allowedHosts: [ `web.whatsapp.com` ],
                 defaultIcon: `whatsapp`
             },
-            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://app.zoom.us/wc/home`,allowedHosts:[`app.zoom.us`],defaultIcon:`zoom`},
+            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://zoom.us/meeting/login`,allowedHosts:[`zoom.us`,`app.zoom.us`],defaultIcon:`zoom`},
             telegram: {
                 id: `telegram`,
                 label: `Telegram`,

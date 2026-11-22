@@ -41,15 +41,28 @@ function install({electron:e,session,getOwner,log=()=>{}}){
  return{clearConsent:()=>granted.clear()};
 }
 module.exports={isZoomURL,install};
+// Zoom's own login buttons hand off to these identity providers. Their popups
+// post the credential back to the Zoom page, so they stay inside Haituo.
+const IDENTITY_HOSTS=new Set([`accounts.google.com`,`accounts.youtube.com`,`oauth2.googleapis.com`,`id.apple.com`,`appleid.apple.com`,`login.microsoftonline.com`,`login.microsoft.com`,`login.live.com`,`facebook.com`,`www.facebook.com`,`m.facebook.com`]);
+// Zoom enterprise SSO leaves zoom.us for a customer identity provider and
+// returns; only that bounded hop may navigate the pane off Zoom.
+const AUTH_HOP_MS=12e4;
+function isIdentityURL(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&IDENTITY_HOSTS.has(u.hostname.toLowerCase())}catch{return false}}
 function installNavigation(contents,{openExternal,log=()=>{}}){
+ let hopUntil=0;
  const guard=(event,url)=>{
-  if(isZoomURL(url))return;event.preventDefault();
-  if(/^https?:/i.test(url)&&Date.now()-Number(contents.haituoLastGestureAt||0)<8000)Promise.resolve().then(()=>openExternal(url)).catch(error=>log('Zoom external link failed: '+String(error.message)));
+  if(isZoomURL(url)){if(hopUntil){log('Zoom returned to Zoom from the identity hop')}hopUntil=0;return}
+  if(isIdentityURL(url)){hopUntil=Date.now()+AUTH_HOP_MS;log('Zoom identity hand-off kept in Haituo: '+url);return}
+  if(Date.now()<hopUntil&&/^https:/i.test(url)){log('Zoom SSO hop kept in Haituo: '+url);return}
+  event.preventDefault();
+  if(/^https?:/i.test(url)&&Date.now()-Number(contents.haituoLastGestureAt||0)<8000){log('Zoom link sent to system browser: '+url);Promise.resolve().then(()=>openExternal(url)).catch(error=>log('Zoom external link failed: '+String(error.message)));}
  };
  contents.on('will-navigate',guard);contents.on('will-redirect',guard);
+ contents.on('did-create-window',child=>{child.haituoLastGestureAt=Date.now();installNavigation(child,{openExternal,log})});
  contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
 }
 module.exports.installNavigation=installNavigation;
+module.exports.isIdentityURL=isIdentityURL;
 
 function browserUserAgent(chrome=process.versions.chrome,platform=process.platform){
  if(!/^\d+(?:\.\d+){1,3}$/.test(String(chrome)))throw Error('Invalid Chromium runtime version');
