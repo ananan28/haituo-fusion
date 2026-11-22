@@ -29032,7 +29032,9 @@ async function nv() {
             }
             return{action:'deny'};
         });
+        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});
         guest.on(`will-navigate`, (event, url) => {
+            if(HaituoZoomSessions.has(guest.session))return;
             let parsed;
             try {
                 parsed = new URL(url);
