@@ -112,5 +112,41 @@
     "old": "        guest.on(`will-navigate`, (event, url) => {",
     "new": "        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});\n        guest.on(`will-navigate`, (event, url) => {\n            if(HaituoZoomSessions.has(guest.session))return;",
     "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "next.platformId === `whatsapp` || next.platformId === `telegram`",
+    "new": "next.platformId === `whatsapp` || next.platformId === `telegram` || next.platformId === `zoom`",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "e?.platformId === `whatsapp` || e?.platformId === `telegram`",
+    "new": "e?.platformId === `whatsapp` || e?.platformId === `telegram` || e?.platformId === `zoom`",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "                        useragent: e.platformId===`zoom` ? undefined : TCr,",
+    "new": "                        preload: e.platformId===`zoom` ? require(\"node:url\").pathToFileURL(require(\"node:path\").resolve(__dirname,\"../../js/haituo-zoom-preload.js\")).href : undefined,\n                        useragent: e.platformId===`zoom` ? undefined : TCr,",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/preload/main.js",
+    "old": "                            if (!node || node.__haituoUnreadEventsBound) return;",
+    "new": "                            if (!node || node.__haituoUnreadEventsBound) return;\n                            if(e.platformId===`zoom`)require(\"../../js/haituo-zoom-view.js\").bind(node);",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "if(!m.statSync(t.preload).isFile()){e.preventDefault();return}",
+    "new": "try { if(!require('node:fs').statSync(t.preload).isFile())throw Error('Zoom preload is not a file'); }\n            catch(error){X.error('Zoom preload validation failed: '+String(error.message));e.preventDefault();return;}",
+    "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "    { value: `telegram`, label: `新增 Telegram 账号` }\n]))",
+    "new": "    { value: `telegram`, label: `新增 Telegram 账号` },\n    { value: `zoom`, label: `新增 Zoom 账号` }\n]))",
+    "count": 1
   }
 ]

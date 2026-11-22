@@ -15,8 +15,14 @@ try{
  while(Date.now()<end){try{const t=(await targets()).find(t=>t.type==='page'&&t.url.includes('background.html'));if(t){client=await attach(t);await client.call('Runtime.enable');break}}catch{}await pause(250)}
  if(!client)throw Error('Main shell CDP unavailable');
  while(Date.now()<end){if(await evaluate(`!!document.querySelector('.CaishengPlatformShell__add')`))break;await pause(250)}
- const create=await evaluate(`(()=>{document.querySelector('.CaishengPlatformShell__add')?.click();return true})()`);await pause(150);
- const clicked=await evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='新增 Zoom 账号');if(!b)return false;b.click();return true})()`);if(!clicked)throw Error('Add Zoom button unavailable in production shell');
+ if(process.platform==='darwin'){
+  await evaluate(`(()=>{const key='caisheng.workspaces.v3',items=JSON.parse(localStorage.getItem(key)||'[]');items.push({id:'zoom-shell-qa',platformId:'zoom',label:'Zoom QA',createdAt:Date.now()});localStorage.setItem(key,JSON.stringify(items));localStorage.setItem('caisheng.lastWorkspace','zoom-shell-qa')})()`);await client.call('Page.reload');
+  report.creationPath='PERSISTED_ACCOUNT_RESTORE_NATIVE_MENU_ASSERTED_IN_UNIT_TEST';
+ }else{
+  await evaluate(`document.querySelector('.CaishengPlatformShell__add').click()`);await pause(200);
+  const clicked=await evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='新增 Zoom 账号');if(!b)return false;b.click();return true})()`);if(!clicked)throw Error('Add Zoom button unavailable in production shell');
+  report.creationPath='ACTUAL_ADD_ACCOUNT_BUTTON';
+ }
  end=Date.now()+45000;let guest;
  while(Date.now()<end){report.shell=await evaluate(`(()=>{const v=[...document.querySelectorAll('webview')].find(v=>String(v.getAttribute('partition')).includes('-zoom-'));return v?{src:v.src,partition:v.partition,visibility:getComputedStyle(v).visibility,width:v.getBoundingClientRect().width,height:v.getBoundingClientRect().height,id:(()=>{try{return v.getWebContentsId()}catch{return null}})()}:null})()`);const t=(await targets()).find(t=>/zoom\.(us|com)/.test(t.url));if(t){guest=await attach(t);await guest.call('Runtime.enable');break}await pause(400)}
  if(!guest)throw Error('Zoom guest target missing: '+JSON.stringify(report.shell));
