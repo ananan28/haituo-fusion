@@ -14,7 +14,7 @@ function bind(view){
  async function ready(){try{const page=await view.executeJavaScript('({url:location.href,body:!!document.body,children:document.body?.children.length||0})');if(!page?.body||page.url==='about:blank')return;set('ready','')}catch{set('error','Zoom 页面启动失败，请重试。')}}
  function gone(){set('error','Zoom 页面进程已退出，请重试。')}
  function again(){start();try{if(typeof view.loadURL==='function')Promise.resolve(view.loadURL(view.src)).catch(()=>gone());else view.src=view.getAttribute('src')}catch{gone()}}
- const events={'did-start-loading':start,'dom-ready':ready,'did-fail-load':failure,'render-process-gone':gone,'crashed':gone};
+ const events={'did-start-loading':start,'dom-ready':ready,'did-finish-load':ready,'did-stop-loading':ready,'did-fail-load':failure,'render-process-gone':gone,'crashed':gone};
  for(const [type,handler]of Object.entries(events))view.addEventListener(type,handler);
  retry.addEventListener('click',again);const observer=new win.MutationObserver(sync);observer.observe(view,{attributes:true,attributeFilter:['style','data-haituo-active']});
  const api={dispose(){clearTimeout(timer);observer.disconnect();for(const [type,handler]of Object.entries(events))view.removeEventListener(type,handler);retry.removeEventListener('click',again);panel.remove();delete view.__haituoZoomLifecycle}};view.__haituoZoomLifecycle=api;queueMicrotask(()=>{if(view.isConnected)start()});return api;
