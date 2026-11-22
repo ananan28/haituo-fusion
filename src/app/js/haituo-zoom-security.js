@@ -50,3 +50,10 @@ function installNavigation(contents,{openExternal,log=()=>{}}){
  contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
 }
 module.exports.installNavigation=installNavigation;
+
+function browserUserAgent(chrome=process.versions.chrome,platform=process.platform){
+ if(!/^\d+(?:\.\d+){1,3}$/.test(String(chrome)))throw Error('Invalid Chromium runtime version');
+ const os=platform==='win32'?'Windows NT 10.0; Win64; x64':platform==='darwin'?'Macintosh; Intel Mac OS X 10_15_7':'X11; Linux x86_64';
+ return 'Mozilla/5.0 ('+os+') AppleWebKit/537.36 (KHTML, like Gecko) Chrome/'+chrome+' Safari/537.36';
+}
+module.exports.browserUserAgent=browserUserAgent;

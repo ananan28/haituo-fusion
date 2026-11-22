@@ -8,7 +8,7 @@ function bind(view){
  let state='loading',message='正在打开 Zoom…',timer;
  const visible=()=>view.isConnected&&view.dataset.haituoActive!=='false'&&view.style.visibility!=='hidden';
  function sync(){if(!view.isConnected)return;const parent=view.parentElement;if(parent&&!panel.isConnected)parent.append(panel);panel.style.display=state==='ready'||!visible()?'none':'flex';panel.dataset.haituoZoomStatus=state;label.textContent=message;retry.hidden=state==='loading'}
- function set(next,text){state=next;message=text;clearTimeout(timer);sync()}
+ function set(next,text){state=next;view.dataset.haituoZoomState=next;message=text;clearTimeout(timer);sync()}
  function start(){set('loading','正在打开 Zoom…');timer=setTimeout(()=>set('error','Zoom 页面未能完成启动。可点击重试；账号数据不会被清除。'),30000)}
  function failure(event){if(event.isMainFrame===false||event.errorCode===-3)return;set('error','Zoom 加载失败：'+String(event.errorCode??'')+' '+String(event.errorDescription||'页面启动异常').replace(/https?:\/\/\S+/g,'[地址]'))}
  async function ready(){try{const page=await view.executeJavaScript('({url:location.href,body:!!document.body,children:document.body?.children.length||0})');if(!page?.body||page.url==='about:blank')return;set('ready','')}catch{set('error','Zoom 页面启动失败，请重试。')}}

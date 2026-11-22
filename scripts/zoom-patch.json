@@ -148,5 +148,11 @@
     "old": "    { value: `telegram`, label: `新增 Telegram 账号` }\n]))",
     "new": "    { value: `telegram`, label: `新增 Telegram 账号` },\n    { value: `zoom`, label: `新增 Zoom 账号` }\n]))",
     "count": 1
+  },
+  {
+    "path": "src/app/bundles/main.js",
+    "old": "            HaituoZoomSessions.add(zoomSession);",
+    "new": "            HaituoZoomSessions.add(zoomSession);\n            zoomSession.setUserAgent(HaituoZoomSecurity.browserUserAgent());",
+    "count": 1
   }
 ]
