@@ -1,0 +1,3 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),cp=require('node:child_process');
+test('Zoom exact patch materialization is idempotent on packaged source',()=>{const code="import pathlib,runpy,subprocess,json; f=runpy.run_path('scripts/apply-zoom.py')['apply']; patches=json.loads(pathlib.Path('scripts/zoom-patch.json').read_text());\nfor p in {x['path'] for x in patches}:\n s=f(pathlib.Path(p).read_text(),p); assert f(s,p)==s,p";const r=cp.spawnSync(process.platform==='win32'?'python':'python3',['-c',code],{encoding:'utf8'});assert.equal(r.status,0,r.stderr)});

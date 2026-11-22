@@ -23,10 +23,10 @@ jobs:
           python-version: '3.12.10'
       - name: Apply isolated WhatsApp implementation
         run: |
-          git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2
+          git fetch --depth=1 origin 42e7aac6074979f5e654880efbc993799944c8f2 acba10a49ebf7039f22a631a29417d5ff8862da8
           python scripts/sync-local-chat-view.py
           python scripts/apply-backtranslation-switches.py
-          python scripts/apply-zoom.py
+          python scripts/apply-zoom.py --canonical
           python scripts/check-signal-frozen.py
           node --check src/app/bundles/main.js
           node --check src/app/js/caisheng-webview-preload.js
