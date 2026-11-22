@@ -29033,7 +29033,16 @@ async function nv() {
             return{action:'deny'};
         });
         if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});
+        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{
+            if(Date.now()-Number(guest.haituoLastGestureAt||0)<8000){
+                if(HaituoZoomSecurity.isZoomURL(details.url))guest.loadURL(details.url).catch(error=>X.warn(error.message));
+                else if(/^https?:/i.test(details.url))q_(details.url).catch(()=>{});
+            }
+            return{action:'deny'};
+        });
+        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,log:message=>X.warn(message)});
         guest.on(`will-navigate`, (event, url) => {
+            if(HaituoZoomSessions.has(guest.session))return;
             if(HaituoZoomSessions.has(guest.session))return;
             let parsed;
             try {
