@@ -61,6 +61,7 @@ function installNavigation(contents,{openExternal,openAuth,log=()=>{}}){
   }
   if(isIdentityURL(url)){
    hopUntil=Date.now()+AUTH_HOP_MS;
+   if(!hopOrigin)hopOrigin=new URL(url).origin;
    log('Zoom identity hand-off requested: '+authPageURL(url));
    if(openAuth){
     event.preventDefault();
@@ -94,29 +95,41 @@ function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log
   try{Promise.resolve(onReturn?.()).catch(error=>log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed')))}catch(error){log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed'))}
   win.destroy();
  };
- const finishWhenLoaded=()=>{
-  if(!returned||done||win.isDestroyed())return;
+ const finishWhenLoaded=contents=>{
+  if(!returned||done||win.isDestroyed()||contents.isDestroyed()||contents.isLoading())return;
+  if(!isZoomURL(contents.getURL()))return;
   clearTimeout(timer);
-  timer=setTimeout(()=>{if(!win.isDestroyed()&&isZoomURL(win.webContents.getURL()))finish()},750);
+  timer=setTimeout(()=>{if(!win.isDestroyed()&&!contents.isDestroyed()&&!contents.isLoading()&&isZoomURL(contents.getURL()))finish()},750);
+ };
+ const watched=new Set();
+ const observe=contents=>{
+  if(watched.has(contents))return;
+  watched.add(contents);
+  contents.on('did-navigate',(_event,current)=>{
+   if(!isZoomURL(current))return;
+   returned=true;
+   log('Zoom auth returned to Zoom: '+authPageURL(current));
+   clearTimeout(timer);
+   timer=setTimeout(()=>finishWhenLoaded(contents),1500);
+  });
+  contents.on('did-stop-loading',()=>finishWhenLoaded(contents));
  };
  const popupHandler=details=>{
   if(isZoomURL(details.url)||isIdentityURL(details.url))return{action:'allow',overrideBrowserWindowOptions:{parent:win,autoHideMenuBar:true,width:1024,height:768,webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}}};
   return{action:'deny'};
  };
+ const manageChild=child=>{
+  child.setWindowOpenHandler(popupHandler);
+  observe(child);
+  child.on('did-create-window',manageChild);
+ };
  const win=new electron.BrowserWindow({parent,autoHideMenuBar:true,width:560,height:820,title:'Zoom 登录 — 海拓',webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ observe(win.webContents);
  win.webContents.haituoLastGestureAt=Date.now();
  win.webContents.on('before-input-event',(_event,input)=>{if(input.type==='mouseDown'||input.type==='keyDown')win.webContents.haituoLastGestureAt=Date.now()});
  win.webContents.setWindowOpenHandler(popupHandler);
- win.webContents.on('did-create-window',child=>child.setWindowOpenHandler(popupHandler));
+ win.webContents.on('did-create-window',manageChild);
  installNavigation(win.webContents,{openExternal,log});
- win.webContents.on('did-navigate',(_event,current)=>{
-  if(!isZoomURL(current))return;
-  returned=true;
-  log('Zoom auth returned to Zoom: '+authPageURL(current));
-  clearTimeout(timer);
-  timer=setTimeout(()=>{if(!win.webContents.isLoading())finishWhenLoaded()},1500);
- });
- win.webContents.on('did-stop-loading',finishWhenLoaded);
  win.once('closed',()=>clearTimeout(timer));
  timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},180000);
  win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'));if(!win.isDestroyed())win.destroy()});

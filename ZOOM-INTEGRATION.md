@@ -5,10 +5,10 @@
 根因：Google 明确禁止 OAuth 在嵌入式 WebView 中运行。39fdf44 只去掉了 UA 里的 Electron 标记，但授权页仍位于 Electron `<webview>` guest 中；把 UA 改成 Chrome 字符串不能改变这个嵌入环境。Zoom 官方开发论坛也确认 Google 不接受 embedded user agent 的授权请求。
 
 改动：
-- `src/app/js/haituo-zoom-security.js`：身份源导航不再进入 Zoom webview，而是打开海拓自己的顶层 `BrowserWindow`。该窗口复用同一个 `persist:caisheng-zoom-*` 分区，保留 sandbox/contextIsolation、禁用 Node；授权回到 `zoom.us` 且页面加载完成后，再自动关闭登录窗并刷新原 Zoom 面板。
-- 主窗口拦截与 `window.open` 两条入口都走同一登录窗；非身份源链接仍按原策略处理。日志只记录 origin+pathname，不记录 OAuth query/state/code。
-- 企业 SSO 从 `zoom.us/web/sso/login` 进入时开启 120 秒一跳窗口，回到 Zoom 即失效。
-- `scripts/zoom-shell-native-check.cjs` 增加真实产品壳验收：用受信任指针点击 Google，断言授权页是新的顶层 page 目标、guest 仍停在 Zoom、UA 不含应用标记，并直接拒绝「浏览器或应用不安全」页面。没有真实账号，因此仍只验证到凭据页之前。
+- `src/app/js/haituo-zoom-security.js`：身份源导航不再进入 Zoom webview，而是打开海拓自己的顶层 `BrowserWindow`。该窗口复用同一个 `persist:caisheng-zoom-*` 分区，保留 sandbox/contextIsolation、禁用 Node；授权回到 `zoom.us` 且页面加载完成后，再自动关闭登录窗并刷新原 Zoom 面板。身份源及企业 SSO 的后续跳转绑定首个身份 origin，子窗口继承同一策略与回传监听。
+- 主窗口拦截与 `window.open` 两条入口都走同一登录窗，Zoom 子窗也递归安装弹窗守卫；非身份源链接仍按原策略处理。日志只记录 origin+pathname，不记录 OAuth query/state/code。
+- 企业 SSO 从 `zoom.us/web/sso/login` 进入时开启 120 秒一跳窗口，只允许首个客户 IdP origin，回到 Zoom 即失效。
+- `scripts/zoom-shell-native-check.cjs` 增加真实产品壳验收：用受信任指针点击 Google，断言授权页是新的顶层 page 目标、guest 仍停在 Zoom、UA 不含应用标记，并直接拒绝「浏览器或应用不安全」页面。报告与 stdout 统一去除 URL query/hash。脚本后的 Zoom 回跳只验证关窗与面板恢复代码路径，明确标记为 synthetic，不冒充真实 OAuth；没有真实账号，因此仍只验证到凭据页之前。
 
 尚未验证：真实 Google 账号输密码/验证码/通行密钥、拿到 code 后回到 Zoom 并显示已登录，以及会议音视频、屏幕共享、真实聊天与字幕选择器。顶层窗口是否被 Google 接受必须以 Windows/macOS 远端产品壳测试结果为准，不能只看 URL 跳转成功。
 

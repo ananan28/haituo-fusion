@@ -29025,19 +29025,26 @@ async function nv() {
         guest.on(`ipc-message`, (e, channel) => {
             channel === `haituo-user-gesture` && (guest.haituoLastGestureAt = Date.now());
         });
-        if(HaituoZoomSessions.has(guest.session))guest.setWindowOpenHandler(details=>{
-            const url=details.url;
-            if(HaituoZoomSecurity.isIdentityURL(url)){
-                X.info(`haituo: Zoom auth popup delegated `+HaituoZoomSecurity.authPageURL(url));
-                try{HaituoZoomSecurity.openAuthWindow({electron:p,parent:Z,partition:guest.session.partition,url,openExternal:q_,onReturn:()=>{if(Z&&!Z.isDestroyed()){Z.show();Z.focus()}if(!guest.isDestroyed())guest.loadURL('https://zoom.us/meeting/login').catch(error=>X.warn(error.message))},log:message=>X.warn(message)})}catch(error){X.warn('Zoom auth popup failed: '+String(error.message))}
-                return{action:'deny'};
-            }
-            const haituoZoomAuth=HaituoZoomSecurity.isZoomURL(url);
-            X.info(`haituo: Zoom window.open `+(haituoZoomAuth?`in-app`:`external`)+` `+HaituoZoomSecurity.authPageURL(url));
-            if(haituoZoomAuth)return{action:'allow',overrideBrowserWindowOptions:{parent:Z,autoHideMenuBar:!0,width:1024,height:768,webPreferences:{partition:guest.session.partition,sandbox:!0,contextIsolation:!0,nodeIntegration:!1}}};
-            if(/^https?:/i.test(url)&&Date.now()-Number(guest.haituoLastGestureAt||0)<8000)q_(url).catch(()=>{});
-            return{action:'deny'};
-        });
+        if(HaituoZoomSessions.has(guest.session)){
+            const installZoomPopupHandler=owner=>{
+                const handler=details=>{
+                    const url=details.url;
+                    if(HaituoZoomSecurity.isIdentityURL(url)){
+                        X.info(`haituo: Zoom auth popup delegated `+HaituoZoomSecurity.authPageURL(url));
+                        try{HaituoZoomSecurity.openAuthWindow({electron:p,parent:Z,partition:guest.session.partition,url,openExternal:q_,onReturn:()=>{if(Z&&!Z.isDestroyed()){Z.show();Z.focus()}if(!guest.isDestroyed())guest.loadURL('https://zoom.us/meeting/login').catch(error=>X.warn(error.message))},log:message=>X.warn(message)})}catch(error){X.warn('Zoom auth popup failed: '+String(error?.name||'auth window failed'))}
+                        return{action:'deny'};
+                    }
+                    const haituoZoomAuth=HaituoZoomSecurity.isZoomURL(url);
+                    X.info(`haituo: Zoom window.open `+(haituoZoomAuth?`in-app`:`external`)+` `+HaituoZoomSecurity.authPageURL(url));
+                    if(haituoZoomAuth)return{action:'allow',overrideBrowserWindowOptions:{parent:Z,autoHideMenuBar:!0,width:1024,height:768,webPreferences:{partition:guest.session.partition,sandbox:!0,contextIsolation:!0,nodeIntegration:!1}}};
+                    if(/^https?:/i.test(url)&&Date.now()-Number(owner.haituoLastGestureAt||0)<8000)q_(url).catch(()=>{});
+                    return{action:'deny'};
+                };
+                owner.setWindowOpenHandler(handler);
+                owner.on('did-create-window',child=>installZoomPopupHandler(child));
+            };
+            installZoomPopupHandler(guest);
+        }
         if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,openAuth:url=>HaituoZoomSecurity.openAuthWindow({electron:p,parent:Z,partition:guest.session.partition,url,openExternal:q_,onReturn:()=>{if(Z&&!Z.isDestroyed()){Z.show();Z.focus()}if(!guest.isDestroyed())guest.loadURL('https://zoom.us/meeting/login').catch(error=>X.warn(error.message))},log:message=>X.warn(message)}),log:message=>X.warn(message)});
         guest.on(`will-navigate`, (event, url) => {
             if(HaituoZoomSessions.has(guest.session))return;
