@@ -9,7 +9,7 @@
 - Google、Apple、Facebook、微软身份源的主框架导航和 `window.open` 都被拦截在海拓内，弹出明确提示并引导用户使用 Zoom 官方邮箱登录；选择“使用邮箱登录”只聚焦页面邮箱框，不读取、保存或提交密码，也不打开系统浏览器。
 - 企业 SSO 仍保留从 `zoom.us/web/sso/login` 开始的 120 秒、单 origin 受限跳转；非身份源普通链接仍按原外部浏览器策略处理。
 - Zoom 自身请求继续规范 UA/UA-CH；身份源请求不再被会话头逻辑改写。日志只记录 origin+pathname，不记录 OAuth query/state/code。
-- `scripts/zoom-shell-native-check.cjs` 的真实产品壳门槛改为：Windows 走新增账号按钮、macOS 走持久账号恢复，确认真实 Zoom 登录页可见且无遮挡，用不存在的虚构 Gmail 地址走到 Zoom 密码步骤（`example.com` 已被 Zoom 实际拒绝，不能继续作为夹具）。提交前必须确认可见邮箱框已收到完整值且 Next 按钮可见、启用、未被遮挡；提交后只认可通过实际尺寸、样式、禁用状态和 `elementFromPoint` 命中检查的可见密码框，隐藏 DOM 中的密码框不再算通过，失败时保留截图。脚本不输入密码、不点击第三方登录、不创建 Google 授权页；报告明确记录 `realAccount: UNTESTED` 和 `EMBEDDED_OAUTH_UNSUPPORTED`，不把合成邮箱通过冒充真实账号登录完成。
+- `scripts/zoom-shell-native-check.cjs` 的真实产品壳门槛改为：Windows 走新增账号按钮、macOS 走持久账号恢复，确认真实 Zoom 登录页可见且无遮挡，用虚构 Gmail 地址提交 Zoom 邮箱步骤。提交前必须确认可见邮箱框已收到完整值且 Next 按钮可见、启用、未被遮挡；提交后只认可通过实际尺寸、样式、禁用状态和 `elementFromPoint` 命中检查的可见密码框，隐藏 DOM 中的密码框不再算通过，失败时保留截图。Zoom 实际会拒绝不存在的账号（`example.com` 和虚构 Gmail 均已复现），因此纯合成数据无法到达密码步骤；该拒绝不算登录通过，也不会被改写成绿色门槛。脚本不输入密码、不点击第三方登录、不创建 Google 授权页；报告明确记录 `realAccount: UNTESTED` 和 `EMBEDDED_OAUTH_UNSUPPORTED`，不把合成邮箱提交冒充真实账号登录完成。
 
 尚未验证：真实邮箱密码、验证码、通行密钥、Google/Apple/Facebook/微软 OAuth、OAuth code 回到 Zoom 后显示已登录，以及会议音视频、屏幕共享、真实聊天与字幕选择器。纯社交账号可按 Zoom 官方流程补设密码后再使用邮箱登录。Google 官方桌面 OAuth 文档：https://developers.google.com/identity/protocols/oauth2/native-app ；Zoom 登录与浏览器要求：https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0067781 、https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0058323 。
 

@@ -14,8 +14,11 @@ const passwordStepExpression=`(()=>{const visible=element=>{const rect=element.g
 const emailPageExpression=`({url:location.href,ready:document.readyState,title:document.title,text:document.body?.innerText?.slice(0,2000)||'',passwordStep:${passwordStepExpression},children:document.body?.children.length||0,userAgent:navigator.userAgent,webdriver:navigator.webdriver})`;
 async function clickPoint(client,point){if(!point)return false;await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x,y:point.y});await client.call('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});await client.call('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});return true}
 async function fillSyntheticEmail(client){
+ await client.call('Page.bringToFront');
  const result=await client.call('Runtime.evaluate',{expression:emailInputExpression,returnByValue:true}),point=result.result?.value;
  if(!await clickPoint(client,point))return false;
+ const focused=await client.call('Runtime.evaluate',{expression:`(()=>{const input=document.querySelector('input[type="email"],input[autocomplete="username"]');if(!input)return false;input.focus();input.select();return document.activeElement===input})()`,returnByValue:true});
+ if(!focused.result?.value)return false;
  const modifiers=process.platform==='darwin'?4:2;
  await client.call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,nativeVirtualKeyCode:65,modifiers});
  await client.call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65,nativeVirtualKeyCode:65,modifiers});
