@@ -29030,8 +29030,8 @@ async function nv() {
                 const handler=details=>{
                     const url=details.url;
                     if(HaituoZoomSecurity.isIdentityURL(url)){
-                        X.info(`haituo: Zoom auth popup delegated `+HaituoZoomSecurity.authPageURL(url));
-                        try{HaituoZoomSecurity.openAuthWindow({electron:p,parent:Z,partition:guest.session.partition,url,openExternal:q_,onReturn:()=>{if(Z&&!Z.isDestroyed()){Z.show();Z.focus()}if(!guest.isDestroyed())guest.loadURL('https://zoom.us/meeting/login').catch(error=>X.warn(error.message))},log:message=>X.warn(message)})}catch(error){X.warn('Zoom auth popup failed: '+String(error?.name||'auth window failed'))}
+                        X.info(`haituo: Zoom identity login kept in app `+HaituoZoomSecurity.authPageURL(url));
+                        HaituoZoomSecurity.notifyIdentityUnsupported({electron:p,parent:Z,guest:owner,url,log:message=>X.warn(message)});
                         return{action:'deny'};
                     }
                     const haituoZoomAuth=HaituoZoomSecurity.isZoomURL(url);
@@ -29045,7 +29045,7 @@ async function nv() {
             };
             installZoomPopupHandler(guest);
         }
-        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,openAuth:url=>HaituoZoomSecurity.openAuthWindow({electron:p,parent:Z,partition:guest.session.partition,url,openExternal:q_,onReturn:()=>{if(Z&&!Z.isDestroyed()){Z.show();Z.focus()}if(!guest.isDestroyed())guest.loadURL('https://zoom.us/meeting/login').catch(error=>X.warn(error.message))},log:message=>X.warn(message)}),log:message=>X.warn(message)});
+        if(HaituoZoomSessions.has(guest.session))HaituoZoomSecurity.installNavigation(guest,{openExternal:q_,openAuth:url=>HaituoZoomSecurity.notifyIdentityUnsupported({electron:p,parent:Z,guest,url,log:message=>X.warn(message)}),log:message=>X.warn(message)});
         guest.on(`will-navigate`, (event, url) => {
             if(HaituoZoomSessions.has(guest.session))return;
             let parsed;

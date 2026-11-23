@@ -1,17 +1,17 @@
-# Zoom Google 登录修复（1.7.2fix 后续）
+# Zoom 登录修复（1.7.2fix 后续）
 
 症状：39fdf44 把 Google 授权页留在 Zoom 面板后，真实账号仍看到 Windows 通行密钥弹窗和「此浏览器或应用不安全」，无法登录。
 
-根因：Google 明确禁止 OAuth 在嵌入式 WebView 中运行。39fdf44 只去掉了 UA 里的 Electron 标记，但授权页仍位于 Electron `<webview>` guest 中；把 UA 改成 Chrome 字符串不能改变这个嵌入环境。Zoom 官方开发论坛也确认 Google 不接受 embedded user agent 的授权请求。
+结论：Google 官方禁止嵌入式 WebView OAuth，桌面应用应使用系统浏览器；Electron 的顶层 `BrowserWindow` 仍是由应用托管的嵌入式 Chromium，不会因为不在 `<webview>` 标签里就变成受支持的外部浏览器。远端 1a5bd8e 已记录 Node 直连 Google 返回 302、Electron 在取得 HTTP 响应前返回 `ERR_ACCESS_DENIED`；后者本身不能证明就是 Google 的 HTTP 拒绝，但足以否定“改成顶层窗口就已修好”。b0d6f6d 的 UA/CDP 伪装没有进入真实壳测试，且不属于受支持方案，已停止。
 
 改动：
-- `src/app/js/haituo-zoom-security.js`：身份源导航不再进入 Zoom webview，而是打开海拓自己的顶层 `BrowserWindow`。该窗口复用同一个 `persist:caisheng-zoom-*` 分区，保留 sandbox/contextIsolation、禁用 Node；授权回到 `zoom.us` 且页面加载完成后，再自动关闭登录窗并刷新原 Zoom 面板。身份源及企业 SSO 的后续跳转绑定首个身份 origin，子窗口继承同一策略与回传监听。
-- 主窗口拦截与 `window.open` 两条入口都走同一登录窗，Zoom 子窗也递归安装弹窗守卫；Zoom 入口直达 `https://zoom.us/signin#/login`，避免 `meeting/login` 在部分平台只落到登录外壳。非身份源链接仍按原策略处理。日志只记录 origin+pathname，不记录 OAuth query/state/code。
-- Zoom 会话同时规范 User-Agent 与低熵 User-Agent Client Hints，清除请求头中的 Electron 品牌；身份源请求不被会话头逻辑二次覆盖。登录窗及子窗在首次导航前等待 CDP `Emulation.setUserAgentOverride` 完成，再同步 JS 可见的 `navigator.userAgentData` 品牌、完整版本、平台与架构，并使用标准 Chrome 简化版本号，避免只改请求头却仍向页面暴露 Chromium-only 元数据。不读取或输出 Cookie/Authorization。
-- 企业 SSO 从 `zoom.us/web/sso/login` 进入时开启 120 秒一跳窗口，只允许首个客户 IdP origin，回到 Zoom 即失效。
-- `scripts/zoom-shell-native-check.cjs` 增加真实产品壳验收：用受信任指针点击 Google，断言授权页是新的顶层 page 目标、guest 仍停在 Zoom、UA 不含应用标记，并直接拒绝「浏览器或应用不安全」页面。登录窗加载失败后保留至 10 分钟超时，使 Windows/macOS 都能附着失败目标；诊断先启用 Network，再用 Google 首页/账号页隔离导航故障并读取 JS 可见 UA metadata，从导航历史恢复原 Google 授权 URL 重试，记录不含凭证的文档请求/响应、UA/UA-CH/Sec-Fetch 白名单请求头及加载失败码。另以 10 秒墙钟预算、无 Cookie/Authorization 的 Node 直连探针记录 runner 出口状态，不把出口失败误判为 Electron 独有。报告、stdout 与原始应用日志统一去除 URL query/hash，修复 JSON replacer 误把 key 当 value 而输出空字符串的问题。脚本后的 Zoom 回跳只验证关窗与面板恢复代码路径，明确标记为 synthetic，不冒充真实 OAuth；没有真实账号，因此仍只验证到凭据页之前。
+- 移除第三方 OAuth `BrowserWindow`、CDP UA metadata 伪装和失败登录窗诊断路径，不再把隐藏 Electron 身份当作登录手段。
+- Google、Apple、Facebook、微软身份源的主框架导航和 `window.open` 都被拦截在海拓内，弹出明确提示并引导用户使用 Zoom 官方邮箱登录；选择“使用邮箱登录”只聚焦页面邮箱框，不读取、保存或提交密码，也不打开系统浏览器。
+- 企业 SSO 仍保留从 `zoom.us/web/sso/login` 开始的 120 秒、单 origin 受限跳转；非身份源普通链接仍按原外部浏览器策略处理。
+- Zoom 自身请求继续规范 UA/UA-CH；身份源请求不再被会话头逻辑改写。日志只记录 origin+pathname，不记录 OAuth query/state/code。
+- `scripts/zoom-shell-native-check.cjs` 的真实产品壳门槛改为：Windows 走新增账号按钮、macOS 走持久账号恢复，确认真实 Zoom 登录页可见且无遮挡，用保留域 `example.com` 的合成邮箱走到 Zoom 密码步骤。脚本不输入密码、不点击第三方登录、不创建 Google 授权页；报告明确记录 `realAccount: UNTESTED` 和 `EMBEDDED_OAUTH_UNSUPPORTED`，不把合成邮箱通过冒充真实账号登录完成。
 
-尚未验证：真实 Google 账号输密码/验证码/通行密钥、拿到 code 后回到 Zoom 并显示已登录，以及会议音视频、屏幕共享、真实聊天与字幕选择器。顶层窗口是否被 Google 接受必须以 Windows/macOS 远端产品壳测试结果为准，不能只看 URL 跳转成功。
+尚未验证：真实邮箱密码、验证码、通行密钥、Google/Apple/Facebook/微软 OAuth、OAuth code 回到 Zoom 后显示已登录，以及会议音视频、屏幕共享、真实聊天与字幕选择器。纯社交账号可按 Zoom 官方流程补设密码后再使用邮箱登录。Google 官方桌面 OAuth 文档：https://developers.google.com/identity/protocols/oauth2/native-app ；Zoom 登录与浏览器要求：https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0067781 、https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0058323 。
 
 # 1.7.1 Zoom 启动修复
 

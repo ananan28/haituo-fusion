@@ -41,9 +41,7 @@ function install({electron:e,session,getOwner,log=()=>{}}){
  return{clearConsent:()=>granted.clear()};
 }
 module.exports={isZoomURL,install};
-// Zoom's own login buttons hand off to these identity providers. Google rejects
-// OAuth inside Electron webviews, so the pane delegates them to an app-owned
-// top-level window that shares the same persist:caisheng-zoom-* session.
+// Identity providers reject OAuth in embedded browsers, including Electron BrowserWindow.
 const IDENTITY_HOSTS=new Set([`accounts.google.com`,`accounts.youtube.com`,`oauth2.googleapis.com`,`id.apple.com`,`appleid.apple.com`,`login.microsoftonline.com`,`login.microsoft.com`,`login.live.com`,`facebook.com`,`www.facebook.com`,`m.facebook.com`]);
 // Zoom enterprise SSO leaves zoom.us for a customer identity provider and
 // returns; only that bounded hop may navigate the pane off Zoom.
@@ -62,11 +60,9 @@ function installNavigation(contents,{openExternal,openAuth,log=()=>{}}){
   if(isIdentityURL(url)){
    hopUntil=Date.now()+AUTH_HOP_MS;
    if(!hopOrigin)hopOrigin=new URL(url).origin;
-   log('Zoom identity hand-off requested: '+authPageURL(url));
-   if(openAuth){
-    event.preventDefault();
-    try{openAuth(url)}catch(error){log('Zoom auth window failed: '+String(error?.name||'auth window failed'))}
-   }
+   event.preventDefault();
+   log('Zoom identity hand-off blocked in embedded browser: '+authPageURL(url));
+   if(openAuth){try{openAuth(url)}catch(error){log('Zoom auth notice failed: '+String(error?.name||'auth notice failed'))}}
    return;
   }
   if(Date.now()<hopUntil&&/^https:/i.test(url)){
@@ -81,81 +77,23 @@ function installNavigation(contents,{openExternal,openAuth,log=()=>{}}){
   }
  };
  contents.on('will-navigate',guard);contents.on('will-redirect',guard);
- contents.on('did-create-window',child=>{child.haituoLastGestureAt=Date.now();installNavigation(child,{openExternal,log})});
+ contents.on('did-create-window',child=>{child.haituoLastGestureAt=Date.now();installNavigation(child,{openExternal,openAuth,log})});
  contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
 }
-function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log=()=>{}}){
- if(!isIdentityURL(url))throw Error('Refusing non-identity Zoom auth URL');
- let done=false,returned=false,timer;
- const finish=()=>{
-  if(done)return;
-  done=true;
-  clearTimeout(timer);
-  if(win.isDestroyed())return;
-  try{Promise.resolve(onReturn?.()).catch(error=>log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed')))}catch(error){log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed'))}
-  win.destroy();
- };
- const finishWhenLoaded=contents=>{
-  if(!returned||done||win.isDestroyed()||contents.isDestroyed()||contents.isLoading())return;
-  if(!isZoomURL(contents.getURL()))return;
-  clearTimeout(timer);
-  timer=setTimeout(()=>{if(!win.isDestroyed()&&!contents.isDestroyed()&&!contents.isLoading()&&isZoomURL(contents.getURL()))finish()},750);
- };
- const watched=new Set();
- const observe=contents=>{
-  if(watched.has(contents))return;
-  watched.add(contents);
-  contents.on('did-navigate',(_event,current)=>{
-   if(!isZoomURL(current))return;
-   returned=true;
-   log('Zoom auth returned to Zoom: '+authPageURL(current));
-   clearTimeout(timer);
-   timer=setTimeout(()=>finishWhenLoaded(contents),1500);
-  });
-  contents.on('did-stop-loading',()=>finishWhenLoaded(contents));
- };
- const popupHandler=details=>{
-  if(isZoomURL(details.url)||isIdentityURL(details.url))return{action:'allow',overrideBrowserWindowOptions:{parent:win,autoHideMenuBar:true,width:1024,height:768,webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}}};
-  return{action:'deny'};
- };
- const manageChild=child=>{
-  child.setWindowOpenHandler(popupHandler);
-  installAuthUserAgentMetadata(child,{log});
-  observe(child);
-  child.on('did-create-window',manageChild);
- };
- const win=new electron.BrowserWindow({parent,autoHideMenuBar:true,width:560,height:820,title:'Zoom 登录 — 海拓',webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}});
- observe(win.webContents);
- installAuthUserAgentMetadata(win.webContents,{log});
- win.webContents.haituoLastGestureAt=Date.now();
- win.webContents.on('before-input-event',(_event,input)=>{if(input.type==='mouseDown'||input.type==='keyDown')win.webContents.haituoLastGestureAt=Date.now()});
- win.webContents.setWindowOpenHandler(popupHandler);
- win.webContents.on('did-create-window',manageChild);
- installNavigation(win.webContents,{openExternal,log});
- win.webContents.on('did-fail-load',(_event,code,_description,url,isMainFrame)=>{if(isMainFrame)log('Zoom auth main-frame load failed: '+String(code)+' '+authPageURL(url))});
- win.once('closed',()=>clearTimeout(timer));
- timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},600000);
- installAuthUserAgentMetadata(win.webContents,{log}).then(()=>{if(!win.isDestroyed())win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'))})});
- return win;
+function focusZoomEmail(contents){
+ if(!contents||contents.isDestroyed?.())return Promise.resolve(false);
+ return Promise.resolve(contents.executeJavaScript(`(()=>{const visible=element=>{const rect=element.getBoundingClientRect();return rect.width>80&&rect.height>20&&getComputedStyle(element).visibility!=='hidden'};const inputs=[...document.querySelectorAll('input')].filter(visible);const input=inputs.find(element=>element.type==='email'||/email/i.test(element.name||'')||/email/i.test(element.placeholder||'')||element.autocomplete==='username')||inputs.find(element=>element.type==='text');if(!input)return false;input.focus();input.scrollIntoView({block:'center'});return true})()`)).catch(()=>false)
 }
-function installAuthUserAgentMetadata(contents,{chrome=process.versions.chrome,platform=process.platform,architecture=process.arch,log=()=>{}}={}){
- if(!contents?.debugger)return Promise.resolve();
- const major=String(chrome).split('.')[0],full=major+'.0.0.0',userAgent=browserUserAgent(full,platform);
- const name=platform==='win32'?'Windows':platform==='darwin'?'macOS':'Linux';
- const brands=[{brand:'Chromium',version:major},{brand:'Google Chrome',version:major},{brand:'Not=A?Brand',version:'99'}];
- try{
-  contents.debugger.attach('1.3');
-  return Promise.resolve(contents.debugger.sendCommand('Emulation.setUserAgentOverride',{
-   userAgent,
-   userAgentMetadata:{brands,fullVersionList:brands.map(item=>({brand:item.brand,version:item.brand==='Not=A?Brand'?'99.0.0.0':full})),fullVersion:full,mobile:false,platform:name,platformVersion:platform==='win32'?'10.0.0':'10.15.7',architecture:architecture==='arm64'?'arm':'x86',model:'',bitness:architecture==='ia32'?'32':'64'}
-  })).catch(error=>{log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'))});
- }catch(error){log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'));return Promise.resolve()}
+function notifyIdentityUnsupported({electron,parent,guest,url,log=()=>{}}={}){
+ if(!isIdentityURL(url))return Promise.resolve(false);
+ log('Zoom identity login is unavailable in the embedded browser: '+authPageURL(url));
+ return Promise.resolve(electron?.dialog?.showMessageBox?.(parent,{type:'info',title:'Zoom 第三方登录',message:'Google、Apple、Facebook 和微软第三方登录不能在海拓内嵌浏览器中完成。',detail:'请使用 Zoom 页面上的邮箱登录。海拓不会把登录转到系统浏览器，也不会读取或保存你的密码。',buttons:['使用邮箱登录','取消'],defaultId:0,cancelId:1})).then(result=>result?.response===0?focusZoomEmail(guest):false).catch(error=>{log('Zoom identity login notice failed: '+String(error?.message||'identity notice failed'));return false})
 }
 module.exports.installNavigation=installNavigation;
 module.exports.isIdentityURL=isIdentityURL;
-module.exports.openAuthWindow=openAuthWindow;
 module.exports.authPageURL=authPageURL;
-module.exports.installAuthUserAgentMetadata=installAuthUserAgentMetadata;
+module.exports.notifyIdentityUnsupported=notifyIdentityUnsupported;
+module.exports.focusZoomEmail=focusZoomEmail;
 
 function browserUserAgent(chrome=process.versions.chrome,platform=process.platform){
  if(!/^\d+(?:\.\d+){1,3}$/.test(String(chrome)))throw Error('Invalid Chromium runtime version');
