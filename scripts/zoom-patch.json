@@ -50,7 +50,7 @@
   {
     "path": "src/app/bundles/preload/main.js",
     "old": "            telegram: {",
-    "new": "            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://zoom.us/meeting/login`,allowedHosts:[`zoom.us`,`app.zoom.us`],defaultIcon:`zoom`},\n            telegram: {",
+    "new": "            zoom: {id:`zoom`,label:`Zoom`,runtime:`web`,startUrl:`https://zoom.us/signin#/login`,allowedHosts:[`zoom.us`,`app.zoom.us`],defaultIcon:`zoom`},\n            telegram: {",
     "count": 1
   },
   {

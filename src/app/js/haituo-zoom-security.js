@@ -130,6 +130,7 @@ function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log
  win.webContents.setWindowOpenHandler(popupHandler);
  win.webContents.on('did-create-window',manageChild);
  installNavigation(win.webContents,{openExternal,log});
+ win.webContents.on('did-fail-load',(_event,code,_description,url,isMainFrame)=>{if(isMainFrame)log('Zoom auth main-frame load failed: '+String(code)+' '+authPageURL(url))});
  win.once('closed',()=>clearTimeout(timer));
  timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},180000);
  win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'));if(!win.isDestroyed())win.destroy()});
