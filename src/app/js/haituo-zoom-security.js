@@ -135,21 +135,21 @@ function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log
  win.webContents.on('did-fail-load',(_event,code,_description,url,isMainFrame)=>{if(isMainFrame)log('Zoom auth main-frame load failed: '+String(code)+' '+authPageURL(url))});
  win.once('closed',()=>clearTimeout(timer));
  timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},600000);
- win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'))});
+ installAuthUserAgentMetadata(win.webContents,{log}).then(()=>{if(!win.isDestroyed())win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'))})});
  return win;
 }
 function installAuthUserAgentMetadata(contents,{chrome=process.versions.chrome,platform=process.platform,architecture=process.arch,log=()=>{}}={}){
- if(!contents?.debugger)return;
- const userAgent=browserUserAgent(chrome,platform),major=String(chrome).split('.')[0],full=String(chrome);
+ if(!contents?.debugger)return Promise.resolve();
+ const major=String(chrome).split('.')[0],full=major+'.0.0.0',userAgent=browserUserAgent(full,platform);
  const name=platform==='win32'?'Windows':platform==='darwin'?'macOS':'Linux';
  const brands=[{brand:'Chromium',version:major},{brand:'Google Chrome',version:major},{brand:'Not=A?Brand',version:'99'}];
  try{
   contents.debugger.attach('1.3');
-  Promise.resolve(contents.debugger.sendCommand('Emulation.setUserAgentOverride',{
+  return Promise.resolve(contents.debugger.sendCommand('Emulation.setUserAgentOverride',{
    userAgent,
    userAgentMetadata:{brands,fullVersionList:brands.map(item=>({brand:item.brand,version:item.brand==='Not=A?Brand'?'99.0.0.0':full})),fullVersion:full,mobile:false,platform:name,platformVersion:platform==='win32'?'10.0.0':'10.15.7',architecture:architecture==='arm64'?'arm':'x86',model:'',bitness:architecture==='ia32'?'32':'64'}
-  })).catch(error=>log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable')));
- }catch(error){log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'))}
+  })).catch(error=>{log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'))});
+ }catch(error){log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'));return Promise.resolve()}
 }
 module.exports.installNavigation=installNavigation;
 module.exports.isIdentityURL=isIdentityURL;
@@ -176,7 +176,7 @@ function installUserAgent(session,{chrome=process.versions.chrome,platform=proce
  const userAgent=browserUserAgent(chrome,platform),hints=browserClientHints(chrome,platform);
  session.setUserAgent(userAgent);
  session.webRequest.onBeforeSendHeaders((details,callback)=>{
-  if(!/^https:\/\//i.test(details.url)){callback({requestHeaders:details.requestHeaders});return}
+  if(!/^https:\/\//i.test(details.url)||isIdentityURL(details.url)){callback({requestHeaders:details.requestHeaders});return}
   const headers={...details.requestHeaders};
   for(const key of Object.keys(headers)){
    const name=key.toLowerCase();
