@@ -2,7 +2,8 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process');
 const out=path.resolve('audit-results'),logPath=path.join(out,'zoom-shell.log');fs.mkdirSync(out,{recursive:true});
 const report={scope:'PACKAGED_APP_REAL_ZOOM_UNAUTHENTICATED_LOGIN',platform:process.platform,errors:[],realAccount:'UNTESTED',checks:[]};
-let client,proc;const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const SYNTHETIC_EMAIL='haituo.zoom.shell.qa@gmail.com';
+let client,proc,guest;const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const safeURL=value=>{try{const u=new URL(value);return u.origin+u.pathname}catch{return'[invalid url]'}};
 const redact=value=>typeof value==='string'?value.replace(/https?:\/\/[^\s"'<>]+/gi,url=>safeURL(url)):value;
 const redactJSON=(_key,value)=>redact(value);
@@ -18,9 +19,9 @@ async function fillSyntheticEmail(client){
  const modifiers=process.platform==='darwin'?4:2;
  await client.call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,nativeVirtualKeyCode:65,modifiers});
  await client.call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65,nativeVirtualKeyCode:65,modifiers});
- await client.call('Input.insertText',{text:'zoom.shell.qa@example.com'});
+ await client.call('Input.insertText',{text:SYNTHETIC_EMAIL});
  const end=Date.now()+5000;
- while(Date.now()<end){const current=await client.call('Runtime.evaluate',{expression:emailInputExpression,returnByValue:true});if(current.result?.value?.value==='zoom.shell.qa@example.com')return true;await pause(100)}
+ while(Date.now()<end){const current=await client.call('Runtime.evaluate',{expression:emailInputExpression,returnByValue:true});if(current.result?.value?.value===SYNTHETIC_EMAIL)return true;await pause(100)}
  return false
 }
 async function attach(target,onMessage){const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('websocket connection timeout')),5000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve()},{once:true});ws.addEventListener('error',reject,{once:true})});let sequence=0;const pending=new Map(),contexts=new Set();ws.addEventListener('message',event=>{const message=JSON.parse(event.data);onMessage?.(message);if(message.id){const item=pending.get(message.id);if(item){pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result)}}else if(message.method==='Runtime.executionContextCreated')contexts.add(message.params.context.id);else if(message.method==='Runtime.executionContextsCleared')contexts.clear();else if(message.method==='Runtime.exceptionThrown')report.errors.push(message.params.exceptionDetails);else if(message.method==='Log.entryAdded')report.errors.push(message.params.entry);else if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')report.errors.push({console:message.params.args.map(x=>x.value||x.description)})});return{ws,contexts,call(method,params={}){return new Promise((resolve,reject)=>{const id=++sequence,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method))},7000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}))})}}}
@@ -43,7 +44,7 @@ try{
   const clicked=await evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='新增 Zoom 账号');if(!b)return false;b.click();return true})()`);if(!clicked)throw Error('Add Zoom button unavailable in production shell');
   report.creationPath='ACTUAL_ADD_ACCOUNT_BUTTON';
  }
- const guestPollStarted=Date.now();end=Date.now()+45000;let guest;
+ const guestPollStarted=Date.now();end=Date.now()+45000;
  while(Date.now()<end){try{report.shell=await evaluate(`(()=>{const v=[...document.querySelectorAll('webview')].find(v=>String(v.getAttribute('partition')).includes('-zoom-'));return v?{src:v.src,partition:v.partition,phase:v.dataset.haituoZoomState,status:[...v.parentElement.querySelectorAll('[data-haituo-zoom-status]')].map(n=>n.textContent).join(' '),visibility:getComputedStyle(v).visibility,width:v.getBoundingClientRect().width,height:v.getBoundingClientRect().height,id:(()=>{try{return v.getWebContentsId()}catch{return null}})()}:null})()`);const candidates=(await targets()).filter(t=>t.type==='webview'&&/zoom\.(us|com)/.test(t.url));if(candidates.length===1&&report.shell?.id&&Date.now()-guestPollStarted>=5000){const t=candidates[0];guest=await attach(t);report.guestTargetId=t.id;await guest.call('Runtime.enable');break}}catch(error){if(!/navigated or closed|Execution context|Cannot find context/i.test(String(error.message)))throw error;}await pause(400)}
  if(!guest){report.targets=(await targets()).map(t=>({type:t.type,url:t.url.split('?')[0]}));throw Error('Zoom guest target missing: '+JSON.stringify(report.shell));}
  let emailRect=null;end=Date.now()+45000;
@@ -55,7 +56,7 @@ try{
  if(/(?:400 Bad Request|403 Forbidden|Access Denied|unsupported browser)/i.test(report.page?.text||'')||/^Error\b/i.test(report.page?.title||''))throw Error('Zoom returned an error page: '+JSON.stringify(report.page));
  if(!report.page||report.page.children===0||report.page.text.length<80)throw Error('Real Zoom page empty: '+JSON.stringify(report.page));
  if(!emailRect)throw Error('Zoom email input missing on the real login page');
- const emailStarted=Date.now(),syntheticAddress='zoom.shell.qa@example.com';
+ const emailStarted=Date.now(),syntheticAddress=SYNTHETIC_EMAIL;
  if(!await fillSyntheticEmail(guest))throw Error('Synthetic Zoom email was not committed to the visible input');
  let nextResult=null;end=Date.now()+10000;
  while(Date.now()<end){nextResult=await guest.call('Runtime.evaluate',{expression:nextButtonExpression,returnByValue:true});if(nextResult.result?.value)break;await pause(200)}
