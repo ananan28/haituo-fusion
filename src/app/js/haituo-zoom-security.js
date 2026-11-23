@@ -41,28 +41,87 @@ function install({electron:e,session,getOwner,log=()=>{}}){
  return{clearConsent:()=>granted.clear()};
 }
 module.exports={isZoomURL,install};
-// Zoom's own login buttons hand off to these identity providers. Their popups
-// post the credential back to the Zoom page, so they stay inside Haituo.
+// Zoom's own login buttons hand off to these identity providers. Google rejects
+// OAuth inside Electron webviews, so the pane delegates them to an app-owned
+// top-level window that shares the same persist:caisheng-zoom-* session.
 const IDENTITY_HOSTS=new Set([`accounts.google.com`,`accounts.youtube.com`,`oauth2.googleapis.com`,`id.apple.com`,`appleid.apple.com`,`login.microsoftonline.com`,`login.microsoft.com`,`login.live.com`,`facebook.com`,`www.facebook.com`,`m.facebook.com`]);
 // Zoom enterprise SSO leaves zoom.us for a customer identity provider and
 // returns; only that bounded hop may navigate the pane off Zoom.
 const AUTH_HOP_MS=12e4;
 function isIdentityURL(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&IDENTITY_HOSTS.has(u.hostname.toLowerCase())}catch{return false}}
-function installNavigation(contents,{openExternal,log=()=>{}}){
- let hopUntil=0;
+function authPageURL(value){try{const u=new URL(value);return u.origin+u.pathname}catch{return`[invalid auth url]`}}
+function isZoomSSOURL(value){try{const u=new URL(value);return isZoomURL(value)&&/^\/web\/sso\/login(?:[/?#]|$)/.test(u.pathname)}catch{return false}}
+function installNavigation(contents,{openExternal,openAuth,log=()=>{}}){
+ let hopUntil=0,hopOrigin='';
  const guard=(event,url)=>{
-  if(isZoomURL(url)){if(hopUntil){log('Zoom returned to Zoom from the identity hop')}hopUntil=0;return}
-  if(isIdentityURL(url)){hopUntil=Date.now()+AUTH_HOP_MS;log('Zoom identity hand-off kept in Haituo: '+url);return}
-  if(Date.now()<hopUntil&&/^https:/i.test(url)){log('Zoom SSO hop kept in Haituo: '+url);return}
+  if(isZoomURL(url)){
+   if(hopUntil)log('Zoom returned to Zoom from the identity hop');
+   if(isZoomSSOURL(url)){hopUntil=Date.now()+AUTH_HOP_MS;hopOrigin=''}else{hopUntil=0;hopOrigin=''}
+   return;
+  }
+  if(isIdentityURL(url)){
+   hopUntil=Date.now()+AUTH_HOP_MS;
+   log('Zoom identity hand-off requested: '+authPageURL(url));
+   if(openAuth){
+    event.preventDefault();
+    try{openAuth(url)}catch(error){log('Zoom auth window failed: '+String(error?.name||'auth window failed'))}
+   }
+   return;
+  }
+  if(Date.now()<hopUntil&&/^https:/i.test(url)){
+   let origin='';try{origin=new URL(url).origin}catch{}
+   if(origin&&(!hopOrigin||origin===hopOrigin)){if(!hopOrigin)hopOrigin=origin;log('Zoom SSO hop kept in Haituo: '+authPageURL(url));return}
+  }
   event.preventDefault();
-  if(/^https?:/i.test(url)&&Date.now()-Number(contents.haituoLastGestureAt||0)<8000){log('Zoom link sent to system browser: '+url);Promise.resolve().then(()=>openExternal(url)).catch(error=>log('Zoom external link failed: '+String(error.message)));}
+  if(/^https?:/i.test(url)&&Date.now()-Number(contents.haituoLastGestureAt||0)<8000){log('Zoom link sent to system browser: '+authPageURL(url));Promise.resolve().then(()=>openExternal(url)).catch(error=>log('Zoom external link failed: '+String(error?.code||error?.name||'external open failed')))}
  };
  contents.on('will-navigate',guard);contents.on('will-redirect',guard);
  contents.on('did-create-window',child=>{child.haituoLastGestureAt=Date.now();installNavigation(child,{openExternal,log})});
  contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
 }
+function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log=()=>{}}){
+ if(!isIdentityURL(url))throw Error('Refusing non-identity Zoom auth URL');
+ let done=false,returned=false,timer;
+ const finish=()=>{
+  if(done)return;
+  done=true;
+  clearTimeout(timer);
+  if(win.isDestroyed())return;
+  try{Promise.resolve(onReturn?.()).catch(error=>log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed')))}catch(error){log('Zoom auth return failed: '+String(error?.code||error?.name||'return failed'))}
+  win.destroy();
+ };
+ const finishWhenLoaded=()=>{
+  if(!returned||done||win.isDestroyed())return;
+  clearTimeout(timer);
+  timer=setTimeout(()=>{if(!win.isDestroyed()&&isZoomURL(win.webContents.getURL()))finish()},750);
+ };
+ const popupHandler=details=>{
+  if(isZoomURL(details.url)||isIdentityURL(details.url))return{action:'allow',overrideBrowserWindowOptions:{parent:win,autoHideMenuBar:true,width:1024,height:768,webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}}};
+  return{action:'deny'};
+ };
+ const win=new electron.BrowserWindow({parent,autoHideMenuBar:true,width:560,height:820,title:'Zoom 登录 — 海拓',webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ win.webContents.haituoLastGestureAt=Date.now();
+ win.webContents.on('before-input-event',(_event,input)=>{if(input.type==='mouseDown'||input.type==='keyDown')win.webContents.haituoLastGestureAt=Date.now()});
+ win.webContents.setWindowOpenHandler(popupHandler);
+ win.webContents.on('did-create-window',child=>child.setWindowOpenHandler(popupHandler));
+ installNavigation(win.webContents,{openExternal,log});
+ win.webContents.on('did-navigate',(_event,current)=>{
+  if(!isZoomURL(current))return;
+  returned=true;
+  log('Zoom auth returned to Zoom: '+authPageURL(current));
+  clearTimeout(timer);
+  timer=setTimeout(()=>{if(!win.webContents.isLoading())finishWhenLoaded()},1500);
+ });
+ win.webContents.on('did-stop-loading',finishWhenLoaded);
+ win.once('closed',()=>clearTimeout(timer));
+ timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},180000);
+ win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'));if(!win.isDestroyed())win.destroy()});
+ return win;
+}
 module.exports.installNavigation=installNavigation;
 module.exports.isIdentityURL=isIdentityURL;
+module.exports.openAuthWindow=openAuthWindow;
+module.exports.authPageURL=authPageURL;
 
 function browserUserAgent(chrome=process.versions.chrome,platform=process.platform){
  if(!/^\d+(?:\.\d+){1,3}$/.test(String(chrome)))throw Error('Invalid Chromium runtime version');
