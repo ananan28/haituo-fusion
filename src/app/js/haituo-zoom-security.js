@@ -120,11 +120,13 @@ function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log
  };
  const manageChild=child=>{
   child.setWindowOpenHandler(popupHandler);
+  installAuthUserAgentMetadata(child,{log});
   observe(child);
   child.on('did-create-window',manageChild);
  };
  const win=new electron.BrowserWindow({parent,autoHideMenuBar:true,width:560,height:820,title:'Zoom 登录 — 海拓',webPreferences:{partition,sandbox:true,contextIsolation:true,nodeIntegration:false}});
  observe(win.webContents);
+ installAuthUserAgentMetadata(win.webContents,{log});
  win.webContents.haituoLastGestureAt=Date.now();
  win.webContents.on('before-input-event',(_event,input)=>{if(input.type==='mouseDown'||input.type==='keyDown')win.webContents.haituoLastGestureAt=Date.now()});
  win.webContents.setWindowOpenHandler(popupHandler);
@@ -132,14 +134,28 @@ function openAuthWindow({electron,parent,url,partition,onReturn,openExternal,log
  installNavigation(win.webContents,{openExternal,log});
  win.webContents.on('did-fail-load',(_event,code,_description,url,isMainFrame)=>{if(isMainFrame)log('Zoom auth main-frame load failed: '+String(code)+' '+authPageURL(url))});
  win.once('closed',()=>clearTimeout(timer));
- timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},180000);
- win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'));if(!win.isDestroyed())win.destroy()});
+ timer=setTimeout(()=>{log('Zoom auth window timed out');if(!win.isDestroyed())win.destroy()},600000);
+ win.loadURL(url).catch(error=>{log('Zoom auth window load failed: '+String(error?.code||error?.name||'load failed'))});
  return win;
+}
+function installAuthUserAgentMetadata(contents,{chrome=process.versions.chrome,platform=process.platform,architecture=process.arch,log=()=>{}}={}){
+ if(!contents?.debugger)return;
+ const userAgent=browserUserAgent(chrome,platform),major=String(chrome).split('.')[0],full=String(chrome);
+ const name=platform==='win32'?'Windows':platform==='darwin'?'macOS':'Linux';
+ const brands=[{brand:'Chromium',version:major},{brand:'Google Chrome',version:major},{brand:'Not=A?Brand',version:'99'}];
+ try{
+  contents.debugger.attach('1.3');
+  Promise.resolve(contents.debugger.sendCommand('Emulation.setUserAgentOverride',{
+   userAgent,
+   userAgentMetadata:{brands,fullVersionList:brands.map(item=>({brand:item.brand,version:item.brand==='Not=A?Brand'?'99.0.0.0':full})),fullVersion:full,mobile:false,platform:name,platformVersion:platform==='win32'?'10.0.0':'10.15.7',architecture:architecture==='arm64'?'arm':'x86',model:'',bitness:architecture==='ia32'?'32':'64'}
+  })).catch(error=>log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable')));
+ }catch(error){log('Zoom auth client hints unavailable: '+String(error?.message||'client hints unavailable'))}
 }
 module.exports.installNavigation=installNavigation;
 module.exports.isIdentityURL=isIdentityURL;
 module.exports.openAuthWindow=openAuthWindow;
 module.exports.authPageURL=authPageURL;
+module.exports.installAuthUserAgentMetadata=installAuthUserAgentMetadata;
 
 function browserUserAgent(chrome=process.versions.chrome,platform=process.platform){
  if(!/^\d+(?:\.\d+){1,3}$/.test(String(chrome)))throw Error('Invalid Chromium runtime version');

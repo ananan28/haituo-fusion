@@ -10,6 +10,18 @@ test('Zoom navigation blocks file/data/native protocols and applies the same gua
 
 test('Zoom UA uses current Chromium and actual OS without proprietary application token',()=>{const make=require('../src/app/js/haituo-zoom-security.js').browserUserAgent;assert.match(make('152.0.7977.65','win32'),/Windows NT 10.0.*Chrome\/152.0.7977.65/);assert.match(make('152.0.7977.65','darwin'),/Macintosh/);assert.doesNotMatch(make('152.0.7977.65','win32'),/Electron|海拓|Haituo/);assert.throws(()=>make('bad\nheader','win32'))});
 test('Zoom session sends Chrome-consistent user agent client hints',()=>{const {installUserAgent,browserClientHints}=require('../src/app/js/haituo-zoom-security.js');let userAgent,handler;installUserAgent({setUserAgent:value=>userAgent=value,webRequest:{onBeforeSendHeaders:value=>handler=value}},{chrome:'152.0.7977.65',platform:'win32'});assert.match(userAgent,/Chrome\/152\.0\.7977\.65/);let output;handler({url:'https://accounts.google.com/o/oauth2/v2/auth',requestHeaders:{'User-Agent':'Electron/44.1.0','Sec-CH-UA':'"Electron"','sec-ch-ua-full-version-list':'"Electron"',Cookie:'keep-secret','X-Test':'keep'}},value=>output=value);assert.equal(output.requestHeaders['User-Agent'],userAgent);assert.equal(output.requestHeaders['sec-ch-ua'],browserClientHints('152.0.7977.65','win32')['sec-ch-ua']);assert.equal(output.requestHeaders['sec-ch-ua-mobile'],'?0');assert.equal(output.requestHeaders['sec-ch-ua-platform'],'"Windows"');assert.equal(output.requestHeaders.Cookie,'keep-secret');assert.equal(output.requestHeaders['X-Test'],'keep');assert.ok(Object.keys(output.requestHeaders).every(key=>!String(output.requestHeaders[key]).includes('Electron')));const insecure={'User-Agent':'Electron/44.1.0'};handler({url:'http://example.test/',requestHeaders:insecure},value=>output=value);assert.deepEqual(output.requestHeaders,insecure);assert.equal(browserClientHints('152.0.7977.65','darwin')['sec-ch-ua-platform'],'"macOS"');assert.throws(()=>browserClientHints('bad','win32'),/Invalid Chromium/)});
+test('Zoom auth window exposes Chrome metadata to page scripts instead of Chromium-only Electron brands',async()=>{
+ const {installAuthUserAgentMetadata}=require('../src/app/js/haituo-zoom-security.js'),calls=[],logs=[];
+ const contents={debugger:{attach:version=>calls.push(['attach',version]),sendCommand:(method,params)=>{calls.push([method,params]);return Promise.resolve()}}};
+ installAuthUserAgentMetadata(contents,{chrome:'152.0.7977.65',platform:'win32',architecture:'x64',log:value=>logs.push(value)});
+ await Promise.resolve();
+ assert.equal(calls[0][0],'attach');assert.equal(calls[0][1],'1.3');assert.equal(calls[1][0],'Emulation.setUserAgentOverride');
+ const options=calls[1][1],metadata=options.userAgentMetadata;
+ assert.match(options.userAgent,/Chrome\/152\.0\.7977\.65/);assert.doesNotMatch(options.userAgent,/Electron|海拓|Haituo/);
+ assert.deepEqual(metadata.brands.map(item=>item.brand),['Chromium','Google Chrome','Not=A?Brand']);assert.equal(metadata.platform,'Windows');assert.equal(metadata.mobile,false);assert.equal(metadata.architecture,'x86');assert.equal(metadata.bitness,'64');assert.deepEqual(logs,[]);
+ installAuthUserAgentMetadata(contents,{chrome:'152.0.7977.65',platform:'darwin',architecture:'arm64',log:value=>logs.push(value)});await Promise.resolve();
+ assert.equal(calls[3][1].userAgentMetadata.platform,'macOS');assert.equal(calls[3][1].userAgentMetadata.architecture,'arm');assert.deepEqual(logs,[]);
+});
 
 test('Zoom keeps identity providers inside Haituo instead of the system browser',()=>{const {isIdentityURL}=require('../src/app/js/haituo-zoom-security.js');for(const u of ['https://accounts.google.com/o/oauth2/v2/auth?client_id=x','https://appleid.apple.com/auth/authorize','https://www.facebook.com/v18.0/dialog/oauth','https://login.microsoftonline.com/common/oauth2/v2.0/authorize'])assert.ok(isIdentityURL(u));for(const u of ['http://accounts.google.com/','https://accounts.google.com.evil.test/','https://evil.test/@accounts.google.com','https://u:p@accounts.google.com/','https://notgoogle.com/','file:///tmp/g'])assert.equal(isIdentityURL(u),false)});
 test('Zoom login hand-offs navigate in app while unrelated links still leave',async()=>{const {EventEmitter}=require('node:events'),{installNavigation}=require('../src/app/js/haituo-zoom-security.js'),contents=new EventEmitter(),opened=[];contents.haituoLastGestureAt=Date.now();contents.getURL=()=>'https://zoom.us/meeting/login';installNavigation(contents,{openExternal:async u=>opened.push(u)});const allow=async url=>{let blocked=false;contents.emit('will-navigate',{preventDefault(){blocked=true}},url);return !blocked};assert.equal(await allow('https://accounts.google.com/o/oauth2/v2/auth'),true);assert.equal(await allow('https://idp.customer.test/saml2/acs'),false);assert.equal(await allow('https://zoom.us/web/sso/login'),true);assert.equal(await allow('https://idp.customer.test/saml2/acs'),true);assert.equal(await allow('https://zoom.us/signin#/login'),true);assert.equal(await allow('https://phish.example.test/zoom'),false);assert.equal(await allow('https://app.zoom.us/wc/home'),true);await new Promise(r=>setImmediate(r));assert.deepEqual(opened,['https://idp.customer.test/saml2/acs','https://phish.example.test/zoom'])});
@@ -35,4 +47,21 @@ test('Zoom auth window shares the account partition, keeps Node disabled, and re
  child.url='https://zoom.us/google/oauth?code=secret';assert.equal(isZoomURL(child.webContents.getURL()),true);child.loading=true;child.webContents.emit('did-navigate',{},child.url);child.webContents.emit('did-stop-loading');await new Promise(resolve=>setTimeout(resolve,900));assert.equal(returns,0);assert.equal(win.isDestroyed(),false);
  child.loading=false;child.webContents.emit('did-stop-loading');await new Promise(resolve=>setTimeout(resolve,900));assert.equal(returns,1);assert.equal(win.isDestroyed(),true);child.webContents.emit('did-stop-loading');await new Promise(resolve=>setTimeout(resolve,900));assert.equal(returns,1);
  assert.throws(()=>openAuthWindow({electron,url:'https://evil.test/'}),/non-identity/);
+});
+test('Zoom auth window keeps failed loads available for diagnostics until its ten-minute deadline',async()=>{
+ const {EventEmitter}=require('node:events'),{openAuthWindow}=require('../src/app/js/haituo-zoom-security.js'),logs=[];
+ const realSetTimeout=global.setTimeout,realClearTimeout=global.clearTimeout,scheduled=[];
+ global.setTimeout=(callback,delay)=>{const token={callback,delay};scheduled.push(token);return token};global.clearTimeout=()=>{};
+ class FakeWindow extends EventEmitter{
+  constructor(){super();this.destroyed=false;this.webContents=new EventEmitter();this.webContents.setWindowOpenHandler=()=>{};this.webContents.getURL=()=>this.url;this.webContents.isDestroyed=()=>this.destroyed;this.webContents.isLoading=()=>false}
+  loadURL(url){this.url=url;return Promise.reject(Object.assign(Error('denied'),{code:'ERR_ACCESS_DENIED'}))}
+  isDestroyed(){return this.destroyed}
+  destroy(){this.destroyed=true;this.emit('closed')}
+ }
+ try{
+  const win=openAuthWindow({electron:{BrowserWindow:FakeWindow},url:'https://accounts.google.com/o/oauth2/v2/auth?state=x',partition:'persist:caisheng-zoom-test',openExternal:async()=>{},log:value=>logs.push(value)});
+  await Promise.resolve();await Promise.resolve();
+  assert.equal(win.isDestroyed(),false);assert.equal(scheduled[0].delay,600000);assert.ok(logs.some(line=>line.includes('ERR_ACCESS_DENIED')));
+  scheduled[0].callback();assert.equal(win.isDestroyed(),true);assert.ok(logs.some(line=>line.includes('timed out')));
+ }finally{global.setTimeout=realSetTimeout;global.clearTimeout=realClearTimeout}
 });
