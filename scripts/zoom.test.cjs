@@ -30,6 +30,7 @@ test('Zoom auth window shares the account partition, keeps Node disabled, and re
  const win=openAuthWindow({electron,parent,url:'https://accounts.google.com/o/oauth2/v2/auth?state=x',partition,onReturn:()=>{returns++},openExternal:async()=>{},log:()=>{}});
  assert.equal(win.options.parent,parent);assert.equal(win.options.webPreferences.partition,partition);assert.equal(win.options.webPreferences.nodeIntegration,false);assert.equal(win.options.webPreferences.sandbox,true);assert.equal(win.options.webPreferences.contextIsolation,true);assert.equal(win.loaded,'https://accounts.google.com/o/oauth2/v2/auth?state=x');
  assert.equal(win.openHandler({url:'https://accounts.google.com/'}).action,'allow');assert.equal(win.openHandler({url:'https://evil.test/'}).action,'deny');
- win.webContents.emit('did-navigate',{},'https://zoom.us/google/oauth?code=secret');win.webContents.emit('did-stop-loading');await new Promise(resolve=>setTimeout(resolve,900));assert.equal(returns,1);assert.equal(win.isDestroyed(),true);
+ win.url='https://zoom.us/google/oauth?code=secret';assert.equal(require('../src/app/js/haituo-zoom-security.js').isZoomURL(win.webContents.getURL()),true);
+ win.webContents.emit('did-navigate',{},win.url);win.webContents.emit('did-stop-loading');await new Promise(resolve=>setTimeout(resolve,900));assert.equal(returns,1);assert.equal(win.isDestroyed(),true);
  assert.throws(()=>openAuthWindow({electron,url:'https://evil.test/'}),/non-identity/);
 });
