@@ -7,8 +7,9 @@
 改动：
 - `src/app/js/haituo-zoom-security.js`：身份源导航不再进入 Zoom webview，而是打开海拓自己的顶层 `BrowserWindow`。该窗口复用同一个 `persist:caisheng-zoom-*` 分区，保留 sandbox/contextIsolation、禁用 Node；授权回到 `zoom.us` 且页面加载完成后，再自动关闭登录窗并刷新原 Zoom 面板。身份源及企业 SSO 的后续跳转绑定首个身份 origin，子窗口继承同一策略与回传监听。
 - 主窗口拦截与 `window.open` 两条入口都走同一登录窗，Zoom 子窗也递归安装弹窗守卫；Zoom 入口直达 `https://zoom.us/signin#/login`，避免 `meeting/login` 在部分平台只落到登录外壳。非身份源链接仍按原策略处理。日志只记录 origin+pathname，不记录 OAuth query/state/code。
+- Zoom 会话同时规范 User-Agent 与低熵 User-Agent Client Hints，清除请求头中的 Electron 品牌，避免 UA 字符串与 `Sec-CH-UA-*` 相互矛盾；不读取或输出 Cookie/Authorization。
 - 企业 SSO 从 `zoom.us/web/sso/login` 进入时开启 120 秒一跳窗口，只允许首个客户 IdP origin，回到 Zoom 即失效。
-- `scripts/zoom-shell-native-check.cjs` 增加真实产品壳验收：用受信任指针点击 Google，断言授权页是新的顶层 page 目标、guest 仍停在 Zoom、UA 不含应用标记，并直接拒绝「浏览器或应用不安全」页面。测试等待真实 Google 按钮出现，记录主框架加载失败码，报告、stdout 与原始应用日志统一去除 URL query/hash。脚本后的 Zoom 回跳只验证关窗与面板恢复代码路径，明确标记为 synthetic，不冒充真实 OAuth；没有真实账号，因此仍只验证到凭据页之前。
+- `scripts/zoom-shell-native-check.cjs` 增加真实产品壳验收：用受信任指针点击 Google，断言授权页是新的顶层 page 目标、guest 仍停在 Zoom、UA 不含应用标记，并直接拒绝「浏览器或应用不安全」页面。测试等待真实 Google 按钮出现，记录主框架加载失败码与不含凭证的文档请求/响应诊断，报告、stdout 与原始应用日志统一去除 URL query/hash。修复 JSON replacer 误把 key 当 value 而输出空字符串的问题。脚本后的 Zoom 回跳只验证关窗与面板恢复代码路径，明确标记为 synthetic，不冒充真实 OAuth；没有真实账号，因此仍只验证到凭据页之前。
 
 尚未验证：真实 Google 账号输密码/验证码/通行密钥、拿到 code 后回到 Zoom 并显示已登录，以及会议音视频、屏幕共享、真实聊天与字幕选择器。顶层窗口是否被 Google 接受必须以 Windows/macOS 远端产品壳测试结果为准，不能只看 URL 跳转成功。
 

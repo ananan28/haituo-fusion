@@ -146,7 +146,7 @@
   {
     "path": "src/app/bundles/main.js",
     "old": "            HaituoZoomSessions.add(zoomSession);",
-    "new": "            HaituoZoomSessions.add(zoomSession);\n            zoomSession.setUserAgent(HaituoZoomSecurity.browserUserAgent());",
+    "new": "            HaituoZoomSessions.add(zoomSession);\n            HaituoZoomSecurity.installUserAgent(zoomSession);",
     "count": 1
   }
 ]

@@ -146,4 +146,30 @@ function browserUserAgent(chrome=process.versions.chrome,platform=process.platfo
  const os=platform==='win32'?'Windows NT 10.0; Win64; x64':platform==='darwin'?'Macintosh; Intel Mac OS X 10_15_7':'X11; Linux x86_64';
  return 'Mozilla/5.0 ('+os+') AppleWebKit/537.36 (KHTML, like Gecko) Chrome/'+chrome+' Safari/537.36';
 }
+function browserClientHints(chrome=process.versions.chrome,platform=process.platform){
+ browserUserAgent(chrome,platform);
+ const major=String(chrome).split('.')[0];
+ const name=platform==='win32'?'Windows':platform==='darwin'?'macOS':'Linux';
+ return{
+  'sec-ch-ua':`"Chromium";v="${major}", "Google Chrome";v="${major}", "Not=A?Brand";v="99"`,
+  'sec-ch-ua-mobile':'?0',
+  'sec-ch-ua-platform':`"${name}"`
+ };
+}
+function installUserAgent(session,{chrome=process.versions.chrome,platform=process.platform}={}){
+ const userAgent=browserUserAgent(chrome,platform),hints=browserClientHints(chrome,platform);
+ session.setUserAgent(userAgent);
+ session.webRequest.onBeforeSendHeaders((details,callback)=>{
+  if(!/^https:\/\//i.test(details.url)){callback({requestHeaders:details.requestHeaders});return}
+  const headers={...details.requestHeaders};
+  for(const key of Object.keys(headers)){
+   const name=key.toLowerCase();
+   if(name==='user-agent'||name.startsWith('sec-ch-ua'))delete headers[key]
+  }
+  Object.assign(headers,{'User-Agent':userAgent,...hints});
+  callback({requestHeaders:headers})
+ });
+}
 module.exports.browserUserAgent=browserUserAgent;
+module.exports.browserClientHints=browserClientHints;
+module.exports.installUserAgent=installUserAgent;
