@@ -1,0 +1,51 @@
+name: 1.7.3 first contact and Zoom login diagnostic
+on:
+  push:
+    branches: ['fix/signal-first-send-zoom-recovery']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: 1
+jobs:
+  verify-and-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: windows
+          - os: macos-15
+            target: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - run: node --test scripts/*.test.cjs
+      - run: python scripts/build.py --target ${{ matrix.target }}
+      - run: python scripts/package-source.py --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haituo-1.7.3-${{ matrix.target }}-candidate-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            windows/out/*Setup.exe
+            macos/out/*.dmg
+            source-packages/*.zip
+      - name: Native Signal profile and session checks
+        run: node scripts/inprocess-native-check.cjs
+      - name: Native five-account switching
+        run: node scripts/${{ matrix.target }}-multi-signal-check.cjs
+      - name: Zoom login page in the actual product shell (no real credentials)
+        run: node scripts/zoom-shell-native-check.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostic-evidence-${{ matrix.target }}
+          path: audit-results/

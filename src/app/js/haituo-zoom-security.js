@@ -80,14 +80,21 @@ function installNavigation(contents,{openExternal,openAuth,log=()=>{}}){
  contents.on('did-create-window',child=>{child.haituoLastGestureAt=Date.now();installNavigation(child,{openExternal,openAuth,log})});
  contents.once('destroyed',()=>{contents.removeListener('will-navigate',guard);contents.removeListener('will-redirect',guard)});
 }
-function focusZoomEmail(contents){
- if(!contents||contents.isDestroyed?.())return Promise.resolve(false);
- return Promise.resolve(contents.executeJavaScript(`(()=>{const visible=element=>{const rect=element.getBoundingClientRect();return rect.width>80&&rect.height>20&&getComputedStyle(element).visibility!=='hidden'};const inputs=[...document.querySelectorAll('input')].filter(visible);const input=inputs.find(element=>element.type==='email'||/email/i.test(element.name||'')||/email/i.test(element.placeholder||'')||element.autocomplete==='username')||inputs.find(element=>element.type==='text');if(!input)return false;input.focus();input.scrollIntoView({block:'center'});return true})()`)).catch(()=>false)
+async function focusZoomEmail(contents){
+ if(!contents||contents.isDestroyed())return false;
+ // Execute only on Zoom's own page, never on an identity-provider page.
+ if(isZoomURL(contents.getURL())){
+  const focused=await contents.executeJavaScript(`(()=>{const inputs=[...document.querySelectorAll('input')];const input=inputs.find(el=>{const rect=el.getBoundingClientRect();return !el.disabled&&rect.width>80&&rect.height>20&&getComputedStyle(el).visibility==='visible'&&(el.type==='email'||/email/i.test(el.name||'')||el.autocomplete==='username')});if(!input)return false;input.scrollIntoView({block:'center'});input.focus();return document.activeElement===input})()`).catch(()=>false);
+  if(focused)return true;
+ }
+ if(contents.isDestroyed())return false;
+ await contents.loadURL('https://zoom.us/meeting/login');
+ return isZoomURL(contents.getURL());
 }
 function notifyIdentityUnsupported({electron,parent,guest,url,log=()=>{}}={}){
  if(!isIdentityURL(url))return Promise.resolve(false);
  log('Zoom identity login is unavailable in the embedded browser: '+authPageURL(url));
- return Promise.resolve(electron?.dialog?.showMessageBox?.(parent,{type:'info',title:'Zoom 第三方登录',message:'Google、Apple、Facebook 和微软第三方登录不能在海拓内嵌浏览器中完成。',detail:'请使用 Zoom 页面上的邮箱登录。海拓不会把登录转到系统浏览器，也不会读取或保存你的密码。',buttons:['使用邮箱登录','取消'],defaultId:0,cancelId:1})).then(result=>result?.response===0?focusZoomEmail(guest):false).catch(error=>{log('Zoom identity login notice failed: '+String(error?.message||'identity notice failed'));return false})
+ return Promise.resolve(electron?.dialog?.showMessageBox?.(parent,{type:'info',title:'Zoom 第三方登录',message:'Google、Apple、Facebook 和微软第三方登录不能在海拓内嵌浏览器中完成。',detail:'请使用 Zoom 官方邮箱登录。原先使用 Google 的账号，可以为同一邮箱添加 Zoom 登录密码；这里不要填写 Google 密码。海拓不会把登录转到系统浏览器，也不会读取或保存你的密码。',buttons:['使用邮箱登录','取消'],defaultId:0,cancelId:1})).then(result=>result?.response===0?focusZoomEmail(guest):false).catch(error=>{log('Zoom identity login notice failed: '+String(error?.message||'identity notice failed'));return false})
 }
 module.exports.installNavigation=installNavigation;
 module.exports.isIdentityURL=isIdentityURL;

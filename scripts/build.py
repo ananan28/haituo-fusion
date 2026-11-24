@@ -108,6 +108,7 @@ def prepare(target):
     pkgpath.write_text(json.dumps(pkg,ensure_ascii=False,indent=2),encoding='utf-8')
     if target=='macos':
         run([sys.executable,'scripts/patch-network.py'])
+    run([sys.executable,'scripts/stage_signal_first_send.py',app/'bundles/preload/main.js'])
     import re
     for rel in ['bundles/preload/main.js','js/caisheng-webview-preload.js']:
         target_file=app/rel
